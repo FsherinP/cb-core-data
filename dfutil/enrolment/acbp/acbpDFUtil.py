@@ -25,14 +25,15 @@ def preComputeACBPData(spark):
             col("planid").alias("acbpID"),
             col("orgid").alias("userOrgID"),
             col("draftdata"),
-            col("contextdata"),
             col("status").alias("acbpStatus"),
             col("createdby").alias("acbpCreatedBy"),
             col("isapar"),
             col("name").alias("cbPlanName"),
             col("enddate").alias("completionDueDate"),
             col("publishedat").alias("allocatedOn"),
-            col("contentlist").alias("acbpCourseIDList")
+            col("contentlist").alias("acbpCourseIDList"),
+            lit(None).alias("assignmentType"),
+            lit(None).alias("assignmentTypeInfo")
         ) \
         .na.fill({"cbPlanName": ""})
     # Draft data
