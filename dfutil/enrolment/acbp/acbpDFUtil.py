@@ -20,20 +20,20 @@ def preComputeACBPData(spark):
     spark.conf.set("spark.sql.parquet.outputTimestampType", "TIMESTAMP_MICROS")
     acbp_df = spark.read.parquet(ParquetFileConstants.ACBP_PARQUET_FILE)
     acbp_select_df = acbp_df \
+        .withColumn("orgid", explode(col("orgidlist"))) \
         .select(
-        col("id").alias("acbpID"),
-        col("orgid").alias("userOrgID"),
-        col("draftdata"),
-        col("status").alias("acbpStatus"),
-        col("createdby").alias("acbpCreatedBy"),
-        col("isapar"),
-        col("name").alias("cbPlanName"),
-        col("assignmenttype").alias("assignmentType"),
-        col("assignmenttypeinfo").alias("assignmentTypeInfo"),
-        col("enddate").alias("completionDueDate"),
-        col("publishedat").alias("allocatedOn"),
-        col("contentlist").alias("acbpCourseIDList")
-    ) \
+            col("planid").alias("acbpID"),
+            col("orgid").alias("userOrgID"),
+            col("draftdata"),
+            col("contextdata"),
+            col("status").alias("acbpStatus"),
+            col("createdby").alias("acbpCreatedBy"),
+            col("isapar"),
+            col("name").alias("cbPlanName"),
+            col("enddate").alias("completionDueDate"),
+            col("publishedat").alias("allocatedOn"),
+            col("contentlist").alias("acbpCourseIDList")
+        ) \
         .na.fill({"cbPlanName": ""})
     # Draft data
     draft_cbp_data = acbp_select_df.filter((col("acbpStatus") == "DRAFT") & col("draftdata").isNotNull()) \
