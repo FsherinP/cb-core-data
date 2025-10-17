@@ -8,7 +8,8 @@ from pathlib import Path
 from pyspark.sql import SparkSession
 from pyspark.sql.window import Window
 from pyspark.sql.functions import (
-    col, when, lit, row_number
+    col,
+    when, lit, row_number
 )
 
 # Add parent directory to sys.path for importing project-specific modules
@@ -18,12 +19,12 @@ from constants.ParquetFileConstants import ParquetFileConstants
 from jobs.config import get_environment_config
 from jobs.default_config import create_config
 
-class L2Assessment:
+class L2AssessmentReport:
     def __init__(self):
-        self.class_name = "org.ekstep.analytics.dashboard.report.L2Assessment"
+        self.class_name = "org.ekstep.analytics.dashboard.report.L2AssessmentReport"
         
     def name(self):
-        return "L2Assessment"
+        return "L2AssessmentReport"
     
     @staticmethod
     def get_date():
@@ -31,10 +32,12 @@ class L2Assessment:
 
     def process_report(self,spark,config):
         """
-        L2 Assessment Report Generation with minimal logging for performance
+        Assessment Report Generation with minimal logging for performance
         """
+        total_start_time = time.time()
     
         try:
+            today = self.get_date()
             
             # load dataframes
             kcmDF = spark.read.parquet(f"{config.warehouseReportDir}/{config.dwKcmDictionaryTable}")
@@ -290,7 +293,7 @@ def main():
     start_time = time.time()
     config_dict = get_environment_config()
     config = create_config(config_dict)
-    model = L2Assessment()
+    model = L2AssessmentReport()
     model.process_report(spark,config)
     end_time = time.time()
     total_time = end_time - start_time

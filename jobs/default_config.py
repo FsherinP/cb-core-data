@@ -100,7 +100,7 @@ DEFAULT_CONFIG = {
     'cassandraKarmaPointsLookupTable': 'user_karma_points_credit_lookup',
     'cassandraKarmaPointsSummaryTable': 'user_karma_points_summary',
     'cassandraUserFeedTable': 'notification_feed',
-    'cassandraAcbpTable': 'cb_plan',
+    'cassandraAcbpTable': 'cb_plan_v2',
     'cassandraLearnerLeaderBoardLookupTable': 'learner_leaderboard_lookup',
     'cassandraLearnerLeaderBoardTable': 'learner_leaderboard',
     'cassandraOldAssesmentTable': 'user_assessment_master',
