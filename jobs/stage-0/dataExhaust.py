@@ -535,6 +535,35 @@ class DataExhaustModel:
             self.write_parquet(userExtendedProfileDF, f"{output_base_path}/userExtendedProfile")
             userExtendedProfileDF.unpersist()
             
+            # Process Elasticsearch assessment data
+            self.logger.info("Processing final assessment ES content data...")
+            primary_categories = ["Course Assessment"]
+            must_clause = ",".join([f'{{"match":{{"primaryCategory.raw":"{pc}"}}}}' for pc in primary_categories])
+            context_categories = ["Final Program Assessment"]
+            context_categories_clause = ",".join([f'{{"match":{{"contextCategory.raw":"{pc}"}}}}' for pc in context_categories])
+            statuses = ["Live"]
+            status_clause = ",".join([f'{{"match":{{"status.raw":"{s}"}}}}' for s in statuses])
+            fields = ["identifier","name","primaryCategory","contextCategory", "status"]
+            fields_clause = ",".join([f'"{f}"' for f in fields])
+            array_fields = []
+            query = f'{{"_source":[{fields_clause}],"query":{{"bool":{{"must":[{must_clause},{context_categories_clause},{status_clause}]}}}}}}'
+
+            es_final_assessment_df = utils.read_elasticsearch_data(
+                self.spark,
+                self.config.sparkElasticsearchConnectionHost,
+                self.config.sparkElasticsearchConnectionPort,
+                "compositesearch",
+                query,
+                fields,
+                array_fields
+            )
+
+            self.write_parquet(es_final_assessment_df, f"{output_base_path}/esFinalAssessment")
+            es_final_assessment_df.unpersist()
+
+            self.logger.info("ES final assessment data processing completed.")
+            
+            
             self.logger.info("Data processing completed successfully!")
             
         except Exception as e:

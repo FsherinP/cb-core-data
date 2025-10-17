@@ -282,7 +282,6 @@ class L2AssessmentModel:
             # Stage 10: Generate Final Report
             print("Stage 10: Generating final report...")
             # Export report
-            userAparData.coalesce(1).write.mode("overwrite").option("header", True).option("timestampFormat", "yyyy-MM-dd HH:mm:ss a").csv("/mount/data/analytics/igot-reports/assessment-report-apar/csv")
             userAparData.coalesce(1).write.mode("overwrite").parquet("/mount/data/analytics/igot-reports/assessment-report-apar/parquet")
             print("Stage 10: Complete")
 
