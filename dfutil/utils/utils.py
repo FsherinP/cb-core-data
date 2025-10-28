@@ -1,3 +1,4 @@
+from pathlib import Path
 from pyspark.sql import SparkSession, DataFrame
 from pyspark import StorageLevel
 from pyspark.sql.functions import (
@@ -7,6 +8,8 @@ import json
 from typing import Optional
 from google.cloud import storage
 import os
+import zipfile
+import shutil
 
 
 def druidDFOption(query: str, host: str, result_format: str = "object", limit: int = 10000,
@@ -35,7 +38,7 @@ def druidDFOption(query: str, host: str, result_format: str = "object", limit: i
         return df.persist(StorageLevel.MEMORY_ONLY)
 
     except Exception as e:
-        print(f"Druid connector not available or failed: {e}")
+        print(f"Druid connector not available or failed")
         print("Falling back to HTTP API approach")
 
         # Fallback to HTTP API approach
@@ -138,6 +141,76 @@ def sync_reports(local_path, remote_path, config):
 
     print(f"REPORT: Finished syncing reports from {local_path} to gs://{config.gcpBucket}/{remote_path}")
 
+def zip_and_sync_reports(complete_path: str, report_path: str,config):
+    """
+    Zip report folder and sync to blob storage.
+    Instance method version that can access self.sync_reports
+    
+    Args:
+        complete_path: Complete local path to the report folder
+        report_path: Remote path for blob storage sync
+    """
+    try:
+        print(f"Starting zip and sync for: {complete_path}")
+        
+        folder = Path(complete_path)
+        zip_file_path = f"{complete_path}.zip"
+        
+        # Step 1: Delete existing .zip file if it exists
+        report_name = folder.name
+        existing_zip_file = folder / f"{report_name}.zip"
+        
+        if existing_zip_file.exists():
+            print(f"Deleting existing zip file: {existing_zip_file}")
+            existing_zip_file.unlink()
+        
+        # Step 2: Delete .crc files (Hadoop checksum files)
+        if folder.exists() and folder.is_dir():
+            crc_files = list(folder.glob("*.crc"))
+            if crc_files:
+                print(f"Deleting {len(crc_files)} .crc files")
+                for crc_file in crc_files:
+                    crc_file.unlink()
+        
+        # Step 3: Zip the folder
+        print(f"Creating zip file: {zip_file_path}")
+        
+        with zipfile.ZipFile(zip_file_path, 'w', zipfile.ZIP_DEFLATED, compresslevel=6) as zipf:
+            for root, dirs, files in os.walk(complete_path):
+                for file in files:
+                    file_path = os.path.join(root, file)
+                    arcname = os.path.relpath(file_path, os.path.dirname(complete_path))
+                    zipf.write(file_path, arcname)
+        
+        print(f"Zip file created successfully: {zip_file_path}")
+        
+        # Step 4: Clean directory contents
+        if folder.exists() and folder.is_dir():
+            print(f"Cleaning directory: {complete_path}")
+            for item in folder.iterdir():
+                if item.is_file():
+                    item.unlink()
+                elif item.is_dir():
+                    shutil.rmtree(item)
+        
+        # Step 5: Move zip file inside the parent directory
+        zip_file_name = Path(zip_file_path).name
+        destination_zip_file_path = folder / zip_file_name
+        
+        print(f"Moving zip file to: {destination_zip_file_path}")
+        shutil.move(zip_file_path, str(destination_zip_file_path))
+        
+        # Step 6: Sync to blob storage
+        print(f"Syncing to blob storage: {report_path}")
+        sync_reports(complete_path, report_path,config)
+        
+        print(f"Successfully zipped and synced: {complete_path}")
+        
+    except Exception as e:
+        print(f"Error in zip_and_sync_reports: {str(e)}")
+        import traceback
+        print(traceback.format_exc())
+        raise
 
 def dataframe_from_json_string(json_str: str, spark: SparkSession) -> DataFrame:
     """

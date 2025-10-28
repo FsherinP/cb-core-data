@@ -1,3 +1,5 @@
+import findspark
+findspark.init()
 import json
 import os
 import glob
@@ -5,9 +7,9 @@ from datetime import datetime, timedelta
 from typing import Dict, List, Any, Optional
 import logging
 from pathlib import Path
-from datetime import datetime
 import sys
-
+import shutil
+import io
 
 from pyspark.sql import SparkSession, DataFrame, Row
 from pyspark.sql.functions import (
@@ -16,24 +18,22 @@ from pyspark.sql.functions import (
 from pyspark.sql.types import (
     StructType, StructField, StringType
 )
-# from pyspark.sql import SaveMode
 from pyspark import StorageLevel
 
 # Configure logging
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
-
 sys.path.append(str(Path(__file__).resolve().parents[2]))
 
 from jobs.default_config import create_config
 from jobs.config import get_environment_config
-from dfutil.utils.utils import druidDFOption
+from dfutil.utils import utils
 from dfutil.dfexport import dfexportutil
 
 
 class SurveyQuestionReportModel:
-    """PySpark implementation of SurveyQuestionReportModel for generating survey question reports."""
+    """PySpark implementation matching Scala QuestionReportModel for generating survey question reports."""
     
     def __init__(self, spark: SparkSession, config: Dict[str, Any]):
         self.spark = spark
@@ -48,7 +48,7 @@ class SurveyQuestionReportModel:
         """Get current date in YYYY-MM-DD format."""
         return datetime.now().strftime('%Y-%m-%d')
     
-    def get_report_config(self, filter_name: str) -> str:
+    def get_report_config(self, filter_name: str):
         """
         Get report configuration from MongoDB.
         
@@ -56,7 +56,7 @@ class SurveyQuestionReportModel:
             filter_name: Filter to identify specific report configuration
             
         Returns:
-            JSON string containing report configuration
+            Row object containing report configuration
         """
         try:
             logger.info("Querying MongoDB database to get report configurations")
@@ -80,11 +80,11 @@ class SurveyQuestionReportModel:
             if filtered_df.count() == 0:
                 raise ValueError(f"No configuration found for report: {filter_name}")
             
-            # Get configuration string
-            config_string = filtered_df.select("config").collect()[0]["config"]
-            logger.info(f"Report config for {filter_name}:\n{config_string}")
+            # Get configuration row
+            config_row = filtered_df.collect()[0]
+            logger.info(f"Report config for {filter_name}:\n{config_row}")
             
-            return config_string
+            return config_row
             
         except Exception as e:
             logger.error(f"Error retrieving report config: {str(e)}")
@@ -95,12 +95,11 @@ class SurveyQuestionReportModel:
         Convert solution IDs string to DataFrame.
         
         Args:
-            solution_ids: Comma-separated solution IDs
+            solution_ids: Comma-separated solution IDs (format: "id1:name1,id2:name2")
             
         Returns:
             DataFrame with solutionId and solutionName columns
         """
-        # Parse solution IDs (assuming format: "id1:name1,id2:name2")
         solution_data = []
         for item in solution_ids.split(','):
             if ':' in item:
@@ -122,7 +121,15 @@ class SurveyQuestionReportModel:
             DataFrame with unique solution IDs and names
         """
         query = f'SELECT DISTINCT solutionId, solutionName FROM "{datasource}"'
-        return druidDFOption(query, self.config.sparkDruidRouterHost)
+        result = utils.druidDFOption(query, self.config.mlSparkDruidRouterHost, limit=1000000)
+        
+        if result is None:
+            return self.spark.createDataFrame([], StructType([
+                StructField("solutionId", StringType(), True),
+                StructField("solutionName", StringType(), True)
+            ]))
+        
+        return result
     
     def get_solutions_end_date(self, solution_ids_df: DataFrame) -> DataFrame:
         """
@@ -139,9 +146,9 @@ class SurveyQuestionReportModel:
             solution_ids = [row['solutionId'] for row in solution_ids_df.collect()]
             
             # MongoDB query for solutions
-            mongo_uri = f"mongodb://{self.config.ml_spark_mongo_connection_host}:27017"
-            database = self.config.ml_mongo_database
-            collection = "solutions"  # Assuming solutions collection name
+            mongo_uri = f"mongodb://{self.config.mlSparkMongoConnectionHost}:27017"
+            database = self.config.mlMongoDatabase
+            collection = "solutions"
             
             solutions_df = (self.spark.read
                           .format("mongo")
@@ -162,6 +169,7 @@ class SurveyQuestionReportModel:
     def is_solution_within_report_date(self, end_date_str: str) -> bool:
         """
         Check if solution end date is within reporting period.
+        Matches Scala logic: endDate.isEqual(today) || (endDate.isAfter(today) || endDate.isAfter(updatedDate)) || endDate.isEqual(updatedDate)
         
         Args:
             end_date_str: End date string in YYYY-MM-DD format
@@ -172,29 +180,53 @@ class SurveyQuestionReportModel:
         try:
             end_date = datetime.strptime(end_date_str, '%Y-%m-%d').date()
             today = datetime.now().date()
-            grace_period = int(self.config.grace_period)
+            grace_period = int(self.config.gracePeriod)
             updated_date = today - timedelta(days=grace_period)
             
+            # Match Scala logic exactly
             return (end_date == today or 
-                   end_date > today or 
-                   end_date > updated_date or 
-                   end_date == updated_date)
+                    end_date > today or 
+                    end_date > updated_date or 
+                    end_date == updated_date)
             
         except Exception as e:
             logger.error(f"Error checking solution date: {str(e)}")
             return False
     
+    def validate_columns(self, df: DataFrame, required_columns: List[str]) -> bool:
+        """
+        Validate that all required columns exist in DataFrame.
+        
+        Args:
+            df: DataFrame to validate
+            required_columns: List of required column names
+            
+        Returns:
+            True if all columns exist, False otherwise
+        """
+        df_columns = set(df.columns)
+        required_columns_set = set(required_columns)
+        
+        missing_columns = required_columns_set - df_columns
+        
+        if missing_columns:
+            logger.error(f"Missing columns: {missing_columns}")
+            return False
+        
+        return True
+    
     def process_profile_data(self, original_df: DataFrame, 
-                           profile_schema: StructType, 
-                           required_csv_columns: List[str]) -> DataFrame:
+                             profile_schema: StructType, 
+                             required_csv_columns: List[col]) -> DataFrame:
         """
         Process user profile data from JSON.
+        Matches Scala implementation exactly.
         
         Args:
             original_df: Original DataFrame with userProfile column
             profile_schema: Schema for parsing JSON profile
-            required_csv_columns: Required columns for CSV output
-            
+            required_csv_columns: List of Column expressions with aliases
+                
         Returns:
             DataFrame with processed profile data
         """
@@ -215,241 +247,378 @@ class SurveyQuestionReportModel:
             )
             return empty_parsed_df.select(*required_csv_columns)
     
-    def validate_columns(self, df: DataFrame, expected_columns: List[str]) -> bool:
-        """
-        Validate if DataFrame has all expected columns.
-        
-        Args:
-            df: DataFrame to validate
-            expected_columns: List of expected column names
-            
-        Returns:
-            True if all columns exist
-        """
-        df_columns = set(df.columns)
-        expected_columns_set = set(expected_columns)
-        return expected_columns_set.issubset(df_columns)
-    
     def combine_csv_files(self, input_path: str, output_path: str):
         """
-        Combine multiple CSV part files into single CSV.
+        Combine multiple part CSV files into a single CSV file.
+        Matches Scala combineCsvFiles implementation.
         
         Args:
-            input_path: Directory containing part files
-            output_path: Output CSV file path
+            input_path: Directory containing part-*.csv files
+            output_path: Output file path for combined CSV
         """
         try:
-            # Find all CSV part files
-            part_files = glob.glob(os.path.join(input_path, "part-*.csv"))
-            part_files.sort()
+            input_dir = Path(input_path)
+            output_file = Path(output_path)
+            
+            # Find all part CSV files
+            part_files = sorted([
+                f for f in input_dir.glob("part-*.csv")
+            ])
+            
+            if not part_files:
+                logger.warning(f"No part CSV files found in {input_path}")
+                return
             
             is_first_file = True
             
-            with open(output_path, 'w', encoding='utf-8') as output_file:
+            # Write combined file
+            with open(output_file, 'w', encoding='utf-8') as outfile:
                 for part_file in part_files:
-                    with open(part_file, 'r', encoding='utf-8') as input_file:
-                        lines = input_file.readlines()
+                    with open(part_file, 'r', encoding='utf-8') as infile:
+                        lines = infile.readlines()
                         
                         for idx, line in enumerate(lines):
-                            # Skip header for subsequent files
+                            # Write header only from first file, skip headers from others
                             if is_first_file or idx > 0:
-                                output_file.write(line)
+                                outfile.write(line)
                         
                         is_first_file = False
             
-            # Delete part files
+            # Delete part files after combining
             for part_file in part_files:
-                os.remove(part_file)
-                
-            logger.info(f"Combined CSV files into: {output_path}")
+                part_file.unlink()
+            
+            logger.info(f"Combined {len(part_files)} CSV files into {output_path}")
             
         except Exception as e:
             logger.error(f"Error combining CSV files: {str(e)}")
             raise
     
     def get_solution_id_data(self, columns: str, datasource: str, 
-                           solution_id: str, solution_name: str, batch_size: int):
+                             solution_id: str, solution_name: str, 
+                             batch_size: int, report_path: str,
+                             user_profile_schema: StructType,
+                             required_csv_columns: List[col],
+                             sorting_columns: List[str]):
         """
-        Get and process data for a specific solution ID in batches.
+        Get and process solution data from Druid in batches.
+        Matches Scala getSolutionIdData implementation exactly.
         
         Args:
-            columns: Comma-separated list of columns to query
+            columns: Comma-separated column names to query
             datasource: Druid datasource name
-            solution_id: Solution ID to process
-            solution_name: Solution name for file naming
-            batch_size: Batch size for processing
+            solution_id: Solution ID to query
+            solution_name: Solution name
+            batch_size: Number of surveySubmissionIds per batch
+            report_path: Path to save report
+            user_profile_schema: Schema for user profile JSON
+            required_csv_columns: List of Column expressions with aliases
+            sorting_columns: Column names for sorting
         """
         try:
-            # Get all survey submission IDs for the solution
-            submission_query = f'''SELECT DISTINCT(surveySubmissionId) FROM "{datasource}" WHERE solutionId='{solution_id}' '''
+            # Step 1: Get all distinct surveySubmissionIds for this solution
+            survey_submission_id_query = f'''
+            SELECT DISTINCT surveySubmissionId 
+            FROM "{datasource}" 
+            WHERE solutionId='{solution_id}'
+            '''
             
-            submission_ids_df = druidDFOption(
-                submission_query, 
-                self.config.sparkDruidRouterHost, 
+            survey_submission_ids_df = utils.druidDFOption(
+                survey_submission_id_query, 
+                self.config.mlSparkDruidRouterHost, 
                 limit=1000000
             )
             
-            if submission_ids_df is None:
-                submission_ids_df = self.spark.createDataFrame([], StringType())
+            if survey_submission_ids_df is None or survey_submission_ids_df.count() == 0:
+                logger.warning(f"No survey submissions found for solutionId: {solution_id}")
+                return
             
-            submission_ids = [row['surveySubmissionId'] for row in submission_ids_df.collect()]
-            logger.info(f"Total {len(submission_ids)} Survey Submissions for solutionId: {solution_id}")
+            # Convert to list of IDs
+            survey_submission_ids = [row['surveySubmissionId'] for row in survey_submission_ids_df.collect()]
             
-            # Process in batches
+            logger.info(f"Total {len(survey_submission_ids)} Survey Submissions for solutionId: {solution_id}")
+            
+            # Step 2: Process in batches
             batch_count = 0
-            for i in range(0, len(submission_ids), batch_size):
+            
+            # Split into batches
+            for i in range(0, len(survey_submission_ids), batch_size):
                 batch_count += 1
-                batch_submission_ids = submission_ids[i:i + batch_size]
+                batch_survey_submission_ids = survey_submission_ids[i:i + batch_size]
                 
-                # Create batch query
-                ids_list = "','".join(batch_submission_ids)
-                batch_query = f'''SELECT {columns} FROM "{datasource}" WHERE solutionId='{solution_id}' AND surveySubmissionId IN ('{ids_list}')'''
+                # Build query for this batch
+                ids_string = "','".join(batch_survey_submission_ids)
+                batch_query = f'''
+                SELECT {columns} 
+                FROM "{datasource}" 
+                WHERE solutionId='{solution_id}' 
+                AND surveySubmissionId IN ('{ids_string}')
+                '''
                 
-                # Execute batch query
-                batch_df = druidDFOption(
+                # Query Druid for batch
+                batch_df = utils.druidDFOption(
                     batch_query, 
-                    self.config.sparkDruidRouterHost, 
+                    self.config.mlSparkDruidRouterHost, 
                     limit=1000000
                 )
                 
                 if batch_df is None:
-                    batch_df = self.spark.createDataFrame([], StringType())
+                    logger.warning(f"Batch {batch_count}: No data returned")
+                    continue
                 
-                # Cache DataFrame
+                # Persist to disk for memory management
                 batch_df.persist(StorageLevel.DISK_ONLY)
                 
-                # Process evidences column if exists
+                # Step 3: Handle evidences column if present
                 if "evidences" in batch_df.columns:
                     base_url = self.config.baseUrlForEvidences
                     
-                    # UDF to add base URL to evidences
+                    @udf(returnType=StringType())
                     def add_base_url(evidences):
                         if evidences and evidences.strip():
+                            # Split by comma-space, add base URL, rejoin
                             urls = evidences.split(", ")
                             return ",".join([f"{base_url}{url}" for url in urls])
                         return evidences
                     
-                    add_base_url_udf = udf(add_base_url, StringType())
-                    batch_df = batch_df.withColumn("evidences", add_base_url_udf(col("evidences")))
+                    batch_df = batch_df.withColumn("evidences", add_base_url(col("evidences")))
                 
-                # Process profile data (this would need the schema and columns from config)
-                final_solution_df = self.process_profile_data(batch_df, user_profile_schema, required_csv_columns)
+                # Step 4: Process profile data
+                final_solution_df = self.process_profile_data(
+                    batch_df, 
+                    user_profile_schema, 
+                    required_csv_columns
+                )
                 
-                # For now, use batch_df as is
-                # final_solution_df = batch_df
+                # Step 5: Validate columns
+                columns_match = self.validate_columns(final_solution_df, sorting_columns)
                 
-                # Validate columns and generate report
-                expected_columns = getattr(self.config, 'sortingColumns', '').split(',')
-                expected_columns = [col.strip() for col in expected_columns if col.strip()]
-                
-                if self.validate_columns(final_solution_df, expected_columns):
-                    sorted_df = final_solution_df.select(*expected_columns)
+                if columns_match:
+                    # Step 6: Sort columns in specified order
+                    sorted_final_df = final_solution_df.select(*[col(c) for c in sorting_columns])
                     
-                    today = self.get_date()
-                    report_path = f"{self.config.mlReportPath}/{today}/SurveyQuestionsReport"
-                    dfexportutil.write_single_csv_duckdb(sorted_df, report_path,  f"{self.config.localReportDir}/temp/SurveyQuestionsReport/{today}",)
+                    # Step 7: Generate report in append mode
+                    self.generate_report(sorted_final_df, report_path, append=True)
                     
                     logger.info(f"Batch: {batch_count}, Successfully generated survey question csv report for solutionId: {solution_id}")
                 else:
-                    logger.error(f"Error occurred while matching DataFrame columns with config sort columns for solutionId: {solution_id}")
+                    logger.error(f"Error occurred while matching the data frame columns with config sort columns for solutionId: {solution_id}")
                 
-                # Unpersist DataFrame
+                # Unpersist to free memory
                 batch_df.unpersist()
-            
-            # Clean solution name for file naming
-            clean_solution_name = solution_name
-            clean_solution_name = ''.join(c for c in clean_solution_name if c.isalnum() or c.isspace())
-            clean_solution_name = ' '.join(clean_solution_name.split())
             
             logger.info(f"Total {batch_count} batches processed for solutionId: {solution_id}")
             
-            # Combine CSV files
-            today = self.get_date()
-            report_dir = os.path.join(self.config.localReportDir, 
-                                    self.config.mlReportPath, today, "SurveyQuestionsReport")
-            output_file = os.path.join(report_dir, f"{clean_solution_name}-{solution_id}.csv")
+            # Step 8: Combine all CSV part files into single file
+            # Clean solution name for filename
+            clean_solution_name = solution_name
+            # Remove special characters and normalize spaces
+            import re
+            clean_solution_name = re.sub(r'[^a-zA-Z0-9\s]', '', clean_solution_name)
+            clean_solution_name = re.sub(r'\s+', ' ', clean_solution_name).strip()
             
-            self.combine_csv_files(report_dir, output_file)
+            output_filename = f"{clean_solution_name}-{solution_id}.csv"
+            self.combine_csv_files(
+                f"{self.config.localReportDir}/{report_path}",
+                f"{self.config.localReportDir}/{report_path}/{output_filename}"
+            )
             
         except Exception as e:
-            logger.error(f"Error processing solution ID data: {str(e)}")
+            logger.error(f"Error processing solution {solution_id}: {str(e)}")
+            import traceback
+            logger.error(traceback.format_exc())
             raise
     
-    def generate_survey_question_report(self, solution_id: str, solution_name: str, 
-                                      columns_to_query: str):
+    def generate_report(self, df: DataFrame, report_path: str, append: bool = False):
         """
-        Generate survey question report for a specific solution.
+        Generate CSV report from DataFrame.
         
         Args:
-            solution_id: Solution ID to process
-            solution_name: Solution name
-            columns_to_query: Columns to query from Druid
+            df: DataFrame to export
+            report_path: Path to save report
+            append: If True, append to existing files (SaveMode.Append)
         """
-        datasource = "sl-survey"
-        batch_size = int(self.config.survey_question_report_batch_size)
+        try:
+            output_path = f"{self.config.localReportDir}/{report_path}"
+            
+            # Create directory if it doesn't exist
+            os.makedirs(output_path, exist_ok=True)
+            
+            # Write CSV in append mode if specified
+            if append:
+                df.coalesce(1).write \
+                    .mode("append") \
+                    .option("header", "true") \
+                    .option("encoding", "UTF-8") \
+                    .csv(output_path)
+            else:
+                df.coalesce(1).write \
+                    .mode("overwrite") \
+                    .option("header", "true") \
+                    .option("encoding", "UTF-8") \
+                    .csv(output_path)
+                    
+        except Exception as e:
+            logger.error(f"Error generating report: {str(e)}")
+            raise
+    
+    def generate_survey_question_report(self, solution_id: str, solution_name: str,
+                                        columns_to_query: str,
+                                        datasource: str,
+                                        batch_size: int,
+                                        report_path: str,
+                                        user_profile_schema: StructType,
+                                        required_csv_columns: List[col],
+                                        sorting_columns: List[str]):
+        """
+        Generate survey question report for a solution.
+        Matches Scala generateSurveyQuestionReport implementation.
         
-        self.get_solution_id_data(columns_to_query, datasource, solution_id, solution_name, batch_size)
-        logger.info(f"Successfully Generated Survey Question CSV In Batches And Combined Into A Single File For SolutionId: {solution_id}")
+        Args:
+            solution_id: Solution ID
+            solution_name: Solution name
+            columns_to_query: Comma-separated column names to query
+            datasource: Druid datasource name
+            batch_size: Batch size for processing
+            report_path: Path to save report
+            user_profile_schema: Schema for user profile JSON
+            required_csv_columns: List of Column expressions with aliases
+            sorting_columns: Column names for sorting
+        """
+        try:
+            self.get_solution_id_data(
+                columns_to_query,
+                datasource,
+                solution_id,
+                solution_name,
+                batch_size,
+                report_path,
+                user_profile_schema,
+                required_csv_columns,
+                sorting_columns
+            )
+            
+            logger.info(f"-------------- Successfully Generated Survey Question CSV In Batches And Combined Into A Single File For A SolutionId: {solution_id} --------------")
+            
+        except Exception as e:
+            logger.error(f"Error generating report for solution {solution_id}: {str(e)}")
+            raise
     
     def zip_and_sync_reports(self, local_path: str, remote_path: str):
         """
-        Zip reports and sync to blob storage.
+        Zip local reports and sync to blob storage.
         
         Args:
             local_path: Local directory path
             remote_path: Remote blob storage path
         """
         try:
-            # This would typically integrate with cloud storage APIs
-            logger.info(f"Zipping and syncing reports from {local_path} to {remote_path}")
-            # Implementation would depend on specific cloud provider (Azure, AWS, GCP)
-            
+            # Implement your blob storage sync logic here
+            logger.info(f"Zipping and syncing {local_path} to {remote_path}")
+            # This is a placeholder - implement according to your blob storage setup
+            pass
         except Exception as e:
             logger.error(f"Error zipping and syncing reports: {str(e)}")
             raise
     
     def process_data(self):
-        """
-        Main processing method for SurveyQuestionReportModel.
-        
-        Args:
-            timestamp: Processing timestamp
-        """
+        """Main processing method to generate all survey question reports."""
         try:
             today = self.get_date()
-            logger.info("Starting SurveyQuestionReportModel processing")
+            logger.info(f"Starting SurveyQuestionReportModel processing for date: {today}")
             
-            # Get report configuration
-            survey_question_report_config = self.get_report_config("surveyQuestionReport")
+            # Get report configuration from MongoDB
+            logger.info("Querying mongo database to get report configurations")
+            survey_question_report_config_row = self.get_report_config("surveyQuestionReport")
             
-            # Parse JSON configuration
-            config_map = json.loads(survey_question_report_config)
-            report_columns_map = config_map["reportColumns"]
-            user_profile_columns_map = config_map["userProfileColumns"]
-            sorting_columns = config_map["sortingColumns"]
+            # Parse configuration
+            config_dict = survey_question_report_config_row.asDict()
             
-            # Prepare columns and schema
+            if 'config' in config_dict and isinstance(config_dict['config'], Row):
+                # Config is a nested Row object
+                config_row = config_dict['config']
+                report_columns_row = config_row.reportColumns
+                sorting_columns_str = config_row.sortingColumns
+                
+                # Convert Row to dict
+                report_columns_map = report_columns_row.asDict() if hasattr(report_columns_row, 'asDict') else dict(report_columns_row)
+                
+                # Check if userProfileColumns exists
+                if hasattr(config_row, 'userProfileColumns'):
+                    user_profile_columns_map = config_row.userProfileColumns.asDict()
+                else:
+                    user_profile_columns_map = {}
+                
+                logger.info("Processed config from nested Row structure")
+                
+            elif 'config' in config_dict and isinstance(config_dict['config'], str):
+                # Config is a JSON string
+                config_string = config_dict['config']
+                config_map = json.loads(config_string)
+                report_columns_map = config_map["reportColumns"]
+                user_profile_columns_map = config_map.get("userProfileColumns", {})
+                sorting_columns_str = config_map["sortingColumns"]
+                
+                logger.info("Processed config from JSON string")
+                
+            elif hasattr(survey_question_report_config_row, 'reportColumns'):
+                # Direct Row access (top level)
+                report_columns_row = survey_question_report_config_row.reportColumns
+                sorting_columns_str = survey_question_report_config_row.sortingColumns
+                
+                # Convert Row to dict
+                report_columns_map = report_columns_row.asDict()
+                
+                # Check if userProfileColumns exists
+                if hasattr(survey_question_report_config_row, 'userProfileColumns'):
+                    user_profile_columns_map = survey_question_report_config_row.userProfileColumns.asDict()
+                else:
+                    user_profile_columns_map = {}
+                
+                logger.info("Processed config from top-level Row structure")
+            else:
+                raise ValueError(f"Unable to parse config from MongoDB. Structure: {config_dict}")
+            
+            # Prepare columns to query
             columns_to_query = ",".join(report_columns_map.keys())
             
             # Create user profile schema
-            user_profile_fields = [
-                StructField(key, StringType(), True) 
-                for key in user_profile_columns_map.keys()
-            ]
-            user_profile_schema = StructType(user_profile_fields)
+            if user_profile_columns_map:
+                user_profile_fields = [
+                    StructField(key, StringType(), True) 
+                    for key in user_profile_columns_map.keys()
+                ]
+                user_profile_schema = StructType(user_profile_fields)
+            else:
+                user_profile_schema = StructType([])
             
-            # Prepare column mappings for CSV
+            # Create Column expressions with aliases (matching Scala logic)
+            # reportColumns: Map camelCase to display name
             report_columns = [col(key).alias(report_columns_map[key]) for key in report_columns_map.keys()]
+            
+            # userProfileColumns: Access from parsedProfile struct
             user_profile_columns = [
                 col(f"parsedProfile.{key}").alias(user_profile_columns_map[key]) 
                 for key in user_profile_columns_map.keys()
-            ]
-            required_csv_columns = [col.alias for col in (report_columns + user_profile_columns)]
+            ] if user_profile_columns_map else []
+            
+            # Combined columns for selection
+            required_csv_columns = report_columns + user_profile_columns
+            
+            # Parse sorting columns (these are the display names)
+            sorting_columns = [c.strip() for c in sorting_columns_str.split(',')]
+            
+            logger.info(f"Columns to query: {columns_to_query}")
+            logger.info(f"Required CSV columns ({len(required_csv_columns)}): {[str(c) for c in required_csv_columns]}")
+            logger.info(f"Sorting columns ({len(sorting_columns)}): {sorting_columns}")
             
             report_path = f"{self.config.mlReportPath}/{today}/SurveyQuestionsReport"
+            datasource = "sl-survey"
+            batch_size = int(self.config.SurveyQuestionReportBatchSize)
             
             # Process solution IDs
             solution_ids = getattr(self.config, 'solutionIDs', None)
+            
             if solution_ids and solution_ids.strip():
                 logger.info("Processing report requests for specified solutionId's")
                 solution_ids_df = self.get_solution_ids_as_df(solution_ids)
@@ -458,23 +627,31 @@ class SurveyQuestionReportModel:
                     solution_id = row['solutionId']
                     solution_name = row['solutionName']
                     logger.info(f"Started processing report request for solutionId: {solution_id}")
-                    self.generate_survey_question_report(solution_id, solution_name, columns_to_query)
+                    self.generate_survey_question_report(
+                        solution_id, solution_name, columns_to_query,
+                        datasource, batch_size, report_path,
+                        user_profile_schema, required_csv_columns, sorting_columns
+                    )
             
             else:
                 logger.info("Processing report requests for all solutionId's")
-                logger.info("Querying Druid to get all unique solutionId's")
-                solution_ids_df = self.load_all_unique_solution_ids("sl-survey")
+                logger.info("Querying druid to get all the unique solutionId's")
+                solution_ids_df = self.load_all_unique_solution_ids(datasource)
                 
                 if getattr(self.config, 'includeExpiredSolutionIDs', False):
-                    logger.info("Generating report for all expired solutionId's also")
+                    logger.info("Generating report for all the expired solutionId's also")
                     for row in solution_ids_df.collect():
                         solution_id = row['solutionId']
                         solution_name = row['solutionName']
                         logger.info(f"Started processing report request for solutionId: {solution_id}")
-                        self.generate_survey_question_report(solution_id, solution_name, columns_to_query)
+                        self.generate_survey_question_report(
+                            solution_id, solution_name, columns_to_query,
+                            datasource, batch_size, report_path,
+                            user_profile_schema, required_csv_columns, sorting_columns
+                        )
                 
                 else:
-                    logger.info("Query MongoDB to get solution end-date for all unique solutionId's")
+                    logger.info("Query mongodb to get solution end-date for all the unique solutionId's")
                     solutions_end_date_df = self.get_solutions_end_date(solution_ids_df)
                     
                     for row in solutions_end_date_df.collect():
@@ -487,26 +664,37 @@ class SurveyQuestionReportModel:
                             logger.info(f"Started processing report request for solutionId: {solution_id}")
                             
                             if self.is_solution_within_report_date(end_date_str):
-                                logger.info(f"Solution with Id {solution_id} will end on {end_date_str}")
-                                self.generate_survey_question_report(solution_id, solution_name, columns_to_query)
+                                logger.info(f"Solution with Id {solution_id} will ends on {end_date_str}")
+                                self.generate_survey_question_report(
+                                    solution_id, solution_name, columns_to_query,
+                                    datasource, batch_size, report_path,
+                                    user_profile_schema, required_csv_columns, sorting_columns
+                                )
                             else:
-                                logger.info(f"Solution with Id {solution_id} has ended on {end_date_str}, not generating report")
+                                logger.info(f"Solution with Id {solution_id} has ended on {end_date_str} date, Hence not generating the report for this ID")
                         else:
-                            logger.info(f"End Date for solutionId: {solution_id} is NULL, skipping report generation")
+                            logger.info(f"End Date for solutionId: {solution_id} is NULL, Hence skipping generating the report for this ID")
             
             # Zip and sync reports
-            logger.info("Zipping the CSV content folder and syncing to blob storage")
-            local_report_path = os.path.join(self.config.local_report_dir, report_path)
-            self.zip_and_sync_reports(local_report_path, report_path)
+            logger.info("Zipping the csv content folder and syncing to blob storage")
+            local_report_path = f"{self.config.localReportDir}/{report_path}"
+            utils.zip_and_sync_reports(local_report_path, report_path,config=self.config)
             logger.info("Successfully zipped folder and synced to blob storage")
             
         except Exception as e:
             logger.error(f"Error occurred during SurveyQuestionReportModel processing: {str(e)}")
-            raise
+            import traceback
+            logger.error(traceback.format_exc())
+            sys.exit(1)
 
 
 def main():
-    os.environ['PYSPARK_SUBMIT_ARGS'] = '--packages org.mongodb.spark:mongo-spark-connector_2.12:3.0.1'
+    """Main entry point for the survey question report generation."""
+    
+    # Set up Spark packages - only MongoDB connector needed
+    os.environ['PYSPARK_SUBMIT_ARGS'] = (
+        '--packages org.mongodb.spark:mongo-spark-connector_2.12:3.0.1 pyspark-shell'
+    )
 
     spark = SparkSession.builder \
         .appName("Survey Question Report") \
@@ -526,13 +714,22 @@ def main():
     config = create_config(config_dict)
     start_time = datetime.now()
     print(f"[START] SurveyQuestionReportModel processing started at: {start_time.strftime('%Y-%m-%d %H:%M:%S')}")
-    model = SurveyQuestionReportModel(spark,config)
-    model.process_data()
-    end_time = datetime.now()
-    duration = end_time - start_time
-    print(f"[END] SurveyQuestionReportModel processing completed at: {end_time.strftime('%Y-%m-%d %H:%M:%S')}")
-    print(f"[INFO] Total duration: {duration}")
-    spark.stop()
+    
+    try:
+        model = SurveyQuestionReportModel(spark, config)
+        model.process_data()
+        end_time = datetime.now()
+        duration = end_time - start_time
+        print(f"[END] SurveyQuestionReportModel processing completed at: {end_time.strftime('%Y-%m-%d %H:%M:%S')}")
+        print(f"[INFO] Total duration: {duration}")
+    except Exception as e:
+        print(f"[ERROR] Processing failed: {str(e)}")
+        import traceback
+        traceback.print_exc()
+        sys.exit(1)
+    finally:
+        spark.stop()
+
 
 if __name__ == "__main__":
-   main()
+    main()
