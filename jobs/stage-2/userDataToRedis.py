@@ -51,10 +51,14 @@ class UserDataToRedisModel:
 
             # Repartition the larger DataFrame to improve parallelism
             repartitioned_user_data = userOrgDF.repartition(500)
+            
+            redis_host = config.redisHost
+            redis_port = config.redisPort
+            
             def process_partition(partition_iter):
                     """Process each partition and write to Redis"""
                     # Create a new Redis connection for each partition
-                    redis_client = redis.Redis(host=config.redisHost, port=config.redisPort, decode_responses=True)
+                    redis_client = redis.Redis(host=redis_host, port=redis_port, decode_responses=True)
                     pipeline = redis_client.pipeline()
                     command_count = 0
                     batch_size = 25000
