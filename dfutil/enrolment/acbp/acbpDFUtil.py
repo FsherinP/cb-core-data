@@ -13,14 +13,25 @@ from pyspark.sql.types import LongType
 sys.path.append(str(Path(__file__).resolve().parents[3]))
 from util import schemas
 from constants.ParquetFileConstants import ParquetFileConstants
+from pyspark.sql import functions as F
 
 
 def preComputeACBPData(spark):
     spark.conf.set("spark.sql.parquet.enableVectorizedReader", "false")
     spark.conf.set("spark.sql.parquet.outputTimestampType", "TIMESTAMP_MICROS")
     acbp_df = spark.read.parquet(ParquetFileConstants.ACBP_PARQUET_FILE)
+    
     acbp_select_df = acbp_df \
         .withColumn("orgid", explode(col("orgidlist"))) \
+        .withColumn("context_data", from_json(col("contextdata"), schemas.accessControlSchema)) \
+        .withColumn("userGroup", explode(col("context_data.accessControl.userGroups"))) \
+        .withColumn("criteria", explode(col("userGroup.userGroupCriteriaList"))) \
+        .withColumn("assignmentType",
+             when(col("criteria.criteriaKey") == "rootOrgId", "AllUsers")
+            .when(col("criteria.criteriaKey") == "designation", "Designation")
+            .when(col("criteria.criteriaKey") == "user", "CustomUser")
+            .otherwise(col("criteria.criteriaKey"))
+        ) \
         .select(
             col("planid").alias("acbpID"),
             col("orgid").alias("userOrgID"),
@@ -32,10 +43,11 @@ def preComputeACBPData(spark):
             col("enddate").alias("completionDueDate"),
             col("publishedat").alias("allocatedOn"),
             col("contentlist").alias("acbpCourseIDList"),
-            lit(None).alias("assignmentType"),
-            lit(None).alias("assignmentTypeInfo")
+            col("assignmentType"),
+            col("criteria.criteriaValue").alias("assignmentTypeInfo")
         ) \
         .na.fill({"cbPlanName": ""})
+
     # Draft data
     draft_cbp_data = acbp_select_df.filter((col("acbpStatus") == "DRAFT") & col("draftdata").isNotNull()) \
         .select("acbpID", "userOrgID", "draftdata", "acbpStatus", "acbpCreatedBy", "isapar") \
