@@ -341,6 +341,21 @@ cbplan_draft_data_schema = StructType([
     StructField("contentList", ArrayType(StringType()), True)
 ])
 
+#access control schema
+accessControlSchema = StructType([
+    StructField("accessControl", StructType([
+        StructField("userGroups", ArrayType(StructType([
+            StructField("userGroupId", StringType(), True),
+            StructField("userGroupName", StringType(), True),
+            StructField("userGroupCriteriaList", ArrayType(StructType([
+                StructField("criteriaKey", StringType(), True),
+                StructField("criteriaValue", ArrayType(StringType()), True)
+            ]), True), True)
+        ]), True), True),
+        StructField("version", IntegerType(), True)
+    ]), True)
+])
+
 # Anonymous Assessment Content Access User Count
 anonymous_assessment_content_access_user_count_schema = StructType([
     StructField("user_count", IntegerType(), True)
