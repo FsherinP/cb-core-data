@@ -20,14 +20,14 @@ def preComputeACBPData(spark):
     spark.conf.set("spark.sql.parquet.enableVectorizedReader", "false")
     spark.conf.set("spark.sql.parquet.outputTimestampType", "TIMESTAMP_MICROS")
     acbp_df = spark.read.parquet(ParquetFileConstants.ACBP_PARQUET_FILE)
-    
+
     acbp_select_df = acbp_df \
         .withColumn("orgid", explode(col("orgidlist"))) \
         .withColumn("context_data", from_json(col("contextdata"), schemas.accessControlSchema)) \
         .withColumn("userGroup", explode(col("context_data.accessControl.userGroups"))) \
         .withColumn("criteria", explode(col("userGroup.userGroupCriteriaList"))) \
         .withColumn("assignmentType",
-             when(col("criteria.criteriaKey") == "rootOrgId", "AllUsers")
+             when(col("criteria.criteriaKey") == "rootOrgId", "AllUser")
             .when(col("criteria.criteriaKey") == "designation", "Designation")
             .when(col("criteria.criteriaKey") == "user", "CustomUser")
             .otherwise(col("criteria.criteriaKey"))
@@ -49,7 +49,7 @@ def preComputeACBPData(spark):
         .na.fill({"cbPlanName": ""})
 
     # Draft data
-    draft_cbp_data = acbp_select_df.filter((col("acbpStatus") == "DRAFT") & col("draftdata").isNotNull()) \
+    draft_cbp_data = acbp_select_df.filter((col("acbpStatus") == "draft") & col("draftdata").isNotNull()) \
         .select("acbpID", "userOrgID", "draftdata", "acbpStatus", "acbpCreatedBy", "isapar") \
         .withColumn("draftData", from_json(col("draftdata"), schemas.cbplan_draft_data_schema)) \
         .withColumn("cbPlanName", col("draftData.name")) \
@@ -59,11 +59,15 @@ def preComputeACBPData(spark):
         .withColumn("allocatedOn", lit("not published")) \
         .withColumn("acbpCourseIDList", col("draftData.contentList")) \
         .drop("draftData")
+
     # Non-draft data
-    non_draft_cbp_data = acbp_select_df.filter(col("acbpStatus") != "DRAFT")
+    non_draft_cbp_data = acbp_select_df.filter(col("acbpStatus") != "draft")
+
+    # Add draftdata column with null values to non-draft data
     draft_cbp_data = draft_cbp_data.withColumn("draftdata", lit(None).cast("string"))
+
     # Union the two
-    final_df = non_draft_cbp_data.unionByName(draft_cbp_data)
+    final_df = non_draft_cbp_data.unionByName(draft_cbp_data) 
 
     exportDFToParquet(final_df, ParquetFileConstants.ACBP_SELECT_FILE)
     explodeAcbpData(spark, final_df)
@@ -76,6 +80,8 @@ def explodeAcbpData(spark, acbp_df):
                      "assignmentType", "completionDueDate", "allocatedOn", "acbpCourseIDList", "acbpStatus",
                      "acbpCreatedBy", "cbPlanName"]
     user_df = spark.read.parquet(ParquetFileConstants.USER_ORG_COMPUTED_FILE)
+    
+    # CustomUser
     acbp_custom_user_df = acbp_df \
         .filter(col("assignmentType") == "CustomUser") \
         .withColumn("userID", explode(col("assignmentTypeInfo"))) \
@@ -86,10 +92,12 @@ def explodeAcbpData(spark, acbp_df):
         .filter(col("assignmentType") == "Designation") \
         .withColumn("designation", explode(col("assignmentTypeInfo"))) \
         .join(user_df, ["userOrgID", "designation"], "left")
+    
     # AllUser
     acbp_all_user_df = acbp_df \
         .filter(col("assignmentType") == "AllUser") \
         .join(user_df, ["userOrgID"], "left")
+    
     # Union the three DataFrames
     dfs = [acbp_custom_user_df, acbp_designation_df, acbp_all_user_df]
     selected_dfs = [df.select([col(c) for c in selectColumns]) for df in dfs]
