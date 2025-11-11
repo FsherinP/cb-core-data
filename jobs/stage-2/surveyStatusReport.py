@@ -75,7 +75,7 @@ class SurveyStatusReportModel:
                        .load())
             
             # Filter by report name
-            filtered_df = mongo_df.filter(col("report") == filter_name.orderBy(col("_id").desc()))
+            filtered_df = mongo_df.filter(col("report") == filter_name).orderBy(col("_id").desc())
             
             if filtered_df.count() == 0:
                 raise ValueError(f"No configuration found for report: {filter_name}")
