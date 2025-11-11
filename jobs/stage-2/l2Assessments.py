@@ -96,6 +96,7 @@ class L2AssessmentReport:
             contentDF.show(5, truncate=False)
         
             # user details dataframe
+            #userDF = userDF.filter((col("status") == 1) & (col("mdo_id") == '0135502316148080641003'))
             userDF = userDF.filter(col("status") == 1)
 
             print("userDF count:", userDF.count())
@@ -275,8 +276,10 @@ class L2AssessmentReport:
 
             print("Stage 10: Generating final report...")
             # Export report
-            apar_assessment_data.coalesce(1).write.mode("overwrite").parquet("/mount/data/analytics/igot-reports/assessment-report-apar/parquet")
-            
+            #apar_assessment_data.coalesce(1).write.mode("overwrite").parquet("/mount/data/analytics/igot-reports/assessment-report-apar/parquet")
+            #csv
+            apar_assessment_data.coalesce(1).write.mode("overwrite").option("header", "true").csv("/home/analytics/shishir/assessment-report-apar/csv")
+
         except Exception as e:
             print(f"Error occurred during processing: {str(e)}")
             raise
