@@ -276,9 +276,9 @@ class L2AssessmentReport:
 
             print("Stage 10: Generating final report...")
             # Export report
-            #apar_assessment_data.coalesce(1).write.mode("overwrite").parquet("/mount/data/analytics/igot-reports/assessment-report-apar/parquet")
+            apar_assessment_data.coalesce(1).write.mode("overwrite").parquet("/mount/data/analytics/igot-reports/assessment-report-apar/parquet")
             #csv
-            apar_assessment_data.coalesce(1).write.mode("overwrite").option("header", "true").csv("/home/analytics/shishir/assessment-report-apar/csv")
+            #apar_assessment_data.coalesce(1).write.mode("overwrite").option("header", "true").csv("/home/analytics/shishir/assessment-report-apar/csv")
 
         except Exception as e:
             print(f"Error occurred during processing: {str(e)}")
