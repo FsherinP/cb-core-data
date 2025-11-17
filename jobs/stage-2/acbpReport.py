@@ -65,34 +65,27 @@ class ACBPModel:
 
             enrolmentDF = spark.read.parquet(ParquetFileConstants.ENROLMENT_COMPUTED_PARQUET_FILE)
 
-            acbpAllEnrolmentDF = spark.read.parquet(ParquetFileConstants.ACBP_COMPUTED_FILE) \
-                .withColumn("courseID", explode(col("acbpCourseIDList"))) \
-                .join(allCourseProgramDetailsDF, ["courseID"], "left") \
-                .join(enrolmentDF, ["courseID", "userID"], "left") \
-                .na.drop(subset=["userID", "courseID"]) \
-                .drop("acbpCourseIDList")
+            acbpAllEnrolmentDF = spark.read.parquet(ParquetFileConstants.ACBP_COMPUTED_FILE)\
+             .withColumn("courseID", explode(col("acbpCourseIDList"))) \
+             .join(allCourseProgramDetailsDF, ["courseID"], "left")\
+             .join(enrolmentDF, ["courseID", "userID"], "left") \
+             .na.drop(subset=["userID", "courseID"]) \
+             .drop("acbpCourseIDList")
             # acbpAllEnrolmentDF.show(5,truncate=False)
             cbPlanWarehouseDF = acbpAllEnrolmentDF \
                 .select(
                 "userOrgID", "acbpCreatedBy", "acbpID", "cbPlanName", "isapar",
-                "assignmentType", "userID", "designation", "courseID",
-                "allocatedOn", "completionDueDate", "acbpStatus"
-            ) \
-                .withColumn(
-                "allotment_to",
-                F.when(col("assignmentType") == "CustomUser", col("userID"))
-                .when(col("assignmentType") == "Designation", col("designation"))
-                .when(col("assignmentType") == "AllUser", F.lit("All Users"))
-                .otherwise(F.lit("No Records"))
+                "assignmentType","assignmentTypeInfo", "userID", "designation", "courseID",
+                "allocatedOn", "completionDueDate", "acbpStatus", "alloted_org_id"
             ) \
                 .withColumn("data_last_generated_on", F.lit(currentDateTime)) \
                 .select(
-                col("userOrgID").alias("org_id"),
+                col("alloted_org_id").alias("org_id"),
                 col("acbpCreatedBy").alias("created_by"),
                 col("acbpID").alias("cb_plan_id"),
                 col("cbPlanName").alias("plan_name"),
                 col("assignmentType").alias("allotment_type"),
-                col("allotment_to"),
+                col("assignmentTypeInfo").alias("allotment_to"),
                 col("courseID").alias("content_id"),
                 date_format(col("allocatedOn"), ParquetFileConstants.DATE_TIME_FORMAT).alias("allocated_on"),
                 date_format(col("completionDueDate"), ParquetFileConstants.DATE_TIME_FORMAT).alias("due_by"),
