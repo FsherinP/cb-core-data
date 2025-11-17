@@ -50,6 +50,7 @@ cadre_details_schema = StructType([
     StructField("cadreControllingAuthorityName", StringType(), True),
     StructField("civilServiceName", StringType(), True),
     StructField("cadreBatch", StringType(), True),
+    StructField("isOnCentralDeputation", BooleanType(), True)
 ])
 
 hierarchySchema = StructType([

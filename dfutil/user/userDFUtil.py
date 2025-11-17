@@ -61,6 +61,7 @@ def preComputeUser(spark: SparkSession) -> DataFrame:
         .withColumn("civilServiceType", col("cadreDetails.civilServiceType")) \
         .withColumn("civilServiceName", col("cadreDetails.civilServiceName")) \
         .withColumn("cadreBatch", col("cadreDetails.cadreBatch")) \
+        .withColumn("isOnCentralDeputation", col("cadreDetails.isOnCentralDeputation")) \
         .withColumn("organised_service", when(col("cadreDetails").isNotNull(), lit("Yes")).otherwise(lit("No")))
 
     # Handle `additionalProperties` fallback
