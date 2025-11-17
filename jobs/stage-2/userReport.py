@@ -146,6 +146,7 @@ def processUserReport(config):
             col("civilServiceType").alias("Civil Service Type"),
             col("civilServiceName").alias("Civil Services"),
             col("cadreBatch").alias("Cadre Batch"),
+            col("isOnCentralDeputation").alias("Is On Central Deputation"),
             col("organised_service").alias("Is From Organised Service of Govt"),
             col("role").alias("Roles"),
             col("personalDetails.gender").alias("Gender"),
@@ -211,6 +212,7 @@ def processUserReport(config):
             col("civilServiceType").alias("civil_service_type"),
             col("civilServiceName").alias("civil_services"),
             col("cadreBatch").alias("cadre_batch"),
+            col("isOnCentralDeputation").alias("is_on_central_deputation"),
             col("organised_service").alias("is_from_organised_service_of_govt"),
             col("data_last_generated_on")
         )

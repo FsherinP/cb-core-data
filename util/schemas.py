@@ -50,6 +50,7 @@ cadre_details_schema = StructType([
     StructField("cadreControllingAuthorityName", StringType(), True),
     StructField("civilServiceName", StringType(), True),
     StructField("cadreBatch", StringType(), True),
+    StructField("isOnCentralDeputation", BooleanType(), True)
 ])
 
 hierarchySchema = StructType([
@@ -339,6 +340,21 @@ cbplan_draft_data_schema = StructType([
     StructField("assignmentTypeInfo", ArrayType(StringType()), True),
     StructField("endDate", StringType(), True),
     StructField("contentList", ArrayType(StringType()), True)
+])
+
+#access control schema
+accessControlSchema = StructType([
+    StructField("accessControl", StructType([
+        StructField("userGroups", ArrayType(StructType([
+            StructField("userGroupId", StringType(), True),
+            StructField("userGroupName", StringType(), True),
+            StructField("userGroupCriteriaList", ArrayType(StructType([
+                StructField("criteriaKey", StringType(), True),
+                StructField("criteriaValue", ArrayType(StringType()), True)
+            ]), True), True)
+        ]), True), True),
+        StructField("version", IntegerType(), True)
+    ]), True)
 ])
 
 # Anonymous Assessment Content Access User Count
