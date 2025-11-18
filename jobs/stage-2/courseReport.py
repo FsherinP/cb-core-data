@@ -1,6 +1,6 @@
 import findspark
 findspark.init()
-import sys
+import os
 from pathlib import Path
 import pandas as pd
 from pyspark.sql import SparkSession
@@ -14,6 +14,7 @@ sys.path.append(str(Path(__file__).resolve().parents[2]))
 from dfutil.content import contentDFUtil
 from dfutil.enrolment import enrolmentDFUtil
 from dfutil.dfexport import dfexportutil
+from dfutil.utils import utils
 from util import schemas
 from jobs.config import get_environment_config
 from jobs.default_config import create_config
@@ -365,15 +366,44 @@ class CourseReportModel:
                     col("data_last_generated_on")
                 )
             
+            es_final_assessment_df = spark.read.parquet(ParquetFileConstants.FINAL_ASSESSMENT_PARQUET_FILE)
+            es_final_assessment_df = es_final_assessment_df.select(
+                col("Identifier").alias("content_id"),
+                col("createdFor").getItem(0).alias("content_provider_id"),
+                lit(None).alias("content_provider_name"), 
+                col("name").alias("content_name"), 
+                col("primaryCategory").alias("content_type"),
+                lit(None).alias("batch_id"),
+                lit(None).alias("batch_name"),
+                lit(None).alias("batch_start_date"),
+                lit(None).alias("batch_end_date"),
+                col("expectedDuration").alias("content_duration"),
+                lit(None).alias("content_rating"),
+                col("lastPublishedOn").alias("last_published_on"),
+                lit(None).alias("content_retired_on"),
+                col("status").alias("content_status"),
+                lit(None).alias("resource_count"),
+                lit(None).alias("total_certificates_issued"),
+                col("reviewStatus").alias("content_substatus"),
+                col("language").getItem(0).alias("language"),
+                col("contextCategory").alias("content_sub_type"),
+                lit(0).alias("scorm_flag"),
+                lit(currentDateTime).alias("data_last_generated_on")
+            )
+            platformContentWarehouseDF = platformContentWarehouseDF.unionByName(es_final_assessment_df)
+            platformContentWarehouseDF.show(30, truncate=False)
             df_warehouse = platformContentWarehouseDF.union(marketPlaceContentWarehouseDF)
             df_warehouse.coalesce(1).write.mode("overwrite").option("compression", "snappy").parquet(f"{config.warehouseReportDir}/{config.dwCourseTable}")
 
         except Exception as e:
             print(f"❌ Error occurred during CourseReportModel processing: {str(e)}")
             raise e
-            sys.exit(1)
+            
 
 def main():
+    config_dict = get_environment_config()
+    config = create_config(config_dict)
+    os.environ['PYSPARK_SUBMIT_ARGS'] = '--packages org.elasticsearch:elasticsearch-spark-30_2.12:8.11.0 pyspark-shell'
     spark = SparkSession.builder \
         .appName("Course Report Model") \
         .config("spark.sql.shuffle.partitions", "200") \
@@ -386,9 +416,13 @@ def main():
         .config("spark.sql.adaptive.enabled", "true") \
         .config("spark.sql.adaptive.coalescePartitions.enabled", "true") \
         .config("spark.sql.legacy.timeParserPolicy", "LEGACY") \
+        .config("es.nodes", config.sparkElasticsearchConnectionHost) \
+        .config("es.port", config.sparkElasticsearchConnectionPort) \
+        .config("es.index.auto.create", "false") \
+        .config("es.nodes.wan.only", "true") \
+        .config("es.nodes.discovery", "false") \
         .getOrCreate()
-    config_dict = get_environment_config()
-    config = create_config(config_dict)
+    
     start_time = datetime.now()
     print(f"[START] CourseReportModel processing started at: {start_time.strftime('%Y-%m-%d %H:%M:%S')}")
     model = CourseReportModel()
