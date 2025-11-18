@@ -12,6 +12,8 @@ from pyspark.sql import DataFrame
 from pyspark.sql.types import LongType
 from pyspark.sql import functions as F
 from functools import reduce
+from pyspark.sql import DataFrame
+from pyspark.sql.types import StringType
 
 sys.path.append(str(Path(__file__).resolve().parents[3]))
 from util import schemas
@@ -121,11 +123,11 @@ def explodeAcbpData(spark, acbp_df: DataFrame) -> DataFrame:
     # Final output columns
     select_columns = [
         "userID", "fullName", "userPrimaryEmail", "userMobile", "designation", "group", "userOrgID",
-        "userProfileStatus",
-        "ministry_name", "dept_name", "userOrgName", "cadreName", "civilServiceType", "civilServiceName", "cadreBatch",
-        "organised_service", "userStatus", "isOnCentralDeputation", "isapar", "acbpID", "assignmentType",
-        "assignmentTypeInfo",
-        "completionDueDate", "allocatedOn", "acbpCourseIDList", "acbpStatus", "acbpCreatedBy", "cbPlanName"]
+        "ministry_name", "dept_name", "userOrgName", "cadreName", "civilServiceType", "civilServiceName",
+        "cadreBatch", "organised_service", "userStatus", "isapar", "acbpID",
+        "assignmentType", "assignmentTypeInfo", "completionDueDate", "allocatedOn", "acbpCourseIDList", "acbpStatus",
+        "acbpCreatedBy", "cbPlanName"
+    ]
 
     # Column mapping: assignmentType key -> userDF column (normalized to lowercase)
     column_mapping = {
@@ -140,6 +142,21 @@ def explodeAcbpData(spark, acbp_df: DataFrame) -> DataFrame:
         'service': 'civilServiceName',
         'isprofileverified': 'userProfileStatus',
         'isoncentraldeputation': 'isOnCentralDeputation'
+    }
+
+    # Display mapping: assignmentType key -> display value for final output
+    display_mapping = {
+        'rootorgid': 'mdo_id',
+        'user': 'user',
+        'customuser': 'user',  # customuser displays as 'user'
+        'alluser': 'user',  # alluser displays as 'user'
+        'designation': 'designation',
+        'cadre': 'cadre',
+        'group': 'groups',
+        'batch': 'cadre_batch',
+        'service': 'civil_services',
+        'isprofileverified': 'is_verified_karmayogi',
+        'isoncentraldeputation': 'is_on_central_deputation'
     }
 
     all_results = []
@@ -158,6 +175,20 @@ def explodeAcbpData(spark, acbp_df: DataFrame) -> DataFrame:
 
         # Parse assignment types (pipe-separated) and normalize to lowercase
         assignment_types = [at.strip().lower() for at in str(assignment_type).split('|')]
+
+        # Format assignmentType for display (convert to display values)
+        display_assignment_type = '|'.join([display_mapping.get(t, t) for t in assignment_types])
+
+        # Format assignmentTypeInfo
+        if len(assignment_types) == 1 and assignment_types[0] == 'alluser':
+            formatted_assignment_info = 'AllUser'
+        else:
+            info_parts = str(assignment_info).split('|')
+            formatted_parts = []
+            for part in info_parts:
+                values = [v.strip() for v in part.split(',') if v.strip()]
+                formatted_parts.append(', '.join(values))
+            formatted_assignment_info = '|'.join(formatted_parts)
 
         # Case 1: Only rootOrgId
         if len(assignment_types) == 1 and assignment_types[0] == 'rootorgid':
@@ -211,9 +242,13 @@ def explodeAcbpData(spark, acbp_df: DataFrame) -> DataFrame:
         # Add ACBP details to matched users
         matched_users = matched_users.withColumn('acbpID', F.lit(acbp_id))
 
+        # Add formatted assignmentType and assignmentTypeInfo
+        matched_users = matched_users.withColumn('assignmentType', F.lit(display_assignment_type))
+        matched_users = matched_users.withColumn('assignmentTypeInfo', F.lit(formatted_assignment_info))
+
         # Add other ACBP columns
-        for col_name in ['assignmentType', 'assignmentTypeInfo', 'isapar', 'completionDueDate', 'allocatedOn',
-                         'acbpCourseIDList', 'acbpID', 'acbpStatus', 'acbpCreatedBy', 'cbPlanName']:
+        for col_name in ['completionDueDate', 'allocatedOn', 'assignmentTypeInfo', 'isapar',
+                         'acbpCourseIDList', 'acbpStatus', 'acbpCreatedBy', 'cbPlanName']:
             if col_name in row.asDict():
                 matched_users = matched_users.withColumn(col_name, F.lit(row[col_name]))
 
@@ -260,6 +295,7 @@ def explodeAcbpData(spark, acbp_df: DataFrame) -> DataFrame:
     print(f"=== ACBP Allocation Complete. Total records: {final_df.count()} ===")
     exportDFToParquet(final_df, ParquetFileConstants.ACBP_COMPUTED_FILE)
     print("=== ACBP Allocation Completed ===")
+
     return final_df
 
 
