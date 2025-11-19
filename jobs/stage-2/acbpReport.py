@@ -7,7 +7,7 @@ import pandas as pd
 from pyspark.sql import SparkSession, functions as F
 from pyspark.sql.functions import bround, col, broadcast, concat_ws, coalesce, lit, when, from_unixtime
 from pyspark.sql.functions import col, lit, coalesce, concat_ws, when, broadcast, get_json_object, rtrim
-from pyspark.sql.functions import col, from_json, explode_outer, coalesce, lit, format_string, count
+from pyspark.sql.functions import col, from_json, explode_outer, coalesce, lit, format_string, count, countDistinct
 from pyspark.sql.types import StructType, ArrayType, StringType, BooleanType, StructField
 from pyspark.sql.types import MapType, StringType, StructType, StructField, FloatType, LongType, DateType, IntegerType
 from pyspark.sql.functions import col, when, size, lit, expr, unix_timestamp, date_format, from_json, current_timestamp, \
@@ -233,7 +233,7 @@ class ACBPModel:
                     "Ministry", "Department", "Organization"
                 ) \
                 .agg(
-                    count("courseID").alias("allocatedCount"),
+                    countDistinct("courseID").alias("allocatedCount"),
                     spark_sum(when(col("dbCompletionStatus") == 2, 1).otherwise(0)).alias("completedCount"),
                     spark_sum(
                         when(
