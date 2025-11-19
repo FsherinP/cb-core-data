@@ -536,7 +536,7 @@ def explodeAcbpData(spark, acbp_df: DataFrame) -> DataFrame:
             final_df = final_df.union(df)
 
         # Remove duplicates
-        final_df = final_df.dropDuplicates(['acbpID', 'userID'])
+        final_df = final_df.dropDuplicates(['acbpID', 'userID', 'assignmentType', 'assignmentTypeInfo'])
     else:
         final_df = None
 
