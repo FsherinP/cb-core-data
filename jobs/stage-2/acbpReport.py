@@ -189,62 +189,82 @@ class ACBPModel:
                 parquet_tmp_path=f"{config.localReportDir}/temp/cbp-enrolment-report/{today}",
                 csv_filename=config.cbpEnrolmentReport)
 
-            userSummaryReportDF = acbpEnrolmentDF \
-                .filter(
-                (col("userStatus").cast("int") == 1)
-            ) \
+            
+            # -----------------------------------------------
+            # 1. Normalize organizational fields BEFORE groupBy
+            # -----------------------------------------------
+
+            ministry_is_empty = (col("ministry_name").isNull()) | (col("ministry_name") == "")
+            dept_is_empty = (col("dept_name").isNull()) | (col("dept_name") == "")
+
+            cleanDF = acbpEnrolmentDF \
+                .filter(col("userStatus").cast("int") == 1) \
+                .withColumn(
+                    "Ministry",
+                    when(ministry_is_empty, col("userOrgName")).otherwise(col("ministry_name"))
+                ) \
+                .withColumn(
+                    "Department",
+                    when(
+                        (col("userOrgName").isNotNull()) &
+                        (col("ministry_name") != col("userOrgName")) &
+                        dept_is_empty,
+                        col("userOrgName")
+                    ).otherwise(col("dept_name"))
+                ) \
+                .withColumn(
+                    "Organization",
+                    when(
+                        (col("ministry_name") != col("userOrgName")) &
+                        (col("dept_name") != col("userOrgName")),
+                        col("userOrgName")
+                    ).otherwise(lit(""))
+                )
+
+            # -----------------------------------------------
+            # 2. Group using normalized columns
+            # -----------------------------------------------
+
+            userSummaryReportDF = cleanDF \
                 .groupBy(
-                "userID", "fullName", "userPrimaryEmail", "userMobile",
-                "designation", "cadreName", "civilServiceType", "civilServiceName",
-                "cadreBatch", "organised_service", "group", "userOrgID", "ministry_name",
-                "dept_name", "userOrgName"
-            ) \
+                    "userID", "fullName", "userPrimaryEmail", "userMobile",
+                    "designation", "cadreName", "civilServiceType", "civilServiceName",
+                    "cadreBatch", "organised_service", "group", "userOrgID",
+                    "Ministry", "Department", "Organization"
+                ) \
                 .agg(
-                count("courseID").alias("allocatedCount"),
-                spark_sum(F.when(col("dbCompletionStatus") == 2, 1).otherwise(0)).alias("completedCount"),
-                spark_sum(
-                    F.when(
-                        (col("dbCompletionStatus") == 2) &
-                        (col("courseCompletedTimestamp").cast(LongType()) <
-                         (col("completionDueDate").cast(LongType()) + 86400)),
-                        1
-                    ).otherwise(0)
-                ).alias("completedBeforeDueDateCount")
-            ) \
+                    count("courseID").alias("allocatedCount"),
+                    spark_sum(when(col("dbCompletionStatus") == 2, 1).otherwise(0)).alias("completedCount"),
+                    spark_sum(
+                        when(
+                            (col("dbCompletionStatus") == 2) &
+                            (col("courseCompletedTimestamp").cast(LongType()) <
+                            (col("completionDueDate").cast(LongType()) + 86400)),
+                            1
+                        ).otherwise(0)
+                    ).alias("completedBeforeDueDateCount")
+                ) \
                 .select(
-                col("fullName").alias("Name"),
-                col("userPrimaryEmail").alias("Email"),
-                col("userMobile").alias("Phone"),
-                col("userOrgName").alias("MDO_Name"),
-                col("group").alias("Group"),
-                col("designation").alias("Designation"),
-                col("cadreName").alias("Cadre"),
-                col("civilServiceType").alias("Civil Service Type"),
-                col("civilServiceName").alias("Civil Services"),
-                col("cadreBatch").alias("Cadre Batch"),
-                col("organised_service").alias("Is From Organised Service of Govt"),
-                when(
-                    (col("ministry_name").isNull()) | (col("ministry_name") == ""),
-                    col("userOrgName")
-                ).otherwise(col("ministry_name")).alias("Ministry"),
-
-                when(
-                    (col("userOrgName").isNotNull()) &
-                    (col("ministry_name") != col("userOrgName")) &
-                    ((col("dept_name").isNull()) | (col("dept_name") == "")),
-                    col("userOrgName")
-                ).otherwise(col("dept_name")).alias("Department"),
-                when(
-                    (col("ministry_name") != col("userOrgName")) &
-                    (col("dept_name") != col("userOrgName")),
-                    col("userOrgName")
-                ).otherwise(lit("")).alias("Organization"),
-                col("allocatedCount").alias("Number of CBP Courses Allocated"),
-                col("completedCount").alias("Number of CBP Courses Completed"),
-                col("completedBeforeDueDateCount").alias("Number of CBP Courses Completed within due date"),
-                col("userOrgID").alias("mdoid"),
-                lit(currentDateTime).alias("Report_Last_Generated_On"))
-
+                    col("fullName").alias("Name"),
+                    col("userPrimaryEmail").alias("Email"),
+                    col("userMobile").alias("Phone"),
+                    col("Ministry"),
+                    col("Department"),
+                    col("Organization"),
+                    col("group").alias("Group"),
+                    col("designation").alias("Designation"),
+                    col("cadreName").alias("Cadre"),
+                    col("civilServiceType").alias("Civil Service Type"),
+                    col("civilServiceName").alias("Civil Services"),
+                    col("cadreBatch").alias("Cadre Batch"),
+                    col("organised_service").alias("Is From Organised Service of Govt"),
+                    col("allocatedCount").alias("Number of CBP Courses Allocated"),
+                    col("completedCount").alias("Number of CBP Courses Completed"),
+                    col("completedBeforeDueDateCount").alias("Number of CBP Courses Completed within due date"),
+                    col("userOrgID").alias("mdoid"),
+                    lit(currentDateTime).alias("Report_Last_Generated_On")
+                )
+            
             print("📝 Writing combined CSV reports for user summary...")
             dfexportutil.write_csv_combined(
                 df=userSummaryReportDF,
