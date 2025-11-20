@@ -5,8 +5,8 @@ import sys
 from pathlib import Path
 import pandas as pd
 from pyspark.sql import SparkSession, functions as F
-from pyspark.sql.functions import bround, col, broadcast, concat_ws, coalesce, lit, when, from_unixtime
-from pyspark.sql.functions import col, lit, coalesce, concat_ws, when, broadcast, get_json_object, rtrim
+from pyspark.sql.functions import bround, col, broadcast, concat_ws, split, coalesce, lit, when, from_unixtime
+from pyspark.sql.functions import col, lit, coalesce, concat_ws, create_map, when, broadcast, get_json_object, rtrim
 from pyspark.sql.functions import col, from_json, explode_outer, coalesce, lit, format_string, count, countDistinct
 from pyspark.sql.types import StructType, ArrayType, StringType, BooleanType, StructField
 from pyspark.sql.types import MapType, StringType, StructType, StructField, FloatType, LongType, DateType, IntegerType
@@ -14,7 +14,7 @@ from pyspark.sql.functions import col, when, size, lit, expr, unix_timestamp, da
     to_date, round, explode, to_utc_timestamp, from_utc_timestamp, to_timestamp, sum as spark_sum
 from pyspark.sql.functions import col, desc, row_number
 from pyspark.sql.window import Window
-
+from itertools import chain
 from datetime import datetime
 import sys
 
@@ -65,22 +65,52 @@ class ACBPModel:
 
             enrolmentDF = spark.read.parquet(ParquetFileConstants.ENROLMENT_COMPUTED_PARQUET_FILE)
 
-            acbpAllEnrolmentDF = spark.read.parquet(ParquetFileConstants.ACBP_COMPUTED_FILE)\
-             .withColumn("courseID", explode(col("acbpCourseIDList"))) \
-             .join(allCourseProgramDetailsDF, ["courseID"], "left")\
-             .join(enrolmentDF, ["courseID", "userID"], "left") \
-             .na.drop(subset=["userID", "courseID"]) \
-             .drop("acbpCourseIDList")
+            acbpAllEnrolmentDF = spark.read.parquet(ParquetFileConstants.ACBP_COMPUTED_FILE) \
+                .withColumn("courseID", explode(split(col("acbpCourseIDList"), ","))) \
+                .join(allCourseProgramDetailsDF, ["courseID"], "left") \
+                .join(enrolmentDF, ["courseID", "userID"], "left") \
+                .na.drop(subset=["userID", "courseID"]) \
+                .drop("acbpCourseIDList")
+            print("=done-==")
             # acbpAllEnrolmentDF.show(5,truncate=False)
-            cbPlanWarehouseDF = acbpAllEnrolmentDF \
+            # Assignment type mapping
+            assignment_type_mapping = {
+                'rootorgid': 'mdo_id',
+                'user': 'user',
+                'customuser': 'user',
+                'alluser': 'user',
+                'designation': 'designation',
+                'cadre': 'cadre',
+                'group': 'groups',
+                'batch': 'cadre_batch',
+                'service': 'civil_services',
+                'isprofileverified': 'is_verified_karmayogi',
+                'isoncentraldeputation': 'is_on_central_deputation'
+            }
+
+            # Create mapping expression
+            mapping_expr = create_map([lit(x) for x in chain(*assignment_type_mapping.items())])
+
+            # Read select file and process same as computed
+            acbpSelectEnrolmentDF = spark.read.parquet(ParquetFileConstants.ACBP_SELECT_FILE) \
+                .withColumn("courseID", explode(col("acbpCourseIDList"))) \
+                .join(allCourseProgramDetailsDF, ["courseID"], "left") \
+                .drop("acbpCourseIDList") \
+                .withColumn("assignmentType",
+                            when(
+                                col("assignmentType").isin(list(assignment_type_mapping.keys())),
+                                mapping_expr[col("assignmentType")]).otherwise(col("assignmentType")))
+
+            # Write to warehouse with mapped names
+            cbPlanWarehouseDF = acbpSelectEnrolmentDF \
                 .select(
-                "userOrgID", "acbpCreatedBy", "acbpID", "cbPlanName", "isapar",
-                "assignmentType","assignmentTypeInfo", "userID", "designation", "courseID",
-                "allocatedOn", "completionDueDate", "acbpStatus", "alloted_org_id"
+                "OrgID", "acbpCreatedBy", "acbpID", "cbPlanName", "isapar",
+                "assignmentType", "assignmentTypeInfo", "courseID",
+                "allocatedOn", "completionDueDate", "acbpStatus"
             ) \
-                .withColumn("data_last_generated_on", F.lit(currentDateTime)) \
+                .withColumn("data_last_generated_on", lit(currentDateTime)) \
                 .select(
-                col("alloted_org_id").alias("org_id"),
+                col("OrgID").alias("org_id"),
                 col("acbpCreatedBy").alias("created_by"),
                 col("acbpID").alias("cb_plan_id"),
                 col("cbPlanName").alias("plan_name"),
@@ -189,7 +219,6 @@ class ACBPModel:
                 parquet_tmp_path=f"{config.localReportDir}/temp/cbp-enrolment-report/{today}",
                 csv_filename=config.cbpEnrolmentReport)
 
-            
             # -----------------------------------------------
             # 1. Normalize organizational fields BEFORE groupBy
             # -----------------------------------------------
@@ -200,26 +229,26 @@ class ACBPModel:
             cleanDF = acbpEnrolmentDF \
                 .filter(col("userStatus").cast("int") == 1) \
                 .withColumn(
-                    "Ministry",
-                    when(ministry_is_empty, col("userOrgName")).otherwise(col("ministry_name"))
-                ) \
+                "Ministry",
+                when(ministry_is_empty, col("userOrgName")).otherwise(col("ministry_name"))
+            ) \
                 .withColumn(
-                    "Department",
-                    when(
-                        (col("userOrgName").isNotNull()) &
-                        (col("ministry_name") != col("userOrgName")) &
-                        dept_is_empty,
-                        col("userOrgName")
-                    ).otherwise(col("dept_name"))
-                ) \
+                "Department",
+                when(
+                    (col("userOrgName").isNotNull()) &
+                    (col("ministry_name") != col("userOrgName")) &
+                    dept_is_empty,
+                    col("userOrgName")
+                ).otherwise(col("dept_name"))
+            ) \
                 .withColumn(
-                    "Organization",
-                    when(
-                        (col("ministry_name") != col("userOrgName")) &
-                        (col("dept_name") != col("userOrgName")),
-                        col("userOrgName")
-                    ).otherwise(lit(""))
-                )
+                "Organization",
+                when(
+                    (col("ministry_name") != col("userOrgName")) &
+                    (col("dept_name") != col("userOrgName")),
+                    col("userOrgName")
+                ).otherwise(lit(""))
+            )
 
             # -----------------------------------------------
             # 2. Group using normalized columns
@@ -227,44 +256,44 @@ class ACBPModel:
 
             userSummaryReportDF = cleanDF \
                 .groupBy(
-                    "userID", "fullName", "userPrimaryEmail", "userMobile",
-                    "designation", "cadreName", "civilServiceType", "civilServiceName",
-                    "cadreBatch", "organised_service", "group", "userOrgID",
-                    "Ministry", "Department", "Organization"
-                ) \
+                "userID", "fullName", "userPrimaryEmail", "userMobile",
+                "designation", "cadreName", "civilServiceType", "civilServiceName",
+                "cadreBatch", "organised_service", "group", "userOrgID",
+                "Ministry", "Department", "Organization"
+            ) \
                 .agg(
-                    countDistinct("courseID").alias("allocatedCount"),
-                    spark_sum(when(col("dbCompletionStatus") == 2, 1).otherwise(0)).alias("completedCount"),
-                    spark_sum(
-                        when(
-                            (col("dbCompletionStatus") == 2) &
-                            (col("courseCompletedTimestamp").cast(LongType()) <
-                            (col("completionDueDate").cast(LongType()) + 86400)),
-                            1
-                        ).otherwise(0)
-                    ).alias("completedBeforeDueDateCount")
-                ) \
+                countDistinct("courseID").alias("allocatedCount"),
+                spark_sum(when(col("dbCompletionStatus") == 2, 1).otherwise(0)).alias("completedCount"),
+                spark_sum(
+                    when(
+                        (col("dbCompletionStatus") == 2) &
+                        (col("courseCompletedTimestamp").cast(LongType()) <
+                         (col("completionDueDate").cast(LongType()) + 86400)),
+                        1
+                    ).otherwise(0)
+                ).alias("completedBeforeDueDateCount")
+            ) \
                 .select(
-                    col("fullName").alias("Name"),
-                    col("userPrimaryEmail").alias("Email"),
-                    col("userMobile").alias("Phone"),
-                    col("Ministry"),
-                    col("Department"),
-                    col("Organization"),
-                    col("group").alias("Group"),
-                    col("designation").alias("Designation"),
-                    col("cadreName").alias("Cadre"),
-                    col("civilServiceType").alias("Civil Service Type"),
-                    col("civilServiceName").alias("Civil Services"),
-                    col("cadreBatch").alias("Cadre Batch"),
-                    col("organised_service").alias("Is From Organised Service of Govt"),
-                    col("allocatedCount").alias("Number of CBP Courses Allocated"),
-                    col("completedCount").alias("Number of CBP Courses Completed"),
-                    col("completedBeforeDueDateCount").alias("Number of CBP Courses Completed within due date"),
-                    col("userOrgID").alias("mdoid"),
-                    lit(currentDateTime).alias("Report_Last_Generated_On")
-                )
-            
+                col("fullName").alias("Name"),
+                col("userPrimaryEmail").alias("Email"),
+                col("userMobile").alias("Phone"),
+                col("Ministry"),
+                col("Department"),
+                col("Organization"),
+                col("group").alias("Group"),
+                col("designation").alias("Designation"),
+                col("cadreName").alias("Cadre"),
+                col("civilServiceType").alias("Civil Service Type"),
+                col("civilServiceName").alias("Civil Services"),
+                col("cadreBatch").alias("Cadre Batch"),
+                col("organised_service").alias("Is From Organised Service of Govt"),
+                col("allocatedCount").alias("Number of CBP Courses Allocated"),
+                col("completedCount").alias("Number of CBP Courses Completed"),
+                col("completedBeforeDueDateCount").alias("Number of CBP Courses Completed within due date"),
+                col("userOrgID").alias("mdoid"),
+                lit(currentDateTime).alias("Report_Last_Generated_On")
+            )
+
             print("📝 Writing combined CSV reports for user summary...")
             dfexportutil.write_csv_combined(
                 df=userSummaryReportDF,

@@ -5,7 +5,7 @@ from pyspark.sql.types import *
 from pyspark.sql.types import StructType, TimestampNTZType
 from pyspark.sql import SparkSession, DataFrame
 from pyspark.sql.functions import (
-    explode, sum, collect_list, col, from_json, explode_outer, when, expr, concat_ws, rtrim, lit, unix_timestamp,
+    struct, explode, sum, collect_list, col, from_json, explode_outer, when, expr, concat_ws, rtrim, lit, unix_timestamp,
     coalesce, regexp_replace, array_join
 )
 from pyspark.sql import DataFrame
