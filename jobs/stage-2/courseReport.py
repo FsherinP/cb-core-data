@@ -123,7 +123,7 @@ class CourseReportModel:
                 .dropDuplicates() \
                 .withColumn("data_last_generated_on", currentDateTime) \
                 .cache()  # Cache the final result since it's used multiple times
-
+            distinctDF.show(30, truncate=False)
             # Generate report path
             report_path=f"{config.localReportDir}/{config.courseReportPath}/{today}"
 
@@ -365,12 +365,13 @@ class CourseReportModel:
                     col("scorm_flag"),
                     col("data_last_generated_on")
                 )
-            
+            orgComputedDF = spark.read.parquet(ParquetFileConstants.ORG_SELECT_PARQUET_FILE) \
+                .select(col("orgId").alias("content_provider_id"), 
+                        col("orgName").alias("content_provider_name"))
             es_final_assessment_df = spark.read.parquet(ParquetFileConstants.FINAL_ASSESSMENT_PARQUET_FILE)
             es_final_assessment_df = es_final_assessment_df.select(
                 col("Identifier").alias("content_id"),
                 col("createdFor").getItem(0).alias("content_provider_id"),
-                lit(None).alias("content_provider_name"), 
                 col("name").alias("content_name"), 
                 col("primaryCategory").alias("content_type"),
                 lit(None).alias("batch_id"),
@@ -383,12 +384,19 @@ class CourseReportModel:
                 lit(None).alias("content_retired_on"),
                 col("status").alias("content_status"),
                 lit(None).alias("resource_count"),
-                lit(None).alias("total_certificates_issued"),
-                col("reviewStatus").alias("content_substatus"),
+                lit(None).alias("total_certificates_issued"), # who have cleared final assessment
+                col("reviewStatus").alias("content_substatus"), # should be None
                 col("language").getItem(0).alias("language"),
                 col("contextCategory").alias("content_sub_type"),
                 lit(0).alias("scorm_flag"),
                 lit(currentDateTime).alias("data_last_generated_on")
+            )
+            es_final_assessment_df = es_final_assessment_df.join(
+                orgComputedDF,
+                on="content_provider_id",
+                how="left"
+            ).select(
+                es_final_assessment_df["*"],orgComputedDF["content_provider_name"]
             )
             platformContentWarehouseDF = platformContentWarehouseDF.unionByName(es_final_assessment_df)
             platformContentWarehouseDF.show(30, truncate=False)

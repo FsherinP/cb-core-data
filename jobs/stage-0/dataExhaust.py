@@ -295,7 +295,6 @@ class DataExhaustModel:
                 fields, 
                 array_fields
             )
-            es_content_df.show(5, truncate=False)
             self.write_parquet(es_content_df, f"{output_base_path}/esContent")
             es_content_df.unpersist()
             
@@ -557,16 +556,16 @@ class DataExhaustModel:
                 fields,
                 array_fields
             )
-            courseAsPrimaryCategorydf = es_content_df.filter(col("primaryCategory") == "Course")
-            courseAsPrimaryCategorydf.show(5, truncate=False)
-            es_final_assessment_df.show(5, truncate=False)
-            es_course_filtered_final_assessment_df = courseAsPrimaryCategorydf.join(
-                es_final_assessment_df,
-                array_contains(courseAsPrimaryCategorydf["childNodes"], es_final_assessment_df["identifier"]),
-                "inner"
-            ).select(
-                es_final_assessment_df["*"])
-            es_course_filtered_final_assessment_df.show(5, truncate=False)
+            # courseAsPrimaryCategorydf = es_content_df.filter(col("primaryCategory") == "Course")
+            # courseAsPrimaryCategorydf.show(5, truncate=False)
+            # es_final_assessment_df.show(5, truncate=False)
+            # es_course_filtered_final_assessment_df = courseAsPrimaryCategorydf.join(
+            #     es_final_assessment_df,
+            #     array_contains(courseAsPrimaryCategorydf["childNodes"], es_final_assessment_df["identifier"]),
+            #     "inner"
+            # ).select(
+            #     es_final_assessment_df["*"], courseAsPrimaryCategorydf["identifier"].alias("course_id"))
+            # es_course_filtered_final_assessment_df.show(5, truncate=False)
             self.write_parquet(es_final_assessment_df, f"{output_base_path}/esFinalAssessment")
             es_final_assessment_df.unpersist()
 
