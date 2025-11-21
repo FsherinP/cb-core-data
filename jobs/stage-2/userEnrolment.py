@@ -4,7 +4,7 @@ import sys
 from pathlib import Path
 import pandas as pd
 from pyspark.sql import SparkSession, functions as F
-from pyspark.sql.functions import bround, col, broadcast, concat_ws, coalesce, lit, when, from_unixtime
+from pyspark.sql.functions import bround, col, broadcast, concat_ws, coalesce, lit, when, from_unixtime, split
 from pyspark.sql.functions import col, lit, coalesce, concat_ws, when, broadcast, get_json_object, rtrim
 from pyspark.sql.functions import col, from_json, explode_outer, coalesce, lit ,format_string
 from pyspark.sql.types import StructType, ArrayType, StringType, BooleanType, StructField
@@ -137,7 +137,7 @@ class UserEnrolmentModel:
             
             # Load and process ACBP data
             acbpAllEnrolmentDF = (spark.read.parquet(ParquetFileConstants.ACBP_COMPUTED_FILE)
-                                 .withColumn("courseID", explode(col("acbpCourseIDList")))
+                                 .withColumn("courseID", explode(split(col("acbpCourseIDList"), ",")))
                                  .withColumn("liveCBPlan", lit(True))
                                  .select(col("userOrgID"), col("courseID"), col("userID"), 
                                         col("designation"), col("liveCBPlan")))
