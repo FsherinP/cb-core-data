@@ -12,7 +12,7 @@ sys.path.append(str(Path(__file__).resolve().parents[2]))
 # Custom module imports
 from constants.ParquetFileConstants import ParquetFileConstants
 from dfutil.user import userDFUtil
-from dfutil.enrolment.acbp import acbpDFUtil
+from dfutil.enrolment.acbp import acbpDFUtil_v3
 from dfutil.enrolment import enrolmentDFUtil
 from dfutil.content import contentDFUtil
 from dfutil.assessment import assessmentDFUtil
@@ -100,7 +100,7 @@ def main():
         ("Enrolment Warehouse", enrolmentDFUtil.preComputeUserEnrolmentWarehouseData, False),
         ("User Warehouse", userDFUtil.preComputeUserWarehouseData, False),
         ("Course Warehouse", contentDFUtil.preComputeContentWarehouseData, False),
-        ("ACBP Enrolment Computation", acbpDFUtil.preComputeACBPData, False),
+        ("ACBP Enrolment Computation", acbpDFUtil_v3.preComputeACBPData, False),
         ("Warehouse Parquet Files", contentDFUtil.writeWarehouseParquetFiles, True),  # Only this needs config
         ("Old Assessment Data", assessmentDFUtil.precomputeOldAssessmentDataframe, False)
     ]
