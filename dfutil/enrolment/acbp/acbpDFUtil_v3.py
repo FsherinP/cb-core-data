@@ -1,6 +1,5 @@
 import sys
 from pathlib import Path
-
 sys.path.append(str(Path(__file__).resolve().parents[3]))
 from util import schemas
 from constants.ParquetFileConstants import ParquetFileConstants
@@ -24,9 +23,9 @@ def preComputeACBPData(spark):
     Pre-process ACBP data from raw parquet files.
     Uses v4 optimized org-partitioned strategy with batched broadcasts.
     """
-    print("=" * 80)
+    print("="*80)
     print("ACBP Pre-Processing - Version 4.0 (Batched Org-Partitioned)")
-    print("=" * 80)
+    print("="*80)
 
     spark.conf.set("spark.sql.parquet.enableVectorizedReader", "false")
     spark.conf.set("spark.sql.parquet.outputTimestampType", "TIMESTAMP_MICROS")
@@ -37,9 +36,9 @@ def preComputeACBPData(spark):
     # CRITICAL FIX: Pre-process contextdata to wrap ALL scalar criteriaValue in arrays
     acbp_df = acbp_df.withColumn("contextdata",
                                  F.regexp_replace(col("contextdata"),
-                                                  '"criteriaValue":((?!\\[)(true|false|"[^"]*"|[0-9]+(?:\\.[0-9]+)?))',
-                                                  '"criteriaValue":[$1]'
-                                                  )
+                                                '"criteriaValue":((?!\\[)(true|false|"[^"]*"|[0-9]+(?:\\.[0-9]+)?))',
+                                                '"criteriaValue":[$1]'
+                                                )
                                  )
 
     acbp_select_df = (acbp_df.withColumn("context_data", from_json(col("contextdata"), schemas.accessControlSchema))
@@ -112,37 +111,37 @@ def preComputeACBPData(spark):
     print(f"final_df data: {final_df.count():,} rows")
 
     exportDFToParquet(final_df, ParquetFileConstants.ACBP_SELECT_FILE)
-
+    
     live_acbp_df = final_df.filter(col("acbpStatus") == "Live")
     live_count = live_acbp_df.count()
     total_count = final_df.count()
     print(f"Total plans: {total_count}, Live Plans: {live_count}")
-
+    
     # Call optimized v4 explode function
-    explodeAcbpData(spark, live_acbp_df)
+    #explodeAcbpData(spark, live_acbp_df)
 
 
 def explodeAcbpData(spark, acbp_df: DataFrame) -> DataFrame:
     """
     OPTIMIZED VERSION 4.0: Batched Org-Partitioned Strategy with OR Logic Built-In
-
-    Key optimization:
+    
+    Key optimization: 
     - Group plans by org (org-partitioning)
     - Build ONE index per org with multiple criteria groups per plan (OR logic)
     - One broadcast per org instead of one per plan row
     - Performance: 2-3 minutes for 14M users, 9500 plans
     """
 
-    print("\n" + "=" * 80)
+    print("\n" + "="*80)
     print("ACBP User Allocation - Version 4.0 (BATCHED ORG-PARTITIONED STRATEGY)")
-    print("=" * 80)
+    print("="*80)
 
     start_time = time.time()
-
+    
     # Step 1: Load and normalize user data
     print("\n[1/7] Loading user data...")
     user_df = spark.read.parquet(ParquetFileConstants.USER_ORG_COMPUTED_FILE)
-
+    
     existing_columns = set(user_df.columns)
     for col_name, default_val in [('isOnCentralDeputation', False), ('userProfileStatus', False)]:
         if col_name not in existing_columns:
@@ -157,7 +156,7 @@ def explodeAcbpData(spark, acbp_df: DataFrame) -> DataFrame:
         .withColumn("cadreBatch_normalized", lower(trim(col("cadreBatch"))))
 
     user_df = user_df.persist()
-
+    
     total_users = user_df.count()
     print(f"   Total users: {total_users:,}")
 
@@ -196,10 +195,10 @@ def explodeAcbpData(spark, acbp_df: DataFrame) -> DataFrame:
         # ✅ KEY CHANGE: Build ONE index for ALL plans in this org (with OR logic built-in)
         org_plan_index = build_plan_index_from_rows(org_plans)
         org_plan_bc = spark.sparkContext.broadcast(org_plan_index)
-
+        
         # Single UDF call for all org plans
         org_matches = match_users_to_plans(org_users, org_plan_bc)
-
+        
         if org_matches:
             match_count = org_matches.count()
             org_elapsed = time.time() - org_start
@@ -207,7 +206,7 @@ def explodeAcbpData(spark, acbp_df: DataFrame) -> DataFrame:
             org_results.append(org_matches)
         else:
             print(f"      No matches")
-
+        
         org_plan_bc.unpersist()
 
     # Step 5: Combine org results
@@ -225,23 +224,23 @@ def explodeAcbpData(spark, acbp_df: DataFrame) -> DataFrame:
     print("\n[6/7] Processing plans WITHOUT orgId (global, BATCHED)...")
     global_matches = None
     global_matches_count = 0
-
+    
     if plans_without_orgid:
         print(f"   Plans to process: {len(plans_without_orgid):,}")
 
         # ✅ KEY CHANGE: Build ONE index for ALL global plans (with OR logic built-in)
         global_plan_index = build_plan_index_from_rows(plans_without_orgid)
         global_plan_bc = spark.sparkContext.broadcast(global_plan_index)
-
+        
         # Single UDF call for all global plans
         global_matches = match_users_to_plans(user_df, global_plan_bc)
-
+        
         if global_matches:
             global_matches_count = global_matches.count()
             print(f"   Global matches: {global_matches_count:,}")
         else:
             print(f"   No global matches")
-
+        
         global_plan_bc.unpersist()
     else:
         print(f"   No global plans to process")
@@ -269,22 +268,22 @@ def explodeAcbpData(spark, acbp_df: DataFrame) -> DataFrame:
     unique_plans = metrics['unique_plans']
 
     elapsed_time = time.time() - start_time
-    print("\n" + "=" * 80)
+    print("\n" + "="*80)
     print("PROCESSING COMPLETE!")
-    print("=" * 80)
-    print(f"Total time: {elapsed_time / 60:.1f} minutes")
+    print("="*80)
+    print(f"Total time: {elapsed_time/60:.1f} minutes")
     print(f"Total user-plan matches: {total_matches:,}")
     print(f"  - From org-specific plans: {org_matches_count:,}")
     print(f"  - From global plans: {global_matches_count:,}")
     print(f"Unique users matched: {unique_users:,}")
     print(f"Unique plans with matches: {unique_plans:,}")
-    print(f"Processing rate: {total_matches / elapsed_time:,.0f} matches/second")
+    print(f"Processing rate: {total_matches/elapsed_time:,.0f} matches/second")
     print(f"Output location: {ParquetFileConstants.ACBP_COMPUTED_FILE}")
-    print("=" * 80 + "\n")
+    print("="*80 + "\n")
 
     # Export
     exportDFToParquet(final_df, ParquetFileConstants.ACBP_COMPUTED_FILE)
-
+    
     final_df.unpersist()
 
     return final_df
@@ -335,7 +334,7 @@ def categorize_plans_by_org(acbp_data):
 def build_plan_index_from_rows(plan_rows):
     """
     Build plan index from a list of plan rows.
-
+    
     ✅ KEY CHANGE: Stores multiple criteria groups per acbpID for OR logic
     Structure: {
         acbpID: [
@@ -414,7 +413,7 @@ def build_plan_index_from_rows(plan_rows):
 def match_users_to_plans(user_df, plan_index_bc):
     """
     Match a DataFrame of users against a broadcast plan index.
-
+    
     ✅ KEY CHANGE: Implements OR logic between criteria groups for same acbpID
     """
 
@@ -442,11 +441,11 @@ def match_users_to_plans(user_df, plan_index_bc):
             matched_display_type = None
             matched_display_info = None
             matched_metadata = None
-
+            
             for criteria_group in criteria_groups:
                 criteria_list = criteria_group['criteria']
                 plan_org_id = (criteria_group['metadata'].get('orgID') or '').strip()
-
+                
                 # AND logic within this criteria group
                 matches_all = True
 

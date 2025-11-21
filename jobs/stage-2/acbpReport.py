@@ -5,7 +5,7 @@ import sys
 from pathlib import Path
 import pandas as pd
 from pyspark.sql import SparkSession, functions as F
-from pyspark.sql.functions import bround, col, broadcast, concat_ws, split, coalesce, lit, when, from_unixtime
+from pyspark.sql.functions import bround, col, broadcast, concat_ws, split, coalesce, lit, when, from_unixtime, regexp_replace
 from pyspark.sql.functions import col, lit, coalesce, concat_ws, create_map, when, broadcast, get_json_object, rtrim
 from pyspark.sql.functions import col, trim, array_join, from_json, explode_outer, coalesce, lit, format_string, count, countDistinct
 from pyspark.sql.types import StructType, ArrayType, StringType, BooleanType, StructField
@@ -65,14 +65,22 @@ class ACBPModel:
 
             enrolmentDF = spark.read.parquet(ParquetFileConstants.ENROLMENT_COMPUTED_PARQUET_FILE)
 
-            acbpAllEnrolmentDF = spark.read.parquet(ParquetFileConstants.ACBP_COMPUTED_FILE) \
-                .withColumn("courseID", explode(split(col("acbpCourseIDList"), ","))) \
-                .join(allCourseProgramDetailsDF, ["courseID"], "left") \
-                .join(enrolmentDF, ["courseID", "userID"], "left") \
-                .na.drop(subset=["userID", "courseID"]) \
-                .drop("acbpCourseIDList")
+            acbpAllEnrolDF = spark.read.parquet(ParquetFileConstants.ACBP_COMPUTED_FILE)
+            acbpAllEnrolDF.printSchema()
+
+            acbpAllEnrolmentDF = (acbpAllEnrolDF\
+                .withColumn("courseID", explode(split(col("acbpCourseIDList"), ",")))\
+                .withColumn("courseID", regexp_replace(col("courseID"), r"^\s*\[|\]\s*$|\s+", ""))\
+                .join(allCourseProgramDetailsDF, ["courseID"], "left")\
+                .join(enrolmentDF, ["courseID", "userID"], "left")\
+                .na.drop(subset=["userID", "courseID"])\
+                .drop("acbpCourseIDList")\
+            )
+
+
             print("=done-==")
-            # acbpAllEnrolmentDF.show(5,truncate=False)
+            
+            
             # Assignment type mapping
             assignment_type_mapping = {
                 'rootorgid': 'mdo_id',
@@ -93,13 +101,13 @@ class ACBPModel:
 
             # Read select file and process same as computed
             acbpSelectEnrolmentDF = spark.read.parquet(ParquetFileConstants.ACBP_SELECT_FILE) \
-             .withColumn("courseID", explode(col("acbpCourseIDList"))) \
+             .withColumn("courseID", explode(col("acbpCourseIDList")))\
              .join(allCourseProgramDetailsDF, ["courseID"], "left") \
              .drop("acbpCourseIDList") \
              .withColumn("assignmentTypeInfo", when(col("assignmentType") == "alluser", lit("AllUser")
              ).otherwise(col("assignmentTypeInfo"))) \
              .withColumn("assignmentType", array_join(F.transform(
-                split(col("assignmentType"), "\\|"),
+                split(col("assignmentType"), "\\|"), 
                 lambda x: mapping_expr[trim(x)]),"|"))
 
             # Write to warehouse with mapped names
