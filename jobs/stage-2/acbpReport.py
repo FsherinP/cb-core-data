@@ -7,7 +7,7 @@ import pandas as pd
 from pyspark.sql import SparkSession, functions as F
 from pyspark.sql.functions import bround, col, broadcast, concat_ws, split, coalesce, lit, when, from_unixtime
 from pyspark.sql.functions import col, lit, coalesce, concat_ws, create_map, when, broadcast, get_json_object, rtrim
-from pyspark.sql.functions import col, from_json, explode_outer, coalesce, lit, format_string, count, countDistinct
+from pyspark.sql.functions import col, trim, array_join, from_json, explode_outer, coalesce, lit, format_string, count, countDistinct
 from pyspark.sql.types import StructType, ArrayType, StringType, BooleanType, StructField
 from pyspark.sql.types import MapType, StringType, StructType, StructField, FloatType, LongType, DateType, IntegerType
 from pyspark.sql.functions import col, when, size, lit, expr, unix_timestamp, date_format, from_json, current_timestamp, \
@@ -93,24 +93,25 @@ class ACBPModel:
 
             # Read select file and process same as computed
             acbpSelectEnrolmentDF = spark.read.parquet(ParquetFileConstants.ACBP_SELECT_FILE) \
-                .withColumn("courseID", explode(col("acbpCourseIDList"))) \
-                .join(allCourseProgramDetailsDF, ["courseID"], "left") \
-                .drop("acbpCourseIDList") \
-                .withColumn("assignmentType",
-                            when(
-                                col("assignmentType").isin(list(assignment_type_mapping.keys())),
-                                mapping_expr[col("assignmentType")]).otherwise(col("assignmentType")))
+             .withColumn("courseID", explode(col("acbpCourseIDList"))) \
+             .join(allCourseProgramDetailsDF, ["courseID"], "left") \
+             .drop("acbpCourseIDList") \
+             .withColumn("assignmentTypeInfo", when(col("assignmentType") == "alluser", lit("AllUser")
+             ).otherwise(col("assignmentTypeInfo"))) \
+             .withColumn("assignmentType", array_join(F.transform(
+                split(col("assignmentType"), "\\|"),
+                lambda x: mapping_expr[trim(x)]),"|"))
 
             # Write to warehouse with mapped names
             cbPlanWarehouseDF = acbpSelectEnrolmentDF \
                 .select(
-                "OrgID", "acbpCreatedBy", "acbpID", "cbPlanName", "isapar",
+                "orgID", "acbpCreatedBy", "acbpID", "cbPlanName", "isapar",
                 "assignmentType", "assignmentTypeInfo", "courseID",
                 "allocatedOn", "completionDueDate", "acbpStatus"
             ) \
                 .withColumn("data_last_generated_on", lit(currentDateTime)) \
                 .select(
-                col("OrgID").alias("org_id"),
+                col("orgID").alias("org_id"),
                 col("acbpCreatedBy").alias("created_by"),
                 col("acbpID").alias("cb_plan_id"),
                 col("cbPlanName").alias("plan_name"),
