@@ -54,10 +54,10 @@ def preComputeACBPData(spark):
         "userOrgID",
         expr("""
             CASE
-              WHEN array_contains(criteria_keys, 'rootOrgId') THEN
+              WHEN array_contains(criteria_keys, 'rootorgid') THEN
                 filter(
                   criteria_values,
-                  (value, idx) -> criteria_keys[idx] = 'rootOrgId'
+                  (value, idx) -> criteria_keys[idx] = 'rootorgid'
                 )[0]
               ELSE NULL
             END

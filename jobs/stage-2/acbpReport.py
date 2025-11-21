@@ -105,13 +105,13 @@ class ACBPModel:
             # Write to warehouse with mapped names
             cbPlanWarehouseDF = acbpSelectEnrolmentDF \
                 .select(
-                "OrgID", "acbpCreatedBy", "acbpID", "cbPlanName", "isapar",
+                "orgID", "acbpCreatedBy", "acbpID", "cbPlanName", "isapar",
                 "assignmentType", "assignmentTypeInfo", "courseID",
                 "allocatedOn", "completionDueDate", "acbpStatus"
             ) \
                 .withColumn("data_last_generated_on", lit(currentDateTime)) \
                 .select(
-                col("OrgID").alias("org_id"),
+                col("orgID").alias("org_id"),
                 col("acbpCreatedBy").alias("created_by"),
                 col("acbpID").alias("cb_plan_id"),
                 col("cbPlanName").alias("plan_name"),
