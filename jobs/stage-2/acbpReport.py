@@ -12,7 +12,7 @@ from pyspark.sql.types import StructType, ArrayType, StringType, BooleanType, St
 from pyspark.sql.types import MapType, StringType, StructType, StructField, FloatType, LongType, DateType, IntegerType
 from pyspark.sql.functions import col, when, size, lit, expr, unix_timestamp, date_format, from_json, current_timestamp, \
     to_date, round, explode, to_utc_timestamp, from_utc_timestamp, to_timestamp, sum as spark_sum
-from pyspark.sql.functions import col, desc, row_number
+from pyspark.sql.functions import col, desc, row_number, udf
 from pyspark.sql.window import Window
 from itertools import chain
 from datetime import datetime
@@ -45,15 +45,20 @@ class ACBPModel:
             currentDateTime = date_format(current_timestamp(), ParquetFileConstants.DATE_TIME_WITH_AMPM_FORMAT)
             primary_categories = ["Course", "Program", "Blended Program", "Curated Program", "Standalone Assessment"]
 
-            userOrgDF = spark.read.parquet(ParquetFileConstants.USER_ORG_COMPUTED_FILE).select("userID", "fullName",
-                                                                                               "userStatus",
-                                                                                               "userPrimaryEmail",
-                                                                                               "userMobile",
-                                                                                               "userOrgID",
-                                                                                               "ministry_name",
-                                                                                               "dept_name",
-                                                                                               "userOrgName",
-                                                                                               "designation", "group")
+            print("📥 Reading source data...")
+            userOrgDF = spark.read.parquet(ParquetFileConstants.USER_ORG_COMPUTED_FILE).select("userID", 
+                                                                                                "fullName",
+                                                                                                "userStatus",
+                                                                                                "userPrimaryEmail",
+                                                                                                "userMobile",
+                                                                                                "userOrgID",
+                                                                                                "ministry_name",
+                                                                                                "dept_name",
+                                                                                                "userOrgName",
+                                                                                                "designation", "group",
+                                                                                                "additionalProperties.externalSystem",
+                                                                                                "additionalProperties.externalSystemId")
+            
             contentHierarchyDF = spark.read.parquet(ParquetFileConstants.CONTENT_HIERARCHY_SELECT_PARQUET_FILE)
             allCourseProgramESDF = spark.read.parquet(
                 ParquetFileConstants.ALL_COURSE_PROGRAM_COMPUTED_PARQUET_FILE).filter(
@@ -227,6 +232,77 @@ class ACBPModel:
                 partition_column='mdoid',
                 parquet_tmp_path=f"{config.localReportDir}/temp/cbp-enrolment-report/{today}",
                 csv_filename=config.cbpEnrolmentReport)
+            
+            enrolmentReportDF.write.mode("overwrite").option("compression", "snappy").parquet(
+                f"{config.warehouseReportDir}/cbp_enrollments")
+            
+            ######################################################
+            # creating data for apar enrollment report for sahil
+            #######################################################
+
+            print("📝 Start Apar enrollment report data...")
+            
+            #getting KCM dataframes
+            kcmDF = spark.read.parquet(f"{config.warehouseReportDir}/{config.dwKcmDictionaryTable}")
+            kcmMappingDF = spark.read.parquet(f"{config.warehouseReportDir}/{config.dwKcmContentTable}")
+
+            # kcm dictionary dataframe
+            kcmMappingDF = kcmMappingDF.join(kcmDF, kcmDF.competency_area_id == kcmMappingDF.competency_area_id, "left").select(
+                col("course_id"),
+                kcmMappingDF["competency_area_id"],
+                col("competency_area")
+            ).distinct()
+            
+            print("📝 Preparing Apar enrollment report data...")
+            
+            # joining user additional properties to get external system details
+            userAdditionalProperties = userOrgDF.select("userID", "externalSystem","externalSystemId")
+    
+            # preparing apar enrollment data
+            aparEnrolmentData = acbpEnrolmentDF.join(userAdditionalProperties, "userID", "left") \
+                .join(kcmMappingDF, acbpEnrolmentDF.courseID == kcmMappingDF.course_id, "left") \
+                .withColumn(
+                    "content_duration",
+                    F.when(F.col("courseDuration").isNull(), None)
+                    .when(F.col("courseDuration") == 0, "00:00:00")
+                    .otherwise(
+                        F.format_string(
+                            "%02d:%02d:%02d",
+                            (F.col("courseDuration") / 3600).cast("int"),
+                            ((F.col("courseDuration") % 3600) / 60).cast("int"),
+                            (F.col("courseDuration") % 60).cast("int")
+                        )
+                    )
+                ) \
+                .filter((col("userStatus").cast("int") == 1) & (col("isApar") == True)) \
+                .select(
+                    col("userID").alias("user_id"),
+                    col("fullName").alias("name"),
+                    col("userOrgID").alias("mdo_id"),
+                    col("userOrgName").alias("mdo_name"),
+                    col("courseID").alias("content_id"),
+                    col("courseName").alias("content_name"),
+                    col("courseStatus").alias("content_status"),
+                    col("content_duration"),
+                    col("courseCategory").alias("content_type"),
+                    col("userMobile").alias("phone"),
+                    col("userPrimaryEmail").alias("email"),
+                    col('isApar').alias("is_apar"),
+                    when(((col("courseProgress").isNotNull()) & (col("courseProgress") > 0)), col("courseProgress")).otherwise(0).alias("content_progress_percentage"),
+                    col("externalSystem").alias("external_system"),
+                    col("externalSystemId").alias("external_system_id"),
+                    col("competency_area").alias("competency_type"),
+                    lit(None).cast("string").alias("parichay_id"),
+                    col("allocatedOn").cast("timestamp").alias("assigned_on")
+                )
+            
+            kcmMappingDF.unpersist()
+            kcmDF.unpersist()
+            print("✅ Apar enrollment report data prepared successfully!")
+            
+            ######################################################
+            # end of apar enrollment report for sahil
+            ######################################################
 
             # -----------------------------------------------
             # 1. Normalize organizational fields BEFORE groupBy
@@ -317,6 +393,12 @@ class ACBPModel:
             cbPlanWarehouseDF.coalesce(1).write.mode("overwrite").option("compression", "snappy").parquet(
                 f"{config.warehouseReportDir}/{config.dwCBPlanTable}")
             print("✅ Processing completed successfully!")
+
+            # apar enrollment report for Sahil
+            print("📝 Writing Apar enrollment parquet report for warehouse...")
+            aparEnrolmentData.coalesce(1).write.mode("overwrite").option("compression", "snappy").parquet(
+                f"{config.warehouseReportDir}/{config.dwAparCBPEnrollmentTable}")
+            print("✅ Apar enrollment parquet report written successfully!")
 
         except Exception as e:
             print(f"❌ Error occurred during ACBPModel processing: {str(e)}")

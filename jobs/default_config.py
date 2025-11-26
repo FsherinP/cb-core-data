@@ -73,6 +73,7 @@ DEFAULT_CONFIG = {
     'dwSLWMdoLeaderboardTable': 'slw_mdo_leaderboard',
     'dwSLWMdoTopLearnerTable': 'slw_mdo_top_learners',
     'dwNLWUserLeaderboardTable': 'nlw_user_leaderboard',
+    'dwAparCBPEnrollmentTable': 'apar_cbp_enrollment',
 
     # Cassandra Keyspaces
     'cassandraUserKeyspace': 'sunbird',
