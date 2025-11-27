@@ -423,7 +423,7 @@ class DataExhaustModel:
             # Process event data (NLW)
             self.logger.info("Processing event data...")
             object_types = ["Event"]
-            should_clause_events = ",".join([f'{{"match":{{"objectType.raw":"{ot}"}}}}' for ot in object_types])
+            should_clause_events = ",".join([f'{{"match":{{".raobjectTypew":"{ot}"}}}}' for ot in object_types])
             fields_events = ["identifier", "name", "objectType", "status", "startDate", "startTime", 
                            "duration", "registrationLink", "createdFor", "recordedLinks", "resourceType"]
             array_fields_events = ["createdFor", "recordedLinks"]
