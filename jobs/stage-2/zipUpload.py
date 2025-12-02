@@ -153,17 +153,14 @@ class ZipUploadModel:
             for mdoid_folder in os.listdir(merged_dir):
                 mdoid_path = os.path.join(merged_dir, mdoid_folder)
                 if os.path.isdir(mdoid_path):
+                    zip_path = os.path.join(mdoid_path, "reports.zip")
                     csv_files = [f for f in os.listdir(mdoid_path) if f.endswith(".csv")]
                     if csv_files:
-                        for csv_file in csv_files:
-                            csv_path = os.path.join(mdoid_path, csv_file)
-                            zip_name = csv_file.replace(".csv", ".zip")
-                            zip_path = os.path.join(mdoid_path, zip_name)
-                            command = ["zip", "-P", password, "-j", zip_path, csv_path]
-                            subprocess.run(command, check=True)
-                    # Delete the individual CSVs after zipping
-                    for f in csv_files:
-                        os.remove(os.path.join(mdoid_path, f))
+                        command = ["zip", "-P", password, "-j", zip_path] + [os.path.join(mdoid_path, f) for f in csv_files]
+                        subprocess.run(command, check=True)
+                        # Delete the individual CSVs after zipping
+                        for f in csv_files:
+                            os.remove(os.path.join(mdoid_path, f))
 
             print(f"All MDOID folders zipped with password at: {merged_dir}")
             sync_reports(merged_dir, config.mdoReportSyncPath, config)
