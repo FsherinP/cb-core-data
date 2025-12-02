@@ -424,29 +424,30 @@ class DataExhaustModel:
             self.logger.info("Processing event data...")
             object_types = ["Event"]
             should_clause_events = ",".join([f'{{"match":{{"objectType.raw":"{ot}"}}}}' for ot in object_types])
-            fields_events = ["identifier", "name", "objectType", "status", "startDate", "startTime", 
-                           "duration", "registrationLink", "createdFor", "recordedLinks", "resourceType"]
+            fields_events = ["identifier", "name", "objectType", "status", "startDate", "startTime",
+                           "duration", "registrationLink", "createdFor", "recordedLinks", "resourceType", "typeofEvent",
+                           "maxEnrolments", "meetingAgenda", "creatorDetails", "recordedMediaLink", "noOfAttendes", "eventDuration",
+                           "meetingSummary", "courseLinked", ]
             array_fields_events = ["createdFor", "recordedLinks"]
             fields_clause_events = ",".join([f'"{f}"' for f in fields_events])
             event_query = f'{{"_source":[{fields_clause_events}],"query":{{"bool":{{"should":[{should_clause_events}]}}}}}}'
-            
+           
             event_data_df = utils.read_elasticsearch_data(
                 self.spark,
                 self.config.sparkElasticsearchConnectionHost,
                 self.config.sparkElasticsearchConnectionPort,
-                "compositesearch", 
-                event_query, 
-                fields_events, 
+                "compositesearch",
+                event_query,
+                fields_events,
                 array_fields_events
             )
-            
             # Transform event data
             event_details_df = event_data_df.withColumn(
                 "event_provider_mdo_id", explode_outer(col("createdFor"))
             ).withColumn(
                 "recording_link", explode_outer(col("recordedLinks"))
             ).withColumn(
-                "event_start_datetime", 
+                "event_start_datetime",
                 concat(substring(col("startDate"), 1, 10), lit(" "), substring(col("startTime"), 1, 8))
             ).withColumn(
                 "presenters", lit("No presenters available")
@@ -465,7 +466,17 @@ class DataExhaustModel:
                 col("presenters"),
                 col("recording_link"),
                 col("registrationLink").alias("video_link"),
-                col("resourceType").alias("event_tag")
+                col("resourceType").alias("event_tag").cast(StringType()),
+                col("typeofEvent").cast(StringType()),
+                col("maxEnrolments").cast(IntegerType()),
+                col("registrationLink").cast(StringType()),
+                col("meetingAgenda").cast(StringType()),
+                col("creatorDetails").cast(StringType()),
+                col("recordedMediaLink").cast(StringType()),
+                col("noOfAttendes").cast(IntegerType()),
+                col("eventDuration").cast(IntegerType()),
+                col("meetingSummary").cast(StringType()),
+                col("courseLinked").cast(StringType())
             ).dropDuplicates(["event_id"]).fillna(0.0, subset=["duration"])
             
             self.write_parquet(event_details_df, f"{output_base_path}/eventDetails")

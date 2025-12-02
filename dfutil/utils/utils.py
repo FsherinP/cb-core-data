@@ -2,7 +2,7 @@ from pathlib import Path
 from pyspark.sql import SparkSession, DataFrame
 from pyspark import StorageLevel
 from pyspark.sql.functions import (
-    col)
+    col, lit)
 import requests
 import json
 from typing import Optional
@@ -271,8 +271,11 @@ def read_elasticsearch_data(spark: SparkSession, host: str, port: str, index: st
     # Select only the specified fields
     if fields:
         # Create column expressions for field selection
-        field_cols = [col(f) for f in fields]
-        df = df.select(*field_cols)
+        for f in fields:
+            #Add missing column with null
+            if f not in df.columns:
+                df = df.withColumn(f, lit(None))
+        df = df.select(*[col(f) for f in fields])
 
     # Persist with MEMORY_ONLY storage level for performance
     df = df.persist(StorageLevel.MEMORY_ONLY)
