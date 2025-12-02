@@ -2,24 +2,51 @@ from constants.ParquetFileConstants import ParquetFileConstants
 from datetime import datetime, timedelta, timezone
 import pytz
 
-class QueryConstants:
 
+class QueryConstants:
+    """
+    Complete Query Constants for Dashboard Sync
+    CORRECTED VERSION - Uses proper JOINs between warehouse tables
+
+    Schema:
+    - user_warehouse_computed: user_id, mdo_id, status, full_name, designation, etc.
+    - content_warehouse_computed: content_id, content_provider_id, content_name, content_status, content_type, etc.
+    - enrolment_warehouse_computed: userID, content_id, user_consumption_status, enrolled_on, first_completed_on, certificateID
+    - org_hierarchy: orgID, orgName (for mdo_name mapping)
+    """
+
+    # ==================== DATE & TIME CALCULATIONS ====================
     currentDate = datetime.now().date()
     istOffset = timezone(timedelta(hours=5, minutes=30))
-    previousDayStartTime = datetime.combine(currentDate - timedelta(days=1), datetime.min.time()).replace(tzinfo=istOffset)
-    previousDayEndTime = (datetime.combine(currentDate, datetime.min.time()) - timedelta(seconds=1)).replace(tzinfo=istOffset)
+    previousDayStartTime = datetime.combine(currentDate - timedelta(days=1), datetime.min.time()).replace(
+        tzinfo=istOffset)
+    previousDayEndTime = (datetime.combine(currentDate, datetime.min.time()) - timedelta(seconds=1)).replace(
+        tzinfo=istOffset)
     previousDayStartTimeString = previousDayStartTime.strftime("%Y-%m-%d %H:%M:%S.%f")[:-3] + "+0530"
     previousDayEndTimeString = previousDayEndTime.strftime("%Y-%m-%d %H:%M:%S.%f")[:-3] + "+0530"
-    
-    # Epoch calculations
-    twentyFourHoursAgoEpochMillisTime = int(datetime.combine(currentDate - timedelta(days=1), datetime.min.time()).replace(tzinfo=istOffset).timestamp())
-    previousDayEndEpochMillis = int((datetime.combine(currentDate, datetime.min.time()) - timedelta(seconds=1)).replace(tzinfo=istOffset).timestamp()) * 1000
-    twentyFourHoursAgoEpochMillis = int(datetime.combine(currentDate - timedelta(days=1), datetime.min.time()).replace(tzinfo=istOffset).timestamp()) * 1000
-    twelveMonthsAgoEpochMillis = int(datetime.combine(currentDate - timedelta(days=365), datetime.min.time()).replace(tzinfo=istOffset).timestamp())
-    print(twentyFourHoursAgoEpochMillis)
-    print(twelveMonthsAgoEpochMillis)
-    print(previousDayEndEpochMillis)
 
+    # Epoch calculations
+    twentyFourHoursAgoEpochMillisTime = int(
+        datetime.combine(currentDate - timedelta(days=1), datetime.min.time()).replace(tzinfo=istOffset).timestamp())
+    previousDayEndEpochMillis = int((datetime.combine(currentDate, datetime.min.time()) - timedelta(seconds=1)).replace(
+        tzinfo=istOffset).timestamp()) * 1000
+    twentyFourHoursAgoEpochMillis = int(datetime.combine(currentDate - timedelta(days=1), datetime.min.time()).replace(
+        tzinfo=istOffset).timestamp()) * 1000
+    twelveMonthsAgoEpochMillis = int(
+        datetime.combine(currentDate - timedelta(days=365), datetime.min.time()).replace(tzinfo=istOffset).timestamp())
+
+    # Week range for certifications
+    currentDayStart = datetime.now().replace(hour=0, minute=0, second=0, microsecond=0, tzinfo=istOffset)
+    endOfCurrentDay = int((currentDayStart + timedelta(days=1)).timestamp())
+    startOf7thDay = int((currentDayStart - timedelta(days=7)).timestamp())
+
+    print(f"twentyFourHoursAgoEpochMillis: {twentyFourHoursAgoEpochMillis}")
+    print(f"twelveMonthsAgoEpochMillis: {twelveMonthsAgoEpochMillis}")
+    print(f"previousDayEndEpochMillis: {previousDayEndEpochMillis}")
+    print(f"startOf7thDay: {startOf7thDay}")
+    print(f"endOfCurrentDay: {endOfCurrentDay}")
+
+    @staticmethod
     def get_epoch_for_ist_datetime(date_str):
         """Convert IST datetime string to epoch seconds"""
         ist = pytz.timezone('Asia/Kolkata')
@@ -27,466 +54,372 @@ class QueryConstants:
         dt_ist = ist.localize(dt)
         return int(dt_ist.timestamp())
 
- # Note: Replace these date values with your actual NLW dates
+    # NLW dates - Update these with your actual dates
     NLW_START_DATE = "'2024-01-15 00:00:00'"
     NLW_END_DATE = "'2024-01-21 23:59:59'"
-    # Calculate epochs
     nlw_start_epoch = get_epoch_for_ist_datetime(NLW_START_DATE)
     nlw_end_epoch = get_epoch_for_ist_datetime(NLW_END_DATE)
-    
-    ORG_BASED_DESIGNATION_LIST = f"""SELECT  
-                                    userOrgID,  
-                                    STRING_AGG(DISTINCT COALESCE(designation, professionalDetails.designation)) as org_designations  
-                                FROM read_parquet('{ParquetFileConstants.USER_ORG_COMPUTED_FILE}/**.parquet')  
-                                WHERE COALESCE(designation, professionalDetails.designation) IS NOT NULL  
-                                GROUP BY userOrgID"""
+
+    # ==================== EXISTING QUERIES (PRESERVED - NO CHANGES NEEDED) ====================
+
+    ORG_BASED_DESIGNATION_LIST = f"""
+        SELECT  
+            userOrgID,  
+            STRING_AGG(DISTINCT COALESCE(designation, professionalDetails.designation)) as org_designations  
+        FROM read_parquet('{ParquetFileConstants.USER_ORG_COMPUTED_FILE}/**.parquet')  
+        WHERE COALESCE(designation, professionalDetails.designation) IS NOT NULL  
+        GROUP BY userOrgID
+    """
 
     ORG_USER_COUNT_DATAFRAME_QUERY = f"""
-                                    SELECT 
-                                    userOrgID AS orgID,
-                                    userOrgName AS orgName,
-                                    COUNT(userID) AS registeredCount,
-                                    10000 AS totalCount
-                                    FROM read_parquet('{ParquetFileConstants.USER_ORG_COMPUTED_FILE}/**.parquet')
-                                    WHERE userOrgID IS NOT NULL 
-                                    AND userStatus = 1      -- Filter for ACTIVE USERS ONLY
-                                    AND userOrgStatus = 1   -- Filter for ACTIVE ORGS ONLY
-                                    GROUP BY userOrgID, userOrgName
-                                    ORDER BY registeredCount DESC"""
-    
-
-    TOP_10_LEARNERS_BY_MDO_QUERY = F"""
-                                    WITH ranked_users AS (
-                                        SELECT
-                                            *,
-                                            RANK() OVER (PARTITION BY userOrgID ORDER BY total_points DESC) AS rank
-                                        FROM read_parquet('{ParquetFileConstants.USER_ORG_COMPUTED_FILE}/**.parquet')
-                                        WHERE total_points IS NOT NULL
-                                    ),
-                                    top10_by_org AS (
-                                        SELECT * FROM ranked_users WHERE rank <= 10
-                                    ),
-                                    json_ready AS (
-                                        SELECT
-                                            userOrgID,
-                                            -- build JSON string manually, escaping strings properly
-                                            FORMAT(
-                                                '{{{{"userID":"{{}}", "fullName":"{{}}", "userOrgName":"{{}}", "designation":"{{}}", "userProfileImgUrl":{{}}, "total_points":{{}}, "rank":{{}}}}}}',
-                                                userID,
-                                                fullName,
-                                                userOrgName,
-                                                COALESCE(designation, ''),
-                                                CASE WHEN userProfileImgUrl IS NULL THEN 'null' ELSE '"' || userProfileImgUrl || '"' END,
-                                                total_points,
-                                                rank
-                                            ) AS json_details_str
-                                        FROM top10_by_org
-                                    )
-                                    SELECT
-                                        userOrgID,
-                                        -- Aggregate as an array of JSON strings and wrap in JSON object
-                                        json_object('top_learners', list(json_details_str)) AS top_learners
-                                    FROM json_ready
-                                    GROUP BY userOrgID;"""
-
-
-    # ORG_BASED_MDO_LEADER_COUNT = f"""WITH exploded_roles AS (
-    #                             SELECT 
-    #                                 userID,
-    #                                 userOrgID,
-    #                                 TRIM(role_value.unnest) AS role  -- extract string from struct before trimming
-    #                             FROM read_parquet('{ParquetFileConstants.USER_ORG_COMPUTED_FILE}/**.parquet'),
-    #                                 UNNEST(STRING_SPLIT(role, ',')) AS role_value
-    #                             WHERE userStatus = 1 AND userOrgStatus = 1
-    #                         ),
-    #                         filtered_roles AS (
-    #                             SELECT DISTINCT userOrgID
-    #                             FROM exploded_roles
-    #                             WHERE role IN ('MDO_ADMIN', 'MDO_LEADER')
-    #                         )
-    #                         SELECT COUNT(*) AS org_with_admin_or_leader_count
-    #                         FROM filtered_roles;"""
-
-    ORG_BASED_MDO_ADMIN_COUNT = f"""WITH exploded_roles AS (
-                                SELECT 
-                                    userID,
-                                    userOrgID,
-                                    TRIM(unnested_role.unnest) AS role
-                                FROM read_parquet('{ParquetFileConstants.USER_ORG_COMPUTED_FILE}/**.parquet'),
-                                    UNNEST(STRING_SPLIT(role, ',')) AS unnested_role
-                                WHERE userStatus = 1 AND userOrgStatus = 1
-                            ),
-                            filtered_roles AS (
-                                SELECT DISTINCT userOrgID
-                                FROM exploded_roles
-                                WHERE role = 'MDO_ADMIN'
-                            )
-                            SELECT COUNT(*) AS org_with_admin_count
-                            FROM filtered_roles;"""
-
-
-    # USER_COUNT_BY_ORG = f"""Select  
-    #                             userOrgID,  
-    #                             count(*)  
-    #                             from read_parquet('{ParquetFileConstants.USER_COMPUTED_PARQUET_FILE}/**.parquet')
-    #                             WHERE userStatus = 1   
-    #                             GROUP BY userOrgID  
-    #                             order by count(*) DESC"""
-    
-    USER_REGISTERED_YESTERDAY=f"""SELECT  count(*) as count
-                                    FROM read_parquet('{ParquetFileConstants.USER_COMPUTED_PARQUET_FILE}/**.parquet')
-                                    WHERE userStatus = 1   
-                                    AND userCreatedTimestamp >= extract(epoch from date_trunc('day', current_timestamp - interval '1 day')) * 1000
-                                    AND userCreatedTimestamp < extract(epoch from date_trunc('day', current_timestamp)) * 1000;"""
-
-    # Fixed: Added missing comma and corrected path
-    COURSE_COUNT_BY_STATUS_GROUP_BY_ORG = f"""SELECT 
-                                            main.courseOrgID,
-                                            main.category,
-                                            COUNT(*) AS totalCourseCount,
-                                            COUNT(CASE WHEN main.courseStatus = 'Live' THEN 1 END) AS liveCourseCount,
-                                            COUNT(CASE WHEN LOWER(main.courseStatus) = 'draft' THEN 1 END) AS draftCourseCount,
-                                            COUNT(CASE WHEN main.courseStatus = 'Review' THEN 1 END) AS reviewCourseCount,
-                                            COUNT(CASE WHEN main.courseStatus = 'Retired' THEN 1 END) AS retiredCourseCount,
-                                            COUNT(CASE WHEN main.courseStatus = 'Review' AND main.courseReviewStatus = 'Reviewed' THEN 1 END) AS pendingPublishCourseCount,
-                                            AVG(ratings.ratingAverage) AS avgRating
-                                        FROM 
-                                            read_parquet('{ParquetFileConstants.CONTENT_COMPUTED_PARQUET_FILE}/**.parquet') AS main
-                                        LEFT JOIN 
-                                            (
-                                                SELECT 
-                                                    courseID,
-                                                    LOWER(category) AS categoryLower,
-                                                    ratingAverage
-                                                FROM 
-                                                    read_parquet('{ParquetFileConstants.RATING_SUMMARY_COMPUTED_PARQUET_FILE}/**.parquet')
-                                            ) AS ratings
-                                        ON 
-                                            main.courseID = ratings.courseID AND LOWER(main.category) = ratings.categoryLower
-                                        GROUP BY 
-                                            main.courseOrgID, main.category
-                                        ORDER BY 
-                                            totalCourseCount DESC;"""
-    EXTERNAL_CONTENT_PROCESSED = f"""
-        WITH external_processed AS (
-            SELECT *,
-                CASE 
-                    WHEN issued_certificates IS NULL THEN ''
-                    ELSE issued_certificates[array_length(issued_certificates, 1)].identifier
-                END AS certificateID,
-                status AS dbCompletionStatus,
-                userid AS userID,
-                CASE 
-                    WHEN issued_certificates IS NULL THEN ''
-                    WHEN array_length(issued_certificates, 1) > 0 THEN issued_certificates[1].lastIssuedOn
-                    ELSE ''
-                END AS firstCompletedOn
-            FROM read_parquet('{ParquetFileConstants.EXTERNAL_COURSE_ENROLMENTS_PARQUET_FILE}')  
-        )
-        SELECT * FROM external_processed
-        """
-        
-        # External content completed yesterday (handles multiple timestamp formats)
-    EXTERNAL_CONTENT_COMPLETED_YESTERDAY = f"""
-    WITH external_processed AS (
-        SELECT *,
-            CASE 
-                WHEN issued_certificates IS NULL THEN ''
-                ELSE issued_certificates[array_length(issued_certificates, 1)].identifier
-            END AS certificateID,
-            status AS dbCompletionStatus,
-            userid AS userID,
-            CASE 
-                WHEN issued_certificates IS NULL THEN ''
-                WHEN array_length(issued_certificates, 1) > 0 THEN issued_certificates[1].lastIssuedOn
-                ELSE ''
-            END AS firstCompletedOn
-        FROM read_parquet('{ParquetFileConstants.EXTERNAL_COURSE_ENROLMENTS_PARQUET_FILE}')  
-    ),
-    processed_with_epochs AS (
-        SELECT *,
-            CASE 
-                WHEN firstCompletedOn IS NULL OR firstCompletedOn = '' OR LENGTH(firstCompletedOn) = 0 THEN NULL
-                -- Try format with +0000 timezone
-                WHEN firstCompletedOn LIKE '%+0000' THEN TRY_CAST(epoch(strptime(firstCompletedOn, '%Y-%m-%dT%H:%M:%S.%f+0000')) AS BIGINT)
-                -- Try format with Z timezone  
-                WHEN firstCompletedOn LIKE '%Z' THEN TRY_CAST(epoch(strptime(firstCompletedOn, '%Y-%m-%dT%H:%M:%S.%fZ')) AS BIGINT)
-                -- Try generic timezone format
-                ELSE TRY_CAST(epoch(strptime(firstCompletedOn, '%Y-%m-%dT%H:%M:%S.%f%z')) AS BIGINT)
-            END AS firstCompletedEpoch
-        FROM external_processed
-    )
-    SELECT COUNT(*) as external_certificate_issued_yesterday_count
-    FROM processed_with_epochs
-    WHERE firstCompletedEpoch IS NOT NULL
-        AND firstCompletedEpoch BETWEEN {int(previousDayStartTime.timestamp())} AND {int(previousDayEndTime.timestamp())}
+        SELECT 
+            userOrgID AS orgID,
+            userOrgName AS orgName,
+            COUNT(userID) AS registeredCount,
+            10000 AS totalCount
+        FROM read_parquet('{ParquetFileConstants.USER_ORG_COMPUTED_FILE}/**.parquet')
+        WHERE userOrgID IS NOT NULL 
+        AND userStatus = 1
+        AND userOrgStatus = 1
+        GROUP BY userOrgID, userOrgName
+        ORDER BY registeredCount DESC
     """
 
-    # Complete base data with all filter categories
+    TOP_10_LEARNERS_BY_MDO_QUERY = f"""
+        WITH ranked_users AS (
+            SELECT
+                *,
+                RANK() OVER (PARTITION BY userOrgID ORDER BY total_points DESC) AS rank
+            FROM read_parquet('{ParquetFileConstants.USER_ORG_COMPUTED_FILE}/**.parquet')
+            WHERE total_points IS NOT NULL
+        ),
+        top10_by_org AS (
+            SELECT * FROM ranked_users WHERE rank <= 10
+        ),
+        json_ready AS (
+            SELECT
+                userOrgID,
+                FORMAT(
+                    '{{{{"userID":"{{}}", "fullName":"{{}}", "userOrgName":"{{}}", "designation":"{{}}", "userProfileImgUrl":{{}}, "total_points":{{}}, "rank":{{}}}}}}',
+                    userID,
+                    fullName,
+                    userOrgName,
+                    COALESCE(designation, ''),
+                    CASE WHEN userProfileImgUrl IS NULL THEN 'null' ELSE '"' || userProfileImgUrl || '"' END,
+                    total_points,
+                    rank
+                ) AS json_details_str
+            FROM top10_by_org
+        )
+        SELECT
+            userOrgID,
+            json_object('top_learners', list(json_details_str)) AS top_learners
+        FROM json_ready
+        GROUP BY userOrgID
+    """
+
+    ORG_BASED_MDO_ADMIN_COUNT = f"""
+        WITH exploded_roles AS (
+            SELECT 
+                userID,
+                userOrgID,
+                TRIM(unnested_role.unnest) AS role
+            FROM read_parquet('{ParquetFileConstants.USER_ORG_COMPUTED_FILE}/**.parquet'),
+                UNNEST(STRING_SPLIT(role, ',')) AS unnested_role
+            WHERE userStatus = 1 AND userOrgStatus = 1
+        ),
+        filtered_roles AS (
+            SELECT DISTINCT userOrgID
+            FROM exploded_roles
+            WHERE role = 'MDO_ADMIN'
+        )
+        SELECT COUNT(*) AS org_with_admin_count
+        FROM filtered_roles
+    """
+
+    USER_REGISTERED_YESTERDAY = f"""
+        SELECT count(*) as count
+        FROM read_parquet('{ParquetFileConstants.USER_COMPUTED_PARQUET_FILE}/**.parquet')
+        WHERE userStatus = 1   
+        AND userCreatedTimestamp >= extract(epoch from date_trunc('day', current_timestamp - interval '1 day')) * 1000
+        AND userCreatedTimestamp < extract(epoch from date_trunc('day', current_timestamp)) * 1000
+    """
+
+    COURSE_COUNT_BY_STATUS_GROUP_BY_ORG = f"""
+        SELECT 
+            main.courseOrgID,
+            main.category,
+            COUNT(*) AS totalCourseCount,
+            COUNT(CASE WHEN main.courseStatus = 'Live' THEN 1 END) AS liveCourseCount,
+            COUNT(CASE WHEN LOWER(main.courseStatus) = 'draft' THEN 1 END) AS draftCourseCount,
+            COUNT(CASE WHEN main.courseStatus = 'Review' THEN 1 END) AS reviewCourseCount,
+            COUNT(CASE WHEN main.courseStatus = 'Retired' THEN 1 END) AS retiredCourseCount,
+            COUNT(CASE WHEN main.courseStatus = 'Review' AND main.courseReviewStatus = 'Reviewed' THEN 1 END) AS pendingPublishCourseCount,
+            AVG(ratings.ratingAverage) AS avgRating
+        FROM 
+            read_parquet('{ParquetFileConstants.CONTENT_COMPUTED_PARQUET_FILE}/**.parquet') AS main
+        LEFT JOIN 
+            (
+                SELECT 
+                    courseID,
+                    LOWER(category) AS categoryLower,
+                    ratingAverage
+                FROM 
+                    read_parquet('{ParquetFileConstants.RATING_SUMMARY_COMPUTED_PARQUET_FILE}/**.parquet')
+            ) AS ratings
+        ON 
+            main.courseID = ratings.courseID AND LOWER(main.category) = ratings.categoryLower
+        GROUP BY 
+            main.courseOrgID, main.category
+        ORDER BY 
+            totalCourseCount DESC
+    """
+
+    # ==================== CORRECTED BASE DATA WITH WAREHOUSE JOINS ====================
+
     BASE_DATA_COMPLETE = f"""
     WITH base_data AS (
-        SELECT *,
-            -- Base eligibility categories
+        SELECT 
+            e.userID,
+            e.content_id as courseID,
+            e.user_consumption_status,
+            e.certificateID,
+            e.enrolled_on,
+            e.first_completed_on,
+            e.batchID,
+
+            -- User fields
+            u.user_id,
+            u.mdo_id as userOrgID,
+            u.status as userStatus,
+            u.full_name,
+            u.designation,
+            u.email,
+
+            -- Org fields
+            o.orgName as userOrgName,
+
+            -- Content fields
+            c.content_id,
+            c.content_provider_id as courseOrgID,
+            c.content_provider_name as courseOrgName,
+            c.content_name as courseName,
+            c.content_type as category,
+            c.content_status as courseStatus,
+            c.content_duration,
+            c.content_rating,
+            c.total_certificates_issued as issuedCertificateCount,
+
+            -- Derived completion status (map to dbCompletionStatus)
             CASE 
-                WHEN courseStatus IN ('Live', 'Retired') AND userStatus = 1 THEN 'live_retired_content'
+                WHEN e.user_consumption_status = 'not-started' THEN 0
+                WHEN e.user_consumption_status = 'in progress' THEN 1
+                WHEN e.user_consumption_status = 'completed' THEN 2
+                ELSE -1
+            END AS dbCompletionStatus,
+
+            -- Timestamps (convert string 'yyyy-mm-dd hh:mm:ss' to epoch)
+            CASE 
+                WHEN e.enrolled_on IS NOT NULL AND e.enrolled_on != '' 
+                THEN epoch(strptime(e.enrolled_on, '%Y-%m-%d %H:%M:%S'))
+                ELSE NULL
+            END as courseEnrolledTimestamp,
+            CASE 
+                WHEN e.first_completed_on IS NOT NULL AND e.first_completed_on != '' 
+                THEN epoch(strptime(e.first_completed_on, '%Y-%m-%d %H:%M:%S'))
+                ELSE NULL
+            END as courseCompletedTimestamp,
+
+            -- Certificate generated on (use first_completed_on when certificate exists)
+            CASE 
+                WHEN e.certificateID IS NOT NULL AND e.certificateID != '' 
+                THEN e.first_completed_on
+                ELSE NULL
+            END as certificateGeneratedOn,
+
+            -- Filter categories
+            CASE 
+                WHEN c.content_status IN ('Live', 'Retired') AND u.status = 1 THEN 'live_retired_content'
                 ELSE 'other'
             END AS live_retired_content_eligible,
-            
+
             CASE 
-                WHEN category IN ('Course', 'Program', 'Blended Program', 'CuratedCollections', 'Curated Program') 
-                        AND courseStatus IN ('Live', 'Retired') 
-                        AND userStatus = 1 THEN 'live_retired_enrolment'
+                WHEN c.content_type IN ('Course', 'Program', 'Blended Program', 'CuratedCollections', 'Curated Program') 
+                    AND c.content_status IN ('Live', 'Retired') 
+                    AND u.status = 1 THEN 'live_retired_enrolment'
                 ELSE 'other'
             END AS live_retired_enrolment_eligible,
-            
+
             CASE 
-                WHEN category = 'Course' 
-                        AND courseStatus IN ('Live', 'Retired') 
-                        AND userOrgID IS NOT NULL THEN 'live_retired_course'
+                WHEN c.content_type = 'Course' 
+                    AND c.content_status IN ('Live', 'Retired') 
+                    AND u.mdo_id IS NOT NULL THEN 'live_retired_course'
                 ELSE 'other'
             END AS live_retired_course_eligible,
-            
+
             CASE 
-                WHEN category IN ('Course', 'Program') 
-                        AND courseStatus IN ('Live', 'Retired') 
-                        AND userStatus = 1 THEN 'live_retired_course_program'
+                WHEN c.content_type IN ('Course', 'Program') 
+                    AND c.content_status IN ('Live', 'Retired') 
+                    AND u.status = 1 THEN 'live_retired_course_program'
                 ELSE 'other'
             END AS live_retired_course_program_eligible,
-            
+
             CASE 
-                WHEN category IN ('Course', 'Program', 'Blended Program', 'CuratedCollections', 'Standalone Assessment', 'Curated Program') 
-                        AND courseStatus IN ('Live', 'Retired') 
-                        AND userStatus = 1 THEN 'live_retired_course_program_excluding_moderated'
+                WHEN c.content_type IN ('Course', 'Program', 'Blended Program', 'CuratedCollections', 'Standalone Assessment', 'Curated Program') 
+                    AND c.content_status IN ('Live', 'Retired') 
+                    AND u.status = 1 THEN 'live_retired_course_program_excluding_moderated'
                 ELSE 'other'
             END AS live_retired_course_program_excluding_moderated_eligible,
-            
+
             CASE 
-                WHEN category IN ('Course', 'Moderated Course') 
-                        AND courseStatus IN ('Live', 'Retired') 
-                        AND userStatus = 1 THEN 'live_retired_course_moderated'
+                WHEN c.content_type IN ('Course', 'Moderated Course') 
+                    AND c.content_status IN ('Live', 'Retired') 
+                    AND u.status = 1 THEN 'live_retired_course_moderated'
                 ELSE 'other'
             END AS live_retired_course_moderated_eligible,
-            
-            -- Live-only filters
+
             CASE 
-                WHEN category IN ('Course', 'Program') 
-                        AND courseStatus = 'Live' 
-                        AND userStatus = 1 THEN 'live_course_program'
-                ELSE 'other'
-            END AS live_course_program_eligible,
-            
-            CASE 
-                WHEN category IN ('Course', 'Program', 'Blended Program', 'CuratedCollections', 'Standalone Assessment', 'Curated Program') 
-                        AND courseStatus = 'Live' 
-                        AND userStatus = 1 THEN 'live_course_program_excluding_moderated'
-                ELSE 'other'
-            END AS live_course_program_excluding_moderated_eligible,
-            
-            CASE 
-                WHEN category IN ('Course', 'Moderated Course') 
-                        AND courseStatus = 'Live' 
-                        AND userStatus = 1 THEN 'live_course_moderated'
-                ELSE 'other'
-            END AS live_course_moderated_eligible,
-            
-            -- Completion status categories
-            CASE 
-                WHEN dbCompletionStatus = 0 THEN 'not_started'
-                WHEN dbCompletionStatus = 1 THEN 'in_progress' 
-                WHEN dbCompletionStatus = 2 THEN 'completed'
+                WHEN e.user_consumption_status = 'not-started' THEN 'not_started'
+                WHEN e.user_consumption_status = 'in progress' THEN 'in_progress' 
+                WHEN e.user_consumption_status = 'completed' THEN 'completed'
                 ELSE 'unknown'
             END AS completion_category,
-            
-            -- Yesterday completion filter
+
             CASE 
-                WHEN category IN ('Course', 'Program') 
-                        AND courseStatus IN ('Live', 'Retired') 
-                        AND userStatus = 1 
-                        AND dbCompletionStatus = 2 
-                        AND COALESCE(
-                TRY_CAST(courseCompletedTimestamp AS BIGINT),
-                CAST(epoch(courseCompletedTimestamp) AS BIGINT)
-            ) >= {twentyFourHoursAgoEpochMillisTime} THEN 'completed_yesterday'
+                WHEN c.content_type IN ('Course', 'Program') 
+                    AND c.content_status IN ('Live', 'Retired') 
+                    AND u.status = 1 
+                    AND e.user_consumption_status = 'completed'
+                    AND e.first_completed_on IS NOT NULL
+                    AND e.first_completed_on != ''
+                    AND epoch(strptime(e.first_completed_on, '%Y-%m-%d %H:%M:%S')) >= {twentyFourHoursAgoEpochMillisTime} 
+                THEN 'completed_yesterday'
                 ELSE 'other'
             END AS completed_yesterday_category,
-            
-            -- 12 months enrollment filter
+
             CASE 
-                WHEN category = 'Course' 
-                        AND courseStatus IN ('Live', 'Retired') 
-                        AND userStatus = 1 
-                        AND COALESCE(
-                TRY_CAST(courseEnrolledTimestamp AS BIGINT),
-                CAST(epoch(courseEnrolledTimestamp) AS BIGINT)
-            ) >= {twelveMonthsAgoEpochMillis}
-            THEN 'enrolled_last_12_months'
+                WHEN c.content_type = 'Course' 
+                    AND c.content_status IN ('Live', 'Retired') 
+                    AND u.status = 1 
+                    AND e.enrolled_on IS NOT NULL
+                    AND e.enrolled_on != ''
+                    AND epoch(strptime(e.enrolled_on, '%Y-%m-%d %H:%M:%S')) >= {twelveMonthsAgoEpochMillis}
+                THEN 'enrolled_last_12_months'
                 ELSE 'other'
             END AS enrolled_last_12_months_category,
-            
-            -- Certificate generation filter
+
             CASE 
-                WHEN certificateGeneratedOn IS NOT NULL AND certificateGeneratedOn != '' THEN 'certificate_generated'
+                WHEN e.certificateID IS NOT NULL AND e.certificateID != '' THEN 'certificate_generated'
                 ELSE 'no_certificate'
             END AS certificate_category,
-            
-            -- UDF equivalent for epoch conversion (handles multiple timestamp formats)
+
             CASE 
-                WHEN firstCompletedOn IS NULL OR firstCompletedOn = '' OR LENGTH(firstCompletedOn) = 0 THEN 0
-                -- Try format with +0000 timezone
-                WHEN firstCompletedOn LIKE '%+0000' THEN COALESCE(TRY_CAST(epoch(strptime(firstCompletedOn, '%Y-%m-%dT%H:%M:%S.%f+0000')) AS BIGINT), 0)
-                -- Try format with Z timezone  
-                WHEN firstCompletedOn LIKE '%Z' THEN COALESCE(TRY_CAST(epoch(strptime(firstCompletedOn, '%Y-%m-%dT%H:%M:%S.%fZ')) AS BIGINT), 0)
-                -- Try generic timezone format
-                ELSE COALESCE(TRY_CAST(epoch(strptime(firstCompletedOn, '%Y-%m-%dT%H:%M:%S.%f%z')) AS BIGINT), 0)
+                WHEN e.first_completed_on IS NULL OR e.first_completed_on = '' OR LENGTH(e.first_completed_on) = 0 THEN 0
+                ELSE COALESCE(TRY_CAST(epoch(strptime(e.first_completed_on, '%Y-%m-%d %H:%M:%S')) AS BIGINT), 0)
             END AS epoch_seconds
-            
-        FROM read_parquet('{ParquetFileConstants.ENROLMENT_CONTENT_USER_COMPUTED_PARQUET_FILE}/**.parquet')  
+
+        FROM read_parquet('{ParquetFileConstants.ENROLMENT_WAREHOUSE_COMPUTED_PARQUET_FILE}/**.parquet') e
+        INNER JOIN read_parquet('{ParquetFileConstants.USER_WAREHOUSE_COMPUTED_PARQUET_FILE}/**.parquet') u
+            ON e.userID = u.user_id
+        INNER JOIN read_parquet('{ParquetFileConstants.CONTENT_WAREHOUSE_COMPUTED_PARQUET_FILE}/**.parquet') c
+            ON e.content_id = c.content_id
+        LEFT JOIN read_parquet('{ParquetFileConstants.ORG_COMPUTED_PARQUET_FILE}/**.parquet') o
+            ON u.mdo_id = o.orgID
     )
     """
 
-    # Overall metrics query - FIXED: All metrics in one query
+    # ==================== QUERIES USING BASE_DATA (NO CHANGES NEEDED - JUST USE UPDATED BASE) ====================
+
     OVERALL_METRICS = BASE_DATA_COMPLETE + f"""
     SELECT 
-        -- Basic enrollment counts (liveRetiredCourseEnrolmentDF equivalent)
         COUNT(*) FILTER (WHERE live_retired_course_eligible = 'live_retired_course') as enrolment_count,
         COUNT(DISTINCT userID) FILTER (WHERE live_retired_course_eligible = 'live_retired_course') as enrolment_unique_user_count,
-        
-        -- Status-based counts from course enrollment
         COUNT(*) FILTER (WHERE live_retired_course_eligible = 'live_retired_course' AND completion_category = 'not_started') as not_started_count,
         COUNT(DISTINCT userID) FILTER (WHERE live_retired_course_eligible = 'live_retired_course' AND completion_category = 'not_started') as not_started_unique_user_count,
-        
         COUNT(*) FILTER (WHERE live_retired_course_eligible = 'live_retired_course' AND completion_category IN ('in_progress', 'completed')) as started_count,
         COUNT(DISTINCT userID) FILTER (WHERE live_retired_course_eligible = 'live_retired_course' AND completion_category IN ('in_progress', 'completed')) as started_unique_user_count,
-        
         COUNT(*) FILTER (WHERE live_retired_course_eligible = 'live_retired_course' AND completion_category = 'in_progress') as in_progress_count,
         COUNT(DISTINCT userID) FILTER (WHERE live_retired_course_eligible = 'live_retired_course' AND completion_category = 'in_progress') as in_progress_unique_user_count,
-        
         COUNT(*) FILTER (WHERE live_retired_course_eligible = 'live_retired_course' AND completion_category = 'completed') as completed_count,
         COUNT(DISTINCT userID) FILTER (WHERE live_retired_course_eligible = 'live_retired_course' AND completion_category = 'completed') as completed_unique_user_count,
-        
-        -- Landing page completed (course program)
         COUNT(*) FILTER (WHERE live_retired_course_program_eligible = 'live_retired_course_program' AND completion_category = 'completed') as landing_page_completed_count,
-        
-        -- Yesterday completions 
         COUNT(*) FILTER (WHERE completed_yesterday_category = 'completed_yesterday') as landing_page_completed_yesterday_count,
-        
-        -- Content enrollment and completion
         COUNT(*) FILTER (WHERE live_retired_enrolment_eligible = 'live_retired_enrolment') as content_enrolment_count,
         COUNT(*) FILTER (WHERE live_retired_enrolment_eligible = 'live_retired_enrolment' AND completion_category = 'completed') as content_completed_count,
-        
-        -- Content completed
         COUNT(*) FILTER (WHERE live_retired_content_eligible = 'live_retired_content' AND completion_category = 'completed') as live_retired_content_completed_count,
-        
-        -- Yesterday content completed count - FIXED: All in one query
         COUNT(*) FILTER (WHERE live_retired_enrolment_eligible = 'live_retired_enrolment'
                                 AND completion_category = 'completed'
                                 AND epoch_seconds > 0
                                 AND epoch_seconds * 1000 >= {twentyFourHoursAgoEpochMillis} 
                                 AND epoch_seconds * 1000 <= {previousDayEndEpochMillis}) as landing_page_content_completed_yesterday_count
-        
     FROM base_data
     """
-    
-    # External content metrics (matches Scala exactly)
+
     EXTERNAL_CONTENT_METRICS = f"""
     SELECT 
         COUNT(*) as external_content_enrolment_count,
         COUNT(*) FILTER (WHERE status = 2) as external_content_completed_count
     FROM read_parquet('{ParquetFileConstants.EXTERNAL_COURSE_ENROLMENTS_PARQUET_FILE}')
     """
-    
-    # Live course program enrollment counts by courseID (exact match)
+
     LIVE_COURSE_PROGRAM_ENROLMENT_COUNTS = BASE_DATA_COMPLETE + """
     SELECT 
         courseID,
         COUNT(*) as enrolmentCount
     FROM base_data 
-    WHERE live_course_program_eligible = 'live_course_program'
+    WHERE live_retired_course_program_eligible = 'live_retired_course_program'
     GROUP BY courseID
     """
-    
-    # MDO-wise comprehensive metrics (all operations in one query)
+
     MDO_WISE_COMPREHENSIVE = BASE_DATA_COMPLETE + f"""
     SELECT 
         userOrgID,
-        
-        -- Course enrollment metrics (liveRetiredCourseEnrolmentByMDODF)
         COUNT(*) FILTER (WHERE live_retired_course_eligible = 'live_retired_course') as course_enrolment_count,
         COUNT(DISTINCT userID) FILTER (WHERE live_retired_course_eligible = 'live_retired_course') as course_enrolment_unique_user_count,
-        
-        -- Content enrollment metrics (liveRetiredContentEnrolmentByMDODF)
         COUNT(*) FILTER (WHERE live_retired_content_eligible = 'live_retired_content') as content_enrolment_count,
         COUNT(DISTINCT userID) FILTER (WHERE live_retired_content_eligible = 'live_retired_content') as content_enrolment_unique_user_count,
-        
-        -- 12 months enrollment (liveRetiredCourseEnrolmentsInLast12MonthsByMDODF)
         COUNT(*) FILTER (WHERE enrolled_last_12_months_category = 'enrolled_last_12_months') as enrolled_last_12_months_count,
         COUNT(DISTINCT userID) FILTER (WHERE enrolled_last_12_months_category = 'enrolled_last_12_months') as active_users_last_12_months,
-        
-        -- Status-based counts
         COUNT(*) FILTER (WHERE live_retired_course_eligible = 'live_retired_course' AND completion_category = 'not_started') as not_started_count,
         COUNT(DISTINCT userID) FILTER (WHERE live_retired_course_eligible = 'live_retired_course' AND completion_category = 'not_started') as not_started_unique_user_count,
-        
         COUNT(*) FILTER (WHERE live_retired_course_eligible = 'live_retired_course' AND completion_category IN ('in_progress', 'completed')) as started_count,
         COUNT(DISTINCT userID) FILTER (WHERE live_retired_course_eligible = 'live_retired_course' AND completion_category IN ('in_progress', 'completed')) as started_unique_user_count,
-        
         COUNT(*) FILTER (WHERE live_retired_course_eligible = 'live_retired_course' AND completion_category = 'in_progress') as in_progress_count,
         COUNT(DISTINCT userID) FILTER (WHERE live_retired_course_eligible = 'live_retired_course' AND completion_category = 'in_progress') as in_progress_unique_user_count,
-        
         COUNT(*) FILTER (WHERE live_retired_course_eligible = 'live_retired_course' AND completion_category = 'completed') as completed_count,
         COUNT(DISTINCT userID) FILTER (WHERE live_retired_course_eligible = 'live_retired_course' AND completion_category = 'completed') as completed_unique_user_count
-        
     FROM base_data
     WHERE userOrgID IS NOT NULL
     GROUP BY userOrgID
     """
-    
-    # CBP-wise comprehensive metrics (all operations in one query)
+
     CBP_WISE_COMPREHENSIVE = BASE_DATA_COMPLETE + """
     SELECT 
         courseOrgID,
-        
-        -- Course enrollment metrics (liveRetiredCourseEnrolmentByCBPDF)
         COUNT(*) FILTER (WHERE live_retired_course_eligible = 'live_retired_course') as course_enrolment_count,
         COUNT(DISTINCT userID) FILTER (WHERE live_retired_course_eligible = 'live_retired_course') as course_enrolment_unique_user_count,
-        
-        -- Content completion (liveRetiredContentCompletedByCBPDF)
         COUNT(*) FILTER (WHERE live_retired_content_eligible = 'live_retired_content' AND completion_category = 'completed') as content_completed_count,
-        
-        -- Course + Moderated course enrollment (liveRetiredCourseModeratedCourseEnrolmentByCBPDF)
         COUNT(*) FILTER (WHERE live_retired_course_moderated_eligible = 'live_retired_course_moderated') as course_moderated_course_enrolment_count,
         COUNT(DISTINCT userID) FILTER (WHERE live_retired_course_moderated_eligible = 'live_retired_course_moderated') as course_moderated_course_enrolment_unique_user_count,
-        
-        -- Content enrollment (liveRetiredContentEnrolmentByCBPDF)
         COUNT(*) FILTER (WHERE live_retired_content_eligible = 'live_retired_content') as content_enrolment_count,
         COUNT(DISTINCT userID) FILTER (WHERE live_retired_content_eligible = 'live_retired_content') as content_enrolment_unique_user_count,
-        
-        -- Status-based counts
         COUNT(*) FILTER (WHERE live_retired_course_eligible = 'live_retired_course' AND completion_category = 'not_started') as not_started_count,
         COUNT(DISTINCT userID) FILTER (WHERE live_retired_course_eligible = 'live_retired_course' AND completion_category = 'not_started') as not_started_unique_user_count,
-        
         COUNT(*) FILTER (WHERE live_retired_course_eligible = 'live_retired_course' AND completion_category IN ('in_progress', 'completed')) as started_count,
         COUNT(DISTINCT userID) FILTER (WHERE live_retired_course_eligible = 'live_retired_course' AND completion_category IN ('in_progress', 'completed')) as started_unique_user_count,
-        
         COUNT(*) FILTER (WHERE live_retired_course_eligible = 'live_retired_course' AND completion_category = 'in_progress') as in_progress_count,
         COUNT(DISTINCT userID) FILTER (WHERE live_retired_course_eligible = 'live_retired_course' AND completion_category = 'in_progress') as in_progress_unique_user_count,
-        
         COUNT(*) FILTER (WHERE live_retired_course_eligible = 'live_retired_course' AND completion_category = 'completed') as completed_count,
         COUNT(DISTINCT userID) FILTER (WHERE live_retired_course_eligible = 'live_retired_course' AND completion_category = 'completed') as completed_unique_user_count,
-        
-        -- Certificate generation metrics (certificateGeneratedByCBPDF)
         COUNT(*) FILTER (WHERE live_retired_content_eligible = 'live_retired_content' AND certificate_category = 'certificate_generated') as certificates_generated_count,
         COUNT(DISTINCT userID) FILTER (WHERE live_retired_content_eligible = 'live_retired_content' AND certificate_category = 'certificate_generated') as certificates_generated_unique_user_count,
-        
-        -- Course + Moderated course certificates (courseModeratedCourseCertificateGeneratedByCBPDF)
         COUNT(*) FILTER (WHERE live_retired_course_moderated_eligible = 'live_retired_course_moderated' AND certificate_category = 'certificate_generated') as course_moderated_course_certificates_generated_count,
         COUNT(DISTINCT userID) FILTER (WHERE live_retired_course_moderated_eligible = 'live_retired_course_moderated' AND certificate_category = 'certificate_generated') as course_moderated_course_certificates_generated_unique_user_count
-        
     FROM base_data
     WHERE courseOrgID IS NOT NULL
     GROUP BY courseOrgID
     """
-    
-    # Top courses by organization (competencies) - exact match to Scala logic
+
     TOP_COURSES_BY_ORG = BASE_DATA_COMPLETE + """,
     course_counts AS (
         SELECT 
@@ -512,212 +445,334 @@ class QueryConstants:
     GROUP BY courseOrgID
     """
 
-    # ==================== National Learning Week Base Dates ====================
-   
-    
-    # ==================== NLW Enrollment Metrics ====================
-    
-    # Event enrollments during NLW
-    NLW_EVENT_ENROLLMENTS = f"""
-    SELECT COUNT(event_id) as event_count
-    FROM read_parquet('{ParquetFileConstants.EVENT_ENROLMENT_PARQUET_FILE}') 
-    WHERE enrolled_on_datetime >= {NLW_START_DATE} 
-      AND enrolled_on_datetime <= {NLW_END_DATE}
-    """
-    
-    # Content enrollments during NLW (using epoch timestamps)
-    NLW_CONTENT_ENROLLMENTS = f"""
-    SELECT COUNT(*) as content_count
-    FROM read_parquet('{ParquetFileConstants.ENROLMENT_CONTENT_USER_COMPUTED_PARQUET_FILE}/**.parquet') 
-    WHERE courseStatus IN ('Live', 'Retired')
-    AND userStatus=1 AND COALESCE(
-                TRY_CAST(courseEnrolledTimestamp AS BIGINT),
-                CAST(epoch(courseEnrolledTimestamp) AS BIGINT)
-            ) >= {nlw_start_epoch}
-      AND COALESCE(
-                TRY_CAST(courseEnrolledTimestamp AS BIGINT),
-                CAST(epoch(courseEnrolledTimestamp) AS BIGINT)
-            ) <= {nlw_end_epoch}
-    """
-    
-    # Total NLW enrollments (combine both)
-    TOTAL_NLW_ENROLLMENTS = f"""
-    WITH event_enroll AS (
-        SELECT COUNT(event_id) as count
-        FROM read_parquet('{ParquetFileConstants.EVENT_ENROLMENT_PARQUET_FILE}') 
-        WHERE enrolled_on_datetime >= {NLW_START_DATE} 
-          AND enrolled_on_datetime <= {NLW_END_DATE}
-    ),
-    content_enroll AS (
-        SELECT COUNT(*) as count
-        FROM read_parquet('{ParquetFileConstants.ENROLMENT_CONTENT_USER_COMPUTED_PARQUET_FILE}/**.parquet') 
-        WHERE courseStatus IN ('Live', 'Retired')
-        AND userStatus=1 AND courseEnrolledTimestamp >= epoch({NLW_START_DATE}::TIMESTAMPTZ AT TIME ZONE 'Asia/Kolkata')
-          AND courseEnrolledTimestamp <= epoch({NLW_END_DATE}::TIMESTAMPTZ AT TIME ZONE 'Asia/Kolkata')
-    )
-    SELECT (e.count + c.count) as total_enrollment_nlw_count
-    FROM event_enroll e, content_enroll c
-    """
-    
+    # ==================== NEW QUERIES WITH WAREHOUSE JOINS ====================
 
-    
-    # ==================== Certificate Generation - Yesterday ====================
-    
-    # Content certificates generated yesterday
-    CONTENT_CERTIFICATES_YESTERDAY = f"""
-    WITH yesterday_range AS (
+    TOP_10_COURSES_PROGRAMS_ASSESSMENTS_COMBINED = BASE_DATA_COMPLETE + f""",
+    live_retired_completed AS (
         SELECT 
-            (CURRENT_DATE - INTERVAL '1 day')::DATE + TIME '00:00:00' AT TIME ZONE 'Asia/Kolkata' as start_time,
-            (CURRENT_DATE - INTERVAL '1 day')::DATE + TIME '23:59:59' AT TIME ZONE 'Asia/Kolkata' as end_time
-    )
-    SELECT COUNT(*) as certificate_count
-    FROM read_parquet('{ParquetFileConstants.ENROLMENT_CONTENT_USER_COMPUTED_PARQUET_FILE}/**.parquet') l, yesterday_range y
-    WHERE l.courseStatus IN ('Live', 'Retired')
-        AND l.userStatus=1 AND l.certificateGeneratedOn >= strftime(y.start_time, '%Y-%m-%dT%H:%M:%S%z')
-      AND l.certificateGeneratedOn <= strftime(y.end_time, '%Y-%m-%dT%H:%M:%S%z')
-    """
-    
-    # Event certificates generated yesterday
-    EVENT_CERTIFICATES_YESTERDAY = f"""
-    WITH yesterday_range AS (
-        SELECT 
-            (CURRENT_DATE - INTERVAL '1 day')::DATE + TIME '00:00:00' as start_time,
-            (CURRENT_DATE - INTERVAL '1 day')::DATE + TIME '23:59:59' as end_time
-    )
-    SELECT COUNT(DISTINCT certificate_id) as event_certificate_count
-    FROM read_parquet('{ParquetFileConstants.EVENT_ENROLMENT_PARQUET_FILE}') e, yesterday_range y
-    WHERE e.status = 'completed'
-      AND e.certificate_id IS NOT NULL
-      AND e.enrolled_on_datetime >= strftime(y.start_time, '%Y-%m-%d %H:%M:%S')
-      AND e.enrolled_on_datetime <= strftime(y.end_time, '%Y-%m-%d %H:%M:%S')
-    """
-    
-    # Total certificates generated yesterday
-    TOTAL_CERTIFICATES_YESTERDAY = f"""
-    WITH yesterday_range AS (
-        SELECT 
-            (CURRENT_DATE - INTERVAL '1 day')::DATE + TIME '00:00:00' AT TIME ZONE 'Asia/Kolkata' as start_time,
-            (CURRENT_DATE - INTERVAL '1 day')::DATE + TIME '23:59:59' AT TIME ZONE 'Asia/Kolkata' as end_time
+            courseOrgID,
+            courseID,
+            category,
+            userID
+        FROM base_data
+        WHERE live_retired_course_program_excluding_moderated_eligible = 'live_retired_course_program_excluding_moderated'
+        AND completion_category = 'completed'
     ),
-    content_certs AS (
-        SELECT COUNT(*) as count
-        FROM read_parquet('{ParquetFileConstants.ENROLMENT_CONTENT_USER_COMPUTED_PARQUET_FILE}/**.parquet') l, yesterday_range y
-        WHERE l.courseStatus IN ('Live', 'Retired')
-        AND l.userStatus=1 AND l.certificateGeneratedOn >= strftime(y.start_time, '%Y-%m-%dT%H:%M:%S%z')
-          AND l.certificateGeneratedOn <= strftime(y.end_time, '%Y-%m-%dT%H:%M:%S%z')
+    course_stats AS (
+        SELECT 
+            courseOrgID,
+            courseID,
+            COUNT(DISTINCT userID) as user_enrolment_count,
+            'courses' as content_type
+        FROM live_retired_completed
+        WHERE category = 'Course'
+        GROUP BY courseOrgID, courseID
     ),
-    event_certs AS (
-        SELECT COUNT(DISTINCT certificate_id) as count
-        FROM read_parquet('{ParquetFileConstants.EVENT_ENROLMENT_PARQUET_FILE}') e, yesterday_range y
-        WHERE e.status = 'completed'
-          AND e.certificate_id IS NOT NULL
-          AND e.enrolled_on_datetime >= strftime(y.start_time, '%Y-%m-%d %H:%M:%S')
-          AND e.enrolled_on_datetime <= strftime(y.end_time, '%Y-%m-%d %H:%M:%S')
+    program_stats AS (
+        SELECT 
+            courseOrgID,
+            courseID,
+            COUNT(DISTINCT userID) as user_enrolment_count,
+            'programs' as content_type
+        FROM live_retired_completed
+        WHERE category = 'Program'
+        GROUP BY courseOrgID, courseID
+    ),
+    assessment_stats AS (
+        SELECT 
+            courseOrgID,
+            courseID,
+            COUNT(DISTINCT userID) as user_enrolment_count,
+            'assessments' as content_type
+        FROM live_retired_completed
+        WHERE category = 'Standalone Assessment'
+        GROUP BY courseOrgID, courseID
+    ),
+    all_content AS (
+        SELECT * FROM course_stats
+        UNION ALL
+        SELECT * FROM program_stats
+        UNION ALL
+        SELECT * FROM assessment_stats
     )
-    SELECT (c.count + e.count) as total_certificates_yesterday
-    FROM content_certs c, event_certs e
-    """
-    
-    # ==================== Certificate Generation - NLW ====================
-    
-    # Content certificates generated during NLW
-    CONTENT_CERTIFICATES_NLW = f"""
-    SELECT COUNT(*) as certificate_count,
-           COUNT(DISTINCT userID) as unique_user_count
-    FROM read_parquet('{ParquetFileConstants.ENROLMENT_CONTENT_USER_COMPUTED_PARQUET_FILE}/**.parquet') 
-    WHERE l.courseStatus IN ('Live', 'Retired')
-        AND l.userStatus=1 AND certificateGeneratedOn >= strftime({NLW_START_DATE}::TIMESTAMPTZ AT TIME ZONE 'Asia/Kolkata', '%Y-%m-%dT%H:%M:%S%z')
-      AND certificateGeneratedOn <= strftime({NLW_END_DATE}::TIMESTAMPTZ AT TIME ZONE 'Asia/Kolkata', '%Y-%m-%dT%H:%M:%S%z')
+    SELECT 
+        courseOrgID || ':' || content_type as courseOrgID_content,
+        STRING_AGG(courseID, ',' ORDER BY user_enrolment_count DESC) as sorted_courseIDs
+    FROM all_content
+    GROUP BY courseOrgID, content_type
     """
 
-    
-    # Total certificates generated during NLW
-    TOTAL_CERTIFICATES_NLW = f"""
-    WITH content_certs AS (
-        SELECT COUNT(*) as count
-        FROM read_parquet('{ParquetFileConstants.ENROLMENT_CONTENT_USER_COMPUTED_PARQUET_FILE}/**.parquet') 
-        WHERE l.courseStatus IN ('Live', 'Retired')
-        AND l.userStatus=1 AND certificateGeneratedOn >= strftime({NLW_START_DATE}::TIMESTAMPTZ AT TIME ZONE 'Asia/Kolkata', '%Y-%m-%dT%H:%M:%S%z')
-          AND certificateGeneratedOn <= strftime({NLW_END_DATE}::TIMESTAMPTZ AT TIME ZONE 'Asia/Kolkata', '%Y-%m-%dT%H:%M:%S%z')
+    CERTIFICATES_GENERATED_BY_USER_ORG = BASE_DATA_COMPLETE + """
+    SELECT 
+        userOrgID,
+        COUNT(*) as count,
+        COUNT(DISTINCT userID) as uniqueUserCount
+    FROM base_data
+    WHERE live_retired_content_eligible = 'live_retired_content'
+    AND certificate_category = 'certificate_generated'
+    GROUP BY userOrgID
+    """
+
+    # ===== TRENDING QUERIES WITH DIRECT JOINS =====
+    TRENDING_COURSES_BY_ORG = f"""
+    WITH course_enrollments AS (
+        SELECT 
+            u.mdo_id as userOrgID,
+            e.content_id as courseID,
+            COUNT(*) as enrollment_count
+        FROM read_parquet('{ParquetFileConstants.ENROLMENT_WAREHOUSE_COMPUTED_PARQUET_FILE}/**.parquet') e
+        INNER JOIN read_parquet('{ParquetFileConstants.USER_WAREHOUSE_COMPUTED_PARQUET_FILE}/**.parquet') u
+            ON e.userID = u.user_id
+        INNER JOIN read_parquet('{ParquetFileConstants.CONTENT_WAREHOUSE_COMPUTED_PARQUET_FILE}/**.parquet') c
+            ON e.content_id = c.content_id
+        WHERE e.user_consumption_status IN ('not-started', 'in progress', 'completed')
+        AND c.content_status = 'Live'
+        AND c.content_type = 'Course'
+        GROUP BY u.mdo_id, e.content_id
     ),
-    event_certs AS (
-        SELECT COUNT(DISTINCT certificate_id) as count
-        FROM read_parquet('{ParquetFileConstants.EVENT_ENROLMENT_PARQUET_FILE}') 
-        WHERE status = 'completed'
-          AND certificate_id IS NOT NULL
-          AND enrolled_on_datetime >= {NLW_START_DATE}
+    ranked_courses AS (
+        SELECT 
+            userOrgID,
+            courseID,
+            enrollment_count,
+            ROW_NUMBER() OVER (PARTITION BY userOrgID ORDER BY enrollment_count DESC) as rank
+        FROM course_enrollments
     )
-    SELECT (c.count + e.count) as total_certificates_nlw
-    FROM content_certs c, event_certs e
-    """
-    
-    # ==================== Events Published ====================
-    
-    # Total events published (distinct count)
-    TOTAL_EVENTS_PUBLISHED = f"""
-    SELECT COUNT(DISTINCT event_id) as events_published_count
-    FROM read_parquet('{ParquetFileConstants.EVENT_PARQUET_FILE}')
-    """
-    
-    # ==================== Learning Hours - NLW ====================
-    
-    # Event learning hours by user during NLW
-    NLW_EVENT_LEARNING_HOURS_BY_USER = f"""
     SELECT 
-        user_id,
-        ROUND(SUM(CASE WHEN duration >= 180 THEN event_duration_seconds ELSE 0 END) / 3600.0, 2) as totalLearningHours
-    FROM read_parquet('{ParquetFileConstants.EVENT_ENROLMENT_PARQUET_FILE}') 
-    WHERE duration IS NOT NULL
-      AND enrolled_on_datetime >= {NLW_START_DATE}
-      AND enrolled_on_datetime <= {NLW_END_DATE}
-    GROUP BY user_id
+        userOrgID || ':courses' as userOrgID_courses,
+        STRING_AGG(courseID, ',' ORDER BY rank) as trendingCourseList
+    FROM ranked_courses
+    WHERE rank <= 50
+    AND userOrgID IS NOT NULL
+    AND userOrgID != ''
+    GROUP BY userOrgID
     """
-    
-    # Content learning hours by user during NLW
-    NLW_CONTENT_LEARNING_HOURS_BY_USER = f"""
+
+    TRENDING_PROGRAMS_BY_ORG = f"""
+    WITH program_enrollments AS (
+        SELECT 
+            u.mdo_id as userOrgID,
+            e.content_id as courseID,
+            COUNT(*) as enrollment_count
+        FROM read_parquet('{ParquetFileConstants.ENROLMENT_WAREHOUSE_COMPUTED_PARQUET_FILE}/**.parquet') e
+        INNER JOIN read_parquet('{ParquetFileConstants.USER_WAREHOUSE_COMPUTED_PARQUET_FILE}/**.parquet') u
+            ON e.userID = u.user_id
+        INNER JOIN read_parquet('{ParquetFileConstants.CONTENT_WAREHOUSE_COMPUTED_PARQUET_FILE}/**.parquet') c
+            ON e.content_id = c.content_id
+        WHERE e.user_consumption_status IN ('not-started', 'in progress', 'completed')
+        AND c.content_status = 'Live'
+        AND c.content_type IN ('Blended Program', 'Curated Program')
+        GROUP BY u.mdo_id, e.content_id
+    ),
+    ranked_programs AS (
+        SELECT 
+            userOrgID,
+            courseID,
+            enrollment_count,
+            ROW_NUMBER() OVER (PARTITION BY userOrgID ORDER BY enrollment_count DESC) as rank
+        FROM program_enrollments
+    )
     SELECT 
-        userID,
-        ROUND(SUM(courseDuration) / 3600.0, 2) as totalLearningHours
-    FROM cbpCompletionWithDetails 
-    WHERE courseCompletedTimestamp >= epoch({NLW_START_DATE}::TIMESTAMPTZ AT TIME ZONE 'Asia/Kolkata')
-      AND courseCompletedTimestamp <= epoch({NLW_END_DATE}::TIMESTAMPTZ AT TIME ZONE 'Asia/Kolkata')
-      AND userID != ''
-      AND dbCompletionStatus = 2
-      AND certificateID IS NOT NULL
-    GROUP BY userID
+        userOrgID || ':programs' as userOrgID_programs,
+        STRING_AGG(courseID, ',' ORDER BY rank) as trendingProgramList
+    FROM ranked_programs
+    WHERE rank <= 50
+    AND userOrgID IS NOT NULL
+    AND userOrgID != ''
+    GROUP BY userOrgID
     """
-    
-    # ==================== NLW Certificates by User ====================
-    
-    # Content certificates by user during NLW
-    NLW_CONTENT_CERTIFICATES_BY_USER = f"""
+
+    MOST_ENROLLED_TAG = f"""
+    WITH course_enrollments AS (
+        SELECT 
+            e.content_id as courseID,
+            COUNT(*) as enrollment_count
+        FROM read_parquet('{ParquetFileConstants.ENROLMENT_WAREHOUSE_COMPUTED_PARQUET_FILE}/**.parquet') e
+        INNER JOIN read_parquet('{ParquetFileConstants.CONTENT_WAREHOUSE_COMPUTED_PARQUET_FILE}/**.parquet') c
+            ON e.content_id = c.content_id
+        WHERE e.user_consumption_status IN ('not-started', 'in progress', 'completed')
+        AND c.content_status = 'Live'
+        AND c.content_type = 'Course'
+        GROUP BY e.content_id
+        ORDER BY enrollment_count DESC
+    ),
+    total_and_limit AS (
+        SELECT CEIL(COUNT(*) * 0.1) as limit_count
+        FROM course_enrollments
+    )
+    SELECT STRING_AGG(courseID, ',') as most_enrolled_tag
+    FROM (
+        SELECT courseID, enrollment_count
+        FROM course_enrollments
+        LIMIT (SELECT limit_count FROM total_and_limit)
+    )
+    """
+
+    # ===== CERTIFICATION QUERIES WITH JOINS =====
+    CERTIFICATIONS_TILL_TODAY = f"""
+    SELECT COUNT(*) as total_certifications
+    FROM read_parquet('{ParquetFileConstants.ENROLMENT_WAREHOUSE_COMPUTED_PARQUET_FILE}/**.parquet') e
+    INNER JOIN read_parquet('{ParquetFileConstants.USER_WAREHOUSE_COMPUTED_PARQUET_FILE}/**.parquet') u
+        ON e.userID = u.user_id
+    INNER JOIN read_parquet('{ParquetFileConstants.CONTENT_WAREHOUSE_COMPUTED_PARQUET_FILE}/**.parquet') c
+        ON e.content_id = c.content_id
+    WHERE c.content_status = 'Live'
+    AND u.status = 1
+    AND e.user_consumption_status = 'completed'
+    AND e.certificateID IS NOT NULL
+    AND e.certificateID != ''
+    """
+
+    CERTIFICATIONS_OF_THE_WEEK = f"""
     SELECT 
-        userID,
-        COUNT(*) as certificate_count
-    FROM read_parquet('{ParquetFileConstants.ENROLMENT_CONTENT_USER_COMPUTED_PARQUET_FILE}/**.parquet') 
-    WHERE l.courseStatus IN ('Live', 'Retired')
-        AND l.userStatus=1 AND certificateGeneratedOn >= strftime({NLW_START_DATE}::TIMESTAMPTZ AT TIME ZONE 'Asia/Kolkata', '%Y-%m-%dT%H:%M:%S%z')
-      AND certificateGeneratedOn <= strftime({NLW_END_DATE}::TIMESTAMPTZ AT TIME ZONE 'Asia/Kolkata', '%Y-%m-%dT%H:%M:%S%z')
-    GROUP BY userID
+        e.content_id as courseID,
+        u.mdo_id as userOrgID,
+        COUNT(*) as courseCount
+    FROM read_parquet('{ParquetFileConstants.ENROLMENT_WAREHOUSE_COMPUTED_PARQUET_FILE}/**.parquet') e
+    INNER JOIN read_parquet('{ParquetFileConstants.USER_WAREHOUSE_COMPUTED_PARQUET_FILE}/**.parquet') u
+        ON e.userID = u.user_id
+    INNER JOIN read_parquet('{ParquetFileConstants.CONTENT_WAREHOUSE_COMPUTED_PARQUET_FILE}/**.parquet') c
+        ON e.content_id = c.content_id
+    WHERE c.content_status = 'Live'
+    AND u.status = 1
+    AND e.first_completed_on IS NOT NULL
+    AND e.first_completed_on != ''
+    AND epoch(strptime(e.first_completed_on, '%Y-%m-%d %H:%M:%S')) > {startOf7thDay}
+    AND epoch(strptime(e.first_completed_on, '%Y-%m-%d %H:%M:%S')) < {endOfCurrentDay}
+    AND e.user_consumption_status = 'completed'
+    AND e.certificateID IS NOT NULL
+    AND e.certificateID != ''
+    GROUP BY e.content_id, u.mdo_id
     """
-    
-    # Event certificates by user during NLW
-    NLW_EVENT_CERTIFICATES_BY_USER = f"""
+
+    TOP_10_CERTIFICATIONS = f"""
+    WITH certifications_of_week AS (
+        SELECT courseID, COUNT(*) as courseCount
+        FROM ({CERTIFICATIONS_OF_THE_WEEK})
+        GROUP BY courseID
+    )
     SELECT 
-        user_id,
-        COUNT(*) as certificate_count
-    FROM read_parquet('{ParquetFileConstants.EVENT_ENROLMENT_PARQUET_FILE}') 
-    WHERE status = 'completed'
-      AND certificate_id IS NOT NULL
-      AND enrolled_on_datetime >= {NLW_START_DATE}
-    GROUP BY user_id
+        STRING_AGG(courseID, ',' ORDER BY courseCount DESC) as course_ids
+    FROM (
+        SELECT courseID, courseCount
+        FROM certifications_of_week
+        ORDER BY courseCount DESC
+        LIMIT 10
+    )
     """
-    
-    # ==================== Top Content by Completion ====================
-    
-    # Top 5 content by completion by course org
-    TOP_5_CONTENT_BY_COMPLETION_BY_ORG = f"""
-    WITH ranked_content AS (
+
+    TOP_CERTIFICATIONS_BY_MDO = f"""
+    WITH certs_by_mdo AS (
+        SELECT 
+            userOrgID,
+            courseID,
+            courseCount,
+            ROW_NUMBER() OVER (PARTITION BY userOrgID ORDER BY courseCount DESC) as rank
+        FROM ({CERTIFICATIONS_OF_THE_WEEK})
+    )
+    SELECT 
+        userOrgID || ':certifications' as userOrgID_certifications,
+        STRING_AGG(courseID, ',' ORDER BY rank) as certifications
+    FROM certs_by_mdo
+    WHERE rank <= 10
+    GROUP BY userOrgID
+    LIMIT 10
+    """
+
+    # ===== TOP 5 QUERIES WITH JOINS =====
+    TOP_5_USERS_BY_COMPLETION_BY_MDO = f"""
+    WITH user_completion_stats AS (
+        SELECT 
+            e.userID,
+            u.full_name as fullName,
+            u.email as maskedEmail,
+            u.mdo_id as userOrgID,
+            o.orgName as userOrgName,
+            COUNT(e.content_id) as completed_count
+        FROM read_parquet('{ParquetFileConstants.ENROLMENT_WAREHOUSE_COMPUTED_PARQUET_FILE}/**.parquet') e
+        INNER JOIN read_parquet('{ParquetFileConstants.USER_WAREHOUSE_COMPUTED_PARQUET_FILE}/**.parquet') u
+            ON e.userID = u.user_id
+        INNER JOIN read_parquet('{ParquetFileConstants.CONTENT_WAREHOUSE_COMPUTED_PARQUET_FILE}/**.parquet') c
+            ON e.content_id = c.content_id
+        LEFT JOIN read_parquet('{ParquetFileConstants.ORG_COMPUTED_PARQUET_FILE}/**.parquet') o
+            ON u.mdo_id = o.orgID
+        WHERE c.content_type = 'Course'
+        AND c.content_status IN ('Live', 'Retired')
+        AND e.user_consumption_status = 'completed'
+        AND u.status = 1
+        GROUP BY e.userID, u.full_name, u.email, u.mdo_id, o.orgName
+    ),
+    ranked_users AS (
+        SELECT 
+            *,
+            ROW_NUMBER() OVER (PARTITION BY userOrgID ORDER BY completed_count DESC) as rank
+        FROM user_completion_stats
+    )
+    SELECT 
+        userOrgID,
+        JSON_GROUP_ARRAY(
+            JSON_OBJECT(
+                'rank', rank,
+                'userID', userID,
+                'fullName', fullName,
+                'maskedEmail', maskedEmail,
+                'completed_count', completed_count
+            )
+        ) as jsonData
+    FROM ranked_users
+    WHERE rank <= 5
+    GROUP BY userOrgID
+    """
+
+    TOP_5_COURSES_BY_COMPLETION_BY_MDO = f"""
+    WITH course_completion_stats AS (
+        SELECT 
+            e.content_id as courseID,
+            c.content_name as courseName,
+            u.mdo_id as userOrgID,
+            o.orgName as userOrgName,
+            COUNT(e.userID) as enrolled_count,
+            SUM(CASE WHEN e.user_consumption_status = 'not-started' THEN 1 ELSE 0 END) as not_started_count,
+            SUM(CASE WHEN e.user_consumption_status = 'in progress' THEN 1 ELSE 0 END) as in_progress_count,
+            SUM(CASE WHEN e.user_consumption_status = 'completed' THEN 1 ELSE 0 END) as completed_count
+        FROM read_parquet('{ParquetFileConstants.ENROLMENT_WAREHOUSE_COMPUTED_PARQUET_FILE}/**.parquet') e
+        INNER JOIN read_parquet('{ParquetFileConstants.USER_WAREHOUSE_COMPUTED_PARQUET_FILE}/**.parquet') u
+            ON e.userID = u.user_id
+        INNER JOIN read_parquet('{ParquetFileConstants.CONTENT_WAREHOUSE_COMPUTED_PARQUET_FILE}/**.parquet') c
+            ON e.content_id = c.content_id
+        LEFT JOIN read_parquet('{ParquetFileConstants.ORG_COMPUTED_PARQUET_FILE}/**.parquet') o
+            ON u.mdo_id = o.orgID
+        WHERE c.content_type = 'Course'
+        AND c.content_status IN ('Live', 'Retired')
+        AND u.status = 1
+        GROUP BY e.content_id, c.content_name, u.mdo_id, o.orgName
+    ),
+    ranked_courses AS (
+        SELECT 
+            *,
+            ROW_NUMBER() OVER (PARTITION BY userOrgID ORDER BY completed_count DESC) as rank
+        FROM course_completion_stats
+    )
+    SELECT 
+        userOrgID,
+        JSON_GROUP_ARRAY(
+            JSON_OBJECT(
+                'rank', rank,
+                'courseID', courseID,
+                'courseName', courseName,
+                'enrolled_count', enrolled_count,
+                'not_started_count', not_started_count,
+                'in_progress_count', in_progress_count,
+                'completed_count', completed_count
+            )
+        ) as jsonData
+    FROM ranked_courses
+    WHERE rank <= 5
+    GROUP BY userOrgID
+    """
+
+    TOP_5_CONTENT_BY_COMPLETION_BY_ORG = BASE_DATA_COMPLETE + f""",
+    ranked_content AS (
         SELECT 
             courseID,
             courseName,
@@ -725,9 +780,9 @@ class QueryConstants:
             COUNT(userID) as enrolledCount,
             SUM(CASE WHEN dbCompletionStatus = 2 THEN 1 ELSE 0 END) as completedCount,
             ROW_NUMBER() OVER (PARTITION BY courseOrgID ORDER BY SUM(CASE WHEN dbCompletionStatus = 2 THEN 1 ELSE 0 END) DESC) as rowNum
-        FROM read_parquet('{ParquetFileConstants.ENROLMENT_CONTENT_USER_COMPUTED_PARQUET_FILE}')
+        FROM base_data
         WHERE courseStatus IN ('Live', 'Retired')
-        AND userStatus=1
+        AND userStatus = 1
         GROUP BY courseID, courseName, courseOrgID
     )
     SELECT 
@@ -745,106 +800,300 @@ class QueryConstants:
     WHERE rowNum <= 5
     GROUP BY courseOrgID
     """
-    
-    # ==================== Competency Coverage ====================
-    
-    # Competency coverage by org
-    COMPETENCY_COVERAGE_BY_ORG = """
-    WITH content_competencies AS (
+
+    TOP_5_CONTENT_BY_ENROLLMENTS_BY_CBP = BASE_DATA_COMPLETE + f""",
+    content_enrollment_stats AS (
         SELECT 
             courseID,
+            courseName,
             courseOrgID,
-            competency_area_id,
-            competency_theme_id,
-            competency_sub_theme_id
-        FROM competencyContentMapping
-        WHERE competency_area_id IS NOT NULL
+            COUNT(userID) as enrollment_count
+        FROM base_data
+        WHERE courseStatus IN ('Live', 'Retired')
+        AND userStatus = 1
+        GROUP BY courseID, courseName, courseOrgID
     ),
-    area_counts AS (
+    ranked_content AS (
         SELECT 
-            courseOrgID,
-            competency_area_id,
-            COUNT(DISTINCT competency_theme_id) as area_count
-        FROM content_competencies
-        GROUP BY courseOrgID, competency_area_id
-    ),
-    total_counts AS (
-        SELECT 
-            courseOrgID,
-            COALESCE(COUNT(DISTINCT competency_theme_id), 0) as total_count
-        FROM content_competencies
-        GROUP BY courseOrgID
-    ),
-    mapped_areas AS (
-        SELECT 
-            courseOrgID,
-            area_count,
-            CASE 
-                WHEN competency_area_id = 'COMAREA-000003' THEN 'Functional'
-                WHEN competency_area_id = 'COMAREA-000001' THEN 'Behavioural'
-                WHEN competency_area_id = 'COMAREA-000002' THEN 'Domain'
-                ELSE competency_area_id
-            END as mapped_area_id
-        FROM area_counts
+            *,
+            ROW_NUMBER() OVER (PARTITION BY courseOrgID ORDER BY enrollment_count DESC) as rank
+        FROM content_enrollment_stats
     )
     SELECT 
-        m.courseOrgID,
-        JSON_OBJECT(
-            'total', t.total_count,
-            'area_count_map', JSON_GROUP_OBJECT(m.mapped_area_id, m.area_count)
+        courseOrgID,
+        JSON_GROUP_ARRAY(
+            JSON_OBJECT(
+                'rank', rank,
+                'courseID', courseID,
+                'courseName', courseName,
+                'enrollment_count', enrollment_count
+            )
         ) as jsonData
-    FROM mapped_areas m
-    JOIN total_counts t ON m.courseOrgID = t.courseOrgID
-    GROUP BY m.courseOrgID, t.total_count
+    FROM ranked_content
+    WHERE rank <= 5
+    GROUP BY courseOrgID
     """
-    
-    # ==================== Course Statistics ====================
-    
-    # Courses enrolled in at least once (live courses only)
-    COURSES_ENROLLED_AT_LEAST_ONCE = """
+
+    TOP_5_COURSES_BY_RATING = f"""
+    WITH course_ratings AS (
+        SELECT 
+            c.content_id as courseID,
+            c.content_name as courseName,
+            c.content_provider_name as courseOrgName,
+            TRY_CAST(c.content_rating AS DOUBLE) as rating_average,
+            COUNT(r.userID) as rating_count
+        FROM read_parquet('{ParquetFileConstants.CONTENT_WAREHOUSE_COMPUTED_PARQUET_FILE}/**.parquet') c
+        LEFT JOIN read_parquet('{ParquetFileConstants.RATING_COMPUTED_PARQUET_FILE}/**.parquet') r
+            ON c.content_id = r.courseID
+        WHERE c.content_type = 'Course'
+        AND c.content_status = 'Live'
+        AND c.content_rating IS NOT NULL
+        AND c.content_rating != ''
+        AND TRY_CAST(c.content_rating AS DOUBLE) > 0
+        AND TRY_CAST(c.content_rating AS DOUBLE) <= 5.0
+        GROUP BY c.content_id, c.content_name, c.content_provider_name, c.content_rating
+        HAVING COUNT(r.userID) > 0
+    ),
+    ranked_courses AS (
+        SELECT 
+            courseID,
+            courseName,
+            courseOrgName,
+            ROUND(rating_average, 1) as rating_average,
+            rating_count,
+            (rating_count * rating_average) as rating_metric
+        FROM course_ratings
+        ORDER BY rating_metric DESC
+        LIMIT 5
+    )
     SELECT 
-        COUNT(DISTINCT courseID) as courses_enrolled_count,
-        STRING_AGG(DISTINCT courseID, ',') as course_id_list
-    FROM liveRetiredCourseEnrolment 
-    WHERE courseStatus = 'Live'
-      AND courseID != ''
+        JSON_GROUP_ARRAY(
+            JSON_OBJECT(
+                'courseID', courseID,
+                'courseName', courseName,
+                'courseOrgName', courseOrgName,
+                'rating_average', rating_average,
+                'rating_count', rating_count
+            )
+        ) as jsonData
+    FROM ranked_courses
     """
-    
-    # Courses completed at least once (live courses only)
-    COURSES_COMPLETED_AT_LEAST_ONCE = """
+
+    # ===== TOP 5 CONTENT BY RATING BY ORG =====
+    TOP_5_CONTENT_BY_RATING_BY_ORG = f"""
+    WITH content_ratings AS (
+        SELECT 
+            c.content_provider_id as courseOrgID,
+            c.content_id as courseID,
+            c.content_name as courseName,
+            TRY_CAST(c.content_rating AS DOUBLE) as rating_average,
+            COUNT(r.userID) as rating_count
+        FROM read_parquet('{ParquetFileConstants.CONTENT_WAREHOUSE_COMPUTED_PARQUET_FILE}/**.parquet') c
+        LEFT JOIN read_parquet('{ParquetFileConstants.RATING_COMPUTED_PARQUET_FILE}/**.parquet') r
+            ON c.content_id = r.courseID
+        WHERE c.content_status = 'Live'
+        AND c.content_rating IS NOT NULL
+        AND c.content_rating != ''
+        AND TRY_CAST(c.content_rating AS DOUBLE) > 0
+        AND TRY_CAST(c.content_rating AS DOUBLE) <= 5.0
+        GROUP BY c.content_provider_id, c.content_id, c.content_name, c.content_rating
+        HAVING COUNT(r.userID) > 0
+    ),
+    ranked_content AS (
+        SELECT 
+            courseOrgID,
+            courseID,
+            courseName,
+            ROUND(rating_average, 1) as averageRating,
+            rating_count as totalRatings,
+            ROW_NUMBER() OVER (PARTITION BY courseOrgID ORDER BY rating_average DESC, rating_count DESC) as rank
+        FROM content_ratings
+    )
     SELECT 
-        COUNT(DISTINCT courseID) as courses_completed_count,
-        STRING_AGG(DISTINCT courseID, ',') as course_id_list
-    FROM liveRetiredCourseCompleted 
-    WHERE courseStatus = 'Live'
-      AND courseID != ''
+        courseOrgID,
+        JSON_GROUP_ARRAY(
+            JSON_OBJECT(
+                'courseID', courseID,
+                'courseName', courseName,
+                'averageRating', averageRating,
+                'totalRatings', totalRatings
+            )
+        ) as jsonData
+    FROM ranked_content
+    WHERE rank <= 5
+    GROUP BY courseOrgID
     """
-    
-    # ==================== MDO-wise Analytics ====================
-    
-    # Certificates generated by MDO
-    CERTIFICATES_BY_MDO = """
+
+    # ===== TOTAL RATINGS BY ORG =====
+    TOTAL_RATINGS_BY_ORG = f"""
     SELECT 
-        userOrgID,
-        COUNT(*) as certificate_count,
-        COUNT(DISTINCT userID) as unique_user_count
-    FROM certificateGenerated
-    GROUP BY userOrgID
+        c.content_provider_id as courseOrgID,
+        COUNT(r.userID) as totalRatings
+    FROM read_parquet('{ParquetFileConstants.CONTENT_WAREHOUSE_COMPUTED_PARQUET_FILE}/**.parquet') c
+    INNER JOIN read_parquet('{ParquetFileConstants.RATING_COMPUTED_PARQUET_FILE}/**.parquet') r
+        ON c.content_id = r.courseID
+    WHERE c.content_status = 'Live'
+    GROUP BY c.content_provider_id
     """
-    
-    # Top 5 MDO by completion
-    TOP_5_MDO_BY_COMPLETION = """
+
+    # ===== RATINGS SPREAD BY ORG =====
+    RATINGS_SPREAD_BY_ORG = f"""
+    SELECT 
+        c.content_provider_id as courseOrgID,
+        JSON_OBJECT(
+            'count5', SUM(CASE WHEN r.userRating >= 4.5 THEN 1 ELSE 0 END),
+            'count4', SUM(CASE WHEN r.userRating >= 3.5 AND r.userRating < 4.5 THEN 1 ELSE 0 END),
+            'count3', SUM(CASE WHEN r.userRating >= 2.5 AND r.userRating < 3.5 THEN 1 ELSE 0 END),
+            'count2', SUM(CASE WHEN r.userRating >= 1.5 AND r.userRating < 2.5 THEN 1 ELSE 0 END),
+            'count1', SUM(CASE WHEN r.userRating < 1.5 THEN 1 ELSE 0 END)
+        ) as jsonData
+    FROM read_parquet('{ParquetFileConstants.CONTENT_WAREHOUSE_COMPUTED_PARQUET_FILE}/**.parquet') c
+    INNER JOIN read_parquet('{ParquetFileConstants.RATING_COMPUTED_PARQUET_FILE}/**.parquet') r
+        ON c.content_id = r.courseID
+    WHERE c.content_status = 'Live'
+    GROUP BY c.content_provider_id
+    """
+
+    TOP_5_MDO_BY_COMPLETION = BASE_DATA_COMPLETE + f""",
+    mdo_completion_stats AS (
+        SELECT 
+            userOrgID,
+            userOrgName,
+            COUNT(courseID) as completedCount
+        FROM base_data
+        WHERE category = 'Course'
+        AND courseStatus IN ('Live', 'Retired')
+        AND dbCompletionStatus = 2
+        GROUP BY userOrgID, userOrgName
+    )
     SELECT 
         userOrgID,
         userOrgName,
-        COUNT(courseID) as completedCount
-    FROM liveRetiredCourseCompleted
-    GROUP BY userOrgID, userOrgName
+        completedCount
+    FROM mdo_completion_stats
     ORDER BY completedCount DESC
     LIMIT 5
     """
-    
-    # Trending events by MDO (top 20 per MDO)
+
+    # ===== TOP 5 MDO BY LIVE COURSES =====
+    TOP_5_MDO_BY_LIVE_COURSES = f"""
+    WITH course_counts AS (
+        SELECT 
+            content_provider_id as courseOrgID,
+            content_provider_name as courseOrgName,
+            COUNT(content_id) as publishedCount
+        FROM read_parquet('{ParquetFileConstants.CONTENT_WAREHOUSE_COMPUTED_PARQUET_FILE}/**.parquet')
+        WHERE content_type = 'Course'
+        AND content_status = 'Live'
+        GROUP BY content_provider_id, content_provider_name
+    )
+    SELECT 
+        JSON_GROUP_ARRAY(
+            JSON_OBJECT(
+                'courseOrgID', courseOrgID,
+                'courseOrgName', courseOrgName,
+                'publishedCount', publishedCount
+            )
+        ) as jsonData
+    FROM (
+        SELECT * FROM course_counts
+        ORDER BY publishedCount DESC
+        LIMIT 5
+    )
+    """
+
+    # ===== ADDITIONAL QUERIES (NEED RATING TABLE) =====
+    TOP_10_REVIEWS_BY_ORG = f"""
+    WITH reviews_with_course AS (
+        SELECT 
+            r.activityid as courseID,
+            r.userid as userID,
+            r.rating,
+            r.review,
+            c.courseOrgID
+        FROM read_parquet('{ParquetFileConstants.RATING_PARQUET_FILE}') r
+        INNER JOIN read_parquet('{ParquetFileConstants.CONTENT_COMPUTED_PARQUET_FILE}/**.parquet') c
+            ON r.activityid = c.courseID
+        WHERE r.review IS NOT NULL
+        AND r.rating >= 4.5
+    ),
+    ranked_reviews AS (
+        SELECT 
+            *,
+            ROW_NUMBER() OVER (PARTITION BY courseOrgID ORDER BY rating DESC) as rank
+        FROM reviews_with_course
+    )
+    SELECT 
+        courseOrgID,
+        JSON_GROUP_ARRAY(
+            JSON_OBJECT(
+                'courseID', courseID,
+                'userID', userID,
+                'rating', rating,
+                'review', review
+            )
+        ) as jsonData
+    FROM ranked_reviews
+    WHERE rank <= 10
+    GROUP BY courseOrgID
+    """
+
+    # ===== TRENDING OVERALL =====
+    TRENDING_COURSES_OVERALL = f"""
+    WITH course_enrollments AS (
+        SELECT 
+            e.content_id as courseID,
+            COUNT(*) as enrollment_count
+        FROM read_parquet('{ParquetFileConstants.ENROLMENT_WAREHOUSE_COMPUTED_PARQUET_FILE}/**.parquet') e
+        INNER JOIN read_parquet('{ParquetFileConstants.CONTENT_WAREHOUSE_COMPUTED_PARQUET_FILE}/**.parquet') c
+            ON e.content_id = c.content_id
+        WHERE e.user_consumption_status IN ('not-started', 'in progress', 'completed')
+        AND c.content_status = 'Live'
+        AND c.content_type = 'Course'
+        GROUP BY e.content_id
+        ORDER BY enrollment_count DESC
+    ),
+    total_and_limit AS (
+        SELECT 
+            COUNT(*) as total_count,
+            CEIL(COUNT(*) * 0.1) as limit_count
+        FROM course_enrollments
+    )
+    SELECT 
+        STRING_AGG(courseID, ',') as course_ids
+    FROM course_enrollments ce
+    CROSS JOIN total_and_limit t
+    WHERE ROWID() <= t.limit_count
+    """
+
+    TRENDING_PROGRAMS_OVERALL = f"""
+    WITH program_enrollments AS (
+        SELECT 
+            e.content_id as courseID,
+            COUNT(*) as enrollment_count
+        FROM read_parquet('{ParquetFileConstants.ENROLMENT_WAREHOUSE_COMPUTED_PARQUET_FILE}/**.parquet') e
+        INNER JOIN read_parquet('{ParquetFileConstants.CONTENT_WAREHOUSE_COMPUTED_PARQUET_FILE}/**.parquet') c
+            ON e.content_id = c.content_id
+        WHERE e.user_consumption_status IN ('not-started', 'in progress', 'completed')
+        AND c.content_status = 'Live'
+        AND c.content_type IN ('Blended Program', 'Curated Program')
+        GROUP BY e.content_id
+        ORDER BY enrollment_count DESC
+    ),
+    total_and_limit AS (
+        SELECT 
+            COUNT(*) as total_count,
+            CEIL(COUNT(*) * 0.1) as limit_count
+        FROM program_enrollments
+    )
+    SELECT 
+        STRING_AGG(courseID, ',') as program_ids
+    FROM program_enrollments pe
+    CROSS JOIN total_and_limit t
+    WHERE ROWID() <= t.limit_count
+    """
+
+    # ===== EVENT QUERIES (IF EVENT DATA EXISTS) =====
     TRENDING_EVENTS_BY_MDO = f"""
     WITH event_counts AS (
         SELECT 
@@ -853,8 +1102,10 @@ class QueryConstants:
             COUNT(*) as event_count,
             DENSE_RANK() OVER (PARTITION BY u.userOrgID ORDER BY COUNT(*) DESC) as rank
         FROM read_parquet('{ParquetFileConstants.EVENT_ENROLMENT_PARQUET_FILE}') e
-        JOIN userOrg u ON e.user_id = u.userID
-        JOIN read_parquet('{ParquetFileConstants.EVENT_PARQUET_FILE}') ed ON e.event_id = ed.event_id
+        JOIN read_parquet('{ParquetFileConstants.USER_ORG_COMPUTED_FILE}/**.parquet') u 
+            ON e.user_id = u.userID
+        JOIN read_parquet('{ParquetFileConstants.EVENT_PARQUET_FILE}') ed 
+            ON e.event_id = ed.event_id
         WHERE ed.event_status = 'Live'
         GROUP BY u.userOrgID, e.event_id
     )
@@ -862,246 +1113,39 @@ class QueryConstants:
         userOrgID,
         STRING_AGG(event_id, ',') as events
     FROM event_counts
-    WHERE rank <= 20
+    WHERE rank <= 100
     GROUP BY userOrgID
     """
-    
-    # Featured events overall (top 20)
+
     FEATURED_EVENTS_OVERALL = f"""
     WITH event_counts AS (
         SELECT 
             e.event_id,
             COUNT(*) as event_count
         FROM read_parquet('{ParquetFileConstants.EVENT_ENROLMENT_PARQUET_FILE}') e
-        JOIN userOrg u ON e.user_id = u.userID
-        JOIN read_parquet('{ParquetFileConstants.EVENT_PARQUET_FILE}') ed ON e.event_id = ed.event_id
+        JOIN read_parquet('{ParquetFileConstants.USER_ORG_COMPUTED_FILE}/**.parquet') u 
+            ON e.user_id = u.userID
+        JOIN read_parquet('{ParquetFileConstants.EVENT_PARQUET_FILE}') ed 
+            ON e.event_id = ed.event_id
         WHERE ed.event_status = 'Live'
         GROUP BY e.event_id
         ORDER BY event_count DESC
-        LIMIT 20
+        LIMIT 100
     )
     SELECT STRING_AGG(event_id, ',') as events
     FROM event_counts
     """
-    
-    # ==================== Content Ratings ====================
-    
-    # Total ratings by course org
-    TOTAL_RATINGS_BY_ORG = """
-    SELECT 
-        courseOrgID,
-        COUNT(ratingCount) as totalRatings
-    FROM ratedLiveContent
-    GROUP BY courseOrgID
-    """
-    
-    # Ratings spread by org
-    RATINGS_SPREAD_BY_ORG = """
-    SELECT 
-        courseOrgID,
-        JSON_OBJECT(
-            'count5', SUM(count5Star),
-            'count4', SUM(count4Star),
-            'count3', SUM(count3Star),
-            'count2', SUM(count2Star),
-            'count1', SUM(count1Star)
-        ) as jsonData
-    FROM ratedLiveContent
-    GROUP BY courseOrgID
-    """
 
-    # Fixed: Moved WHERE clause to correct position and changed == to =
-    AVG_COURSE_RATING_BY_COURSE_ORG = f"""SELECT courseOrgID,  
-                                        COUNT(*) AS totalCourseCount,  
-                                        AVG(rating) AS avgRating  
-                                        FROM read_parquet('{ParquetFileConstants.CONTENT_COMPUTED_PARQUET_FILE}/**.parquet')  
-                                        WHERE category = 'Course'  
-                                        GROUP BY courseOrgID  
-                                        ORDER BY avgRating DESC"""
-    
-    # Fixed: Moved WHERE clause to correct position and changed == to =
-    AVG_COURSE_RATING_ACROSS_PLATFORM = f"""SELECT  
-                                            AVG(rating) AS avgRating  
-                                            FROM read_parquet('{ParquetFileConstants.CONTENT_COMPUTED_PARQUET_FILE}/**.parquet')  
-                                            WHERE category = 'Course'"""
-    
-    # Fixed: Moved WHERE clause to correct position and changed == to =
-    AVG_MODERATED_COURSE_RATING_BY_COURSE_ORG = f"""SELECT courseOrgID,  
-                                        COUNT(*) AS totalCourseCount,  
-                                        AVG(rating) AS avgRating  
-                                        FROM read_parquet('{ParquetFileConstants.CONTENT_COMPUTED_PARQUET_FILE}/**.parquet')  
-                                        WHERE category = 'Course'  
-                                        GROUP BY courseOrgID  
-                                        ORDER BY avgRating DESC"""
-    
-    UNIQUE_USERS_ENROLLED_BY_STATUS = f"""SELECT  
-                                        COUNT(DISTINCT userID) AS totalUsers,  
-                                        COUNT(DISTINCT CASE WHEN dbCompletionStatus = 0 THEN userID END) AS notStartedUsers,  
-                                        COUNT(DISTINCT CASE WHEN dbCompletionStatus = 1 THEN userID END) AS inProgressUsers,  
-                                        COUNT(DISTINCT CASE WHEN dbCompletionStatus = 2 THEN userID END) AS completedUsers  
-                                    FROM read_parquet('{ParquetFileConstants.ENROLMENT_COMPUTED_PARQUET_FILE}/**.parquet')"""
-
-    DASHBOARD_ENROLMENTS_BY_STATUS = f"""SELECT  
-                                COUNT(*) AS totalEnrolments,  
-                                COUNT(CASE WHEN dbCompletionStatus = 0 THEN 1 END) AS notStartedEnrolments,  
-                                COUNT(CASE WHEN dbCompletionStatus = 1 THEN 1 END) AS inProgressEnrolments,  
-                                COUNT(CASE WHEN dbCompletionStatus = 2 THEN 1 END) AS completedEnrolments  
-                            FROM read_parquet('{ParquetFileConstants.ENROLMENT_COMPUTED_PARQUET_FILE}/**.parquet')"""
-    
-    # ==================== Configuration Variables ====================
-    # Update these with your actual values
-    NLW_START_DATE = "'2024-01-15 00:00:00'"
-    NLW_END_DATE = "'2024-01-21 23:59:59'"
-    PLATFORM_RATING_SURVEY_ID = "'YOUR_SURVEY_ID'"  # Replace with actual survey ID
-    
-    TOTAL_EVENT_ENROLLMENTS = f"""
-    SELECT COUNT(event_id) as total_event_count
-    FROM read_parquet('{ParquetFileConstants.EVENT_ENROLMENT_PARQUET_FILE}')
-    """
-    
-    EVENTS_PUBLISHED_COUNT = f"""
-    SELECT COUNT(DISTINCT event_id) as events_published_count
-    FROM read_parquet('{ParquetFileConstants.EVENT_PARQUET_FILE}')
-    """
-    
-    # ==================== Certificate Generation - Yesterday ====================
-    
-   
-    
-    
-    # ==================== Certificate Generation - NLW ====================
-    
-    EVENT_CERTIFICATES_NLW = f"""
-    SELECT COUNT(DISTINCT certificate_id) as event_certificate_count
-    FROM read_parquet('{ParquetFileConstants.EVENT_ENROLMENT_PARQUET_FILE}') 
-    WHERE status = 'completed'
-      AND certificate_id IS NOT NULL
-      AND enrolled_on_datetime >= {NLW_START_DATE}
-    """
-    
-    # ==================== NLW Events Published ====================
-    
-    EVENTS_PUBLISHED_NLW = f"""
-    SELECT COUNT(*) as events_published_nlw_count
-    FROM read_parquet('{ParquetFileConstants.EVENT_PARQUET_FILE}')
-    WHERE startDate >= date({NLW_START_DATE})
-      AND startDate <= date({NLW_END_DATE})
-      AND contentType = 'Event'
-    """
-    
-    # ==================== Certificate Generation by User - NLW ====================
-    
-    NLW_CONTENT_CERTIFICATES_BY_USER = f"""
-    WITH nlw_range AS (
-        SELECT 
-            strftime({NLW_START_DATE}::TIMESTAMPTZ AT TIME ZONE 'Asia/Kolkata', '%Y-%m-%dT%H:%M:%S%z') as start_time,
-            strftime({NLW_END_DATE}::TIMESTAMPTZ AT TIME ZONE 'Asia/Kolkata', '%Y-%m-%dT%H:%M:%S%z') as end_time
-    )
-    SELECT 
-        userID,
-        COUNT(*) as count
-    FROM read_parquet('{ParquetFileConstants.ENROLMENT_CONTENT_USER_COMPUTED_PARQUET_FILE}/**.parquet') l, nlw_range r
-    WHERE l.courseStatus IN ('Live', 'Retired')
-        AND l.userStatus=1 AND l.certificateGeneratedOn >= r.start_time
-      AND l.certificateGeneratedOn <= r.end_time
-    GROUP BY userID
-    """
-    
-    NLW_EVENT_CERTIFICATES_BY_USER = f"""
-    SELECT 
-        user_id,
-        COUNT(*) as count
-    FROM read_parquet('{ParquetFileConstants.EVENT_ENROLMENT_PARQUET_FILE}') 
-    WHERE status = 'completed'
-      AND certificate_id IS NOT NULL
-      AND enrolled_on_datetime >= {NLW_START_DATE}
-    GROUP BY user_id
-    """
-    
-    
-    # ==================== Top Content by Completion ====================
-    
-    TOP_COURSES_BY_COMPLETION_BY_ORG = """
-    WITH course_stats AS (
-        SELECT 
-            courseOrgID,
-            courseID,
-            COUNT(DISTINCT userID) as user_enrolment_count
-        FROM liveCourseProgramExcludingModeratedCompleted
-        WHERE category = 'Course'
-        GROUP BY courseOrgID, courseID
-        ORDER BY user_enrolment_count DESC
-    )
-    SELECT 
-        CONCAT(courseOrgID, ':courses') as key,
-        STRING_AGG(courseID, ',') as sorted_courseIDs
-    FROM course_stats
-    GROUP BY courseOrgID
-    """
-    
-    TOP_PROGRAMS_BY_COMPLETION_BY_ORG = """
-    WITH program_stats AS (
-        SELECT 
-            courseOrgID,
-            courseID,
-            COUNT(DISTINCT userID) as user_enrolment_count
-        FROM liveCourseProgramExcludingModeratedCompleted
-        WHERE category = 'Program'
-        GROUP BY courseOrgID, courseID
-        ORDER BY user_enrolment_count DESC
-    )
-    SELECT 
-        CONCAT(courseOrgID, ':programs') as key,
-        STRING_AGG(courseID, ',') as sorted_courseIDs
-    FROM program_stats
-    GROUP BY courseOrgID
-    """
-    
-    TOP_ASSESSMENTS_BY_COMPLETION_BY_ORG = """
-    WITH assessment_stats AS (
-        SELECT 
-            courseOrgID,
-            courseID,
-            COUNT(DISTINCT userID) as user_enrolment_count
-        FROM liveCourseProgramExcludingModeratedCompleted
-        WHERE category = 'Standalone Assessment'
-        GROUP BY courseOrgID, courseID
-        ORDER BY user_enrolment_count DESC
-    )
-    SELECT 
-        CONCAT(courseOrgID, ':assessments') as key,
-        STRING_AGG(courseID, ',') as sorted_courseIDs
-    FROM assessment_stats
-    GROUP BY courseOrgID
-    """
-    
-    # ==================== NPS Calculation ====================
-    
-    AVERAGE_NPS = f"""
-    SELECT 
-        ROUND(
-            COALESCE(
-                ((SUM(CASE WHEN rating IN (9, 10) THEN 1 ELSE 0 END) - 
-                  SUM(CASE WHEN rating IN (0, 1, 2, 3, 4, 5, 6) THEN 1 ELSE 0 END)) * 1.0) 
-                / NULLIF(COUNT(rating), 0) * 100, 
-                0
-            ), 1
-        ) AS avgNps 
-    FROM nps_upgraded_users_data 
-    WHERE submitted = true 
-      AND activityID = {PLATFORM_RATING_SURVEY_ID}
-    """
-    
-    
-    CORE_COMPETENCIES_BY_MDO = f"""
-    WITH course_counts AS (
+    # ===== CORE COMPETENCIES BY MDO =====
+    CORE_COMPETENCIES_BY_MDO = BASE_DATA_COMPLETE + """,
+    course_counts AS (
         SELECT 
             userOrgID,
             courseID,
             COUNT(*) as count
-        FROM read_parquet('{ParquetFileConstants.ENROLMENT_CONTENT_USER_COMPUTED_PARQUET_FILE}')
+        FROM base_data
         WHERE courseStatus IN ('Live', 'Retired')
-        AND userStatus=1
+        AND userStatus = 1
         GROUP BY userOrgID, courseID
         ORDER BY count DESC
     )
@@ -1112,42 +1156,166 @@ class QueryConstants:
     GROUP BY userOrgID
     """
 
-    
-    # ==================== Monthly Active Users ====================
-    
-    AVERAGE_MONTHLY_ACTIVE_USERS = """
-    SELECT COUNT(DISTINCT userID) as active_users_count
-    FROM userActivity 
-    WHERE activity_date >= CURRENT_DATE - INTERVAL '30 days'
+    # ===== COURSES COMPLETED AT LEAST ONCE BY MDO =====
+    COURSES_COMPLETED_AT_LEAST_ONCE_BY_MDO = BASE_DATA_COMPLETE + """
+    SELECT 
+        userOrgID,
+        COUNT(DISTINCT courseID) as count
+    FROM base_data
+    WHERE courseStatus = 'Live'
+    AND category = 'Course'
+    AND dbCompletionStatus = 2
+    AND courseID IS NOT NULL
+    AND courseID != ''
+    GROUP BY userOrgID
     """
-    
-    # ==================== Moderated Course Certificates ====================
-    
-    MODERATED_COURSE_CERTIFICATES_YESTERDAY = """
+
+    # ===== NLW QUERIES =====
+    NLW_EVENT_ENROLLMENTS = f"""
+    SELECT COUNT(event_id) as event_count
+    FROM read_parquet('{ParquetFileConstants.EVENT_ENROLMENT_PARQUET_FILE}') 
+    WHERE enrolled_on_datetime >= {NLW_START_DATE} 
+      AND enrolled_on_datetime <= {NLW_END_DATE}
+    """
+
+    NLW_CONTENT_ENROLLMENTS = f"""
+    SELECT COUNT(*) as content_count
+    FROM read_parquet('{ParquetFileConstants.ENROLMENT_WAREHOUSE_COMPUTED_PARQUET_FILE}/**.parquet') e
+    INNER JOIN read_parquet('{ParquetFileConstants.USER_WAREHOUSE_COMPUTED_PARQUET_FILE}/**.parquet') u
+        ON e.userID = u.user_id
+    INNER JOIN read_parquet('{ParquetFileConstants.CONTENT_WAREHOUSE_COMPUTED_PARQUET_FILE}/**.parquet') c
+        ON e.content_id = c.content_id
+    WHERE c.content_status IN ('Live', 'Retired')
+    AND u.status = 1 
+    AND e.enrolled_on IS NOT NULL
+    AND e.enrolled_on != ''
+    AND epoch(strptime(e.enrolled_on, '%Y-%m-%d %H:%M:%S')) >= {nlw_start_epoch}
+    AND epoch(strptime(e.enrolled_on, '%Y-%m-%d %H:%M:%S')) <= {nlw_end_epoch}
+    """
+
+    TOTAL_EVENT_ENROLLMENTS = f"""
+    SELECT COUNT(event_id) as total_event_count
+    FROM read_parquet('{ParquetFileConstants.EVENT_ENROLMENT_PARQUET_FILE}')
+    """
+
+    EVENTS_PUBLISHED_COUNT = f"""
+    SELECT COUNT(DISTINCT event_id) as events_published_count
+    FROM read_parquet('{ParquetFileConstants.EVENT_PARQUET_FILE}')
+    """
+
+    CONTENT_CERTIFICATES_YESTERDAY = f"""
     WITH yesterday_range AS (
         SELECT 
-            strftime((CURRENT_DATE - INTERVAL '1 day')::DATE + TIME '00:00:00', '%Y-%m-%dT%H:%M:%S:00+0000') as start_time
+            strftime((CURRENT_DATE - INTERVAL '1 day')::DATE + TIME '00:00:00', '%Y-%m-%d %H:%M:%S') as start_time,
+            strftime((CURRENT_DATE - INTERVAL '1 day')::DATE + TIME '23:59:59', '%Y-%m-%d %H:%M:%S') as end_time
     )
     SELECT COUNT(*) as certificate_count
-    FROM liveRetiredCourseModeratedCourseEnrolment l, yesterday_range y
-    WHERE l.certificateGeneratedOn IS NOT NULL 
-      AND l.certificateGeneratedOn != ''
-      AND l.certificateGeneratedOn >= y.start_time
+    FROM read_parquet('{ParquetFileConstants.ENROLMENT_WAREHOUSE_COMPUTED_PARQUET_FILE}/**.parquet') e
+    CROSS JOIN yesterday_range y
+    INNER JOIN read_parquet('{ParquetFileConstants.USER_WAREHOUSE_COMPUTED_PARQUET_FILE}/**.parquet') u
+        ON e.userID = u.user_id
+    INNER JOIN read_parquet('{ParquetFileConstants.CONTENT_WAREHOUSE_COMPUTED_PARQUET_FILE}/**.parquet') c
+        ON e.content_id = c.content_id
+    WHERE c.content_status IN ('Live', 'Retired')
+    AND u.status = 1 
+    AND e.first_completed_on IS NOT NULL
+    AND e.first_completed_on != ''
+    AND e.first_completed_on >= y.start_time
+    AND e.first_completed_on <= y.end_time
+    AND e.certificateID IS NOT NULL
+    AND e.certificateID != ''
     """
 
-    # These lists should now work correctly
-    ORG_BASED_LIST = [ORG_BASED_DESIGNATION_LIST, ORG_USER_COUNT_DATAFRAME_QUERY,ORG_BASED_MDO_ADMIN_COUNT]
-    COURSE_BASED_LIST = [COURSE_COUNT_BY_STATUS_GROUP_BY_ORG, AVG_COURSE_RATING_BY_COURSE_ORG, 
-                        AVG_COURSE_RATING_ACROSS_PLATFORM, AVG_MODERATED_COURSE_RATING_BY_COURSE_ORG]
-    ENROLMENT_BASED_LIST = [UNIQUE_USERS_ENROLLED_BY_STATUS, DASHBOARD_ENROLMENTS_BY_STATUS]
+    EVENT_CERTIFICATES_YESTERDAY = f"""
+    WITH yesterday_range AS (
+        SELECT 
+            (CURRENT_DATE - INTERVAL '1 day')::DATE + TIME '00:00:00' as start_time,
+            (CURRENT_DATE - INTERVAL '1 day')::DATE + TIME '23:59:59' as end_time
+    )
+    SELECT COUNT(DISTINCT certificate_id) as event_certificate_count
+    FROM read_parquet('{ParquetFileConstants.EVENT_ENROLMENT_PARQUET_FILE}') e, yesterday_range y
+    WHERE e.status = 'completed'
+    AND e.certificate_id IS NOT NULL
+    AND e.enrolled_on_datetime >= strftime(y.start_time, '%Y-%m-%d %H:%M:%S')
+    AND e.enrolled_on_datetime <= strftime(y.end_time, '%Y-%m-%d %H:%M:%S')
+    """
 
-    
+    EVENT_CERTIFICATES_NLW = f"""
+    SELECT COUNT(DISTINCT certificate_id) as event_certificate_count
+    FROM read_parquet('{ParquetFileConstants.EVENT_ENROLMENT_PARQUET_FILE}') 
+    WHERE status = 'completed'
+    AND certificate_id IS NOT NULL
+    AND enrolled_on_datetime >= {NLW_START_DATE}
+    """
+
+    CONTENT_CERTIFICATES_NLW = f"""
+    SELECT COUNT(*) as certificate_count,
+           COUNT(DISTINCT e.userID) as unique_user_count
+    FROM read_parquet('{ParquetFileConstants.ENROLMENT_WAREHOUSE_COMPUTED_PARQUET_FILE}/**.parquet') e
+    INNER JOIN read_parquet('{ParquetFileConstants.USER_WAREHOUSE_COMPUTED_PARQUET_FILE}/**.parquet') u
+        ON e.userID = u.user_id
+    INNER JOIN read_parquet('{ParquetFileConstants.CONTENT_WAREHOUSE_COMPUTED_PARQUET_FILE}/**.parquet') c
+        ON e.content_id = c.content_id
+    WHERE c.content_status IN ('Live', 'Retired')
+    AND u.status = 1 
+    AND e.first_completed_on IS NOT NULL
+    AND e.first_completed_on != ''
+    AND epoch(strptime(e.first_completed_on, '%Y-%m-%d %H:%M:%S')) >= {nlw_start_epoch}
+    AND epoch(strptime(e.first_completed_on, '%Y-%m-%d %H:%M:%S')) <= {nlw_end_epoch}
+    AND e.certificateID IS NOT NULL
+    AND e.certificateID != ''
+    """
+
+    # ===== COURSES ENROLLED/COMPLETED AT LEAST ONCE =====
+    COURSES_ENROLLED_AT_LEAST_ONCE = BASE_DATA_COMPLETE + """
+    SELECT 
+        COUNT(DISTINCT courseID) as courses_enrolled_count,
+        STRING_AGG(DISTINCT courseID, ',') as course_id_list
+    FROM base_data 
+    WHERE live_retired_course_eligible = 'live_retired_course'
+    AND courseStatus = 'Live'
+    AND courseID != ''
+    """
+
+    COURSES_COMPLETED_AT_LEAST_ONCE = BASE_DATA_COMPLETE + """
+    SELECT 
+        COUNT(DISTINCT courseID) as courses_completed_count,
+        STRING_AGG(DISTINCT courseID, ',') as course_id_list
+    FROM base_data 
+    WHERE live_retired_course_eligible = 'live_retired_course'
+    AND courseStatus = 'Live'
+    AND completion_category = 'completed'
+    AND courseID != ''
+    """
+
+    # ===== QUERY LISTS FOR ORGANIZED EXECUTION =====
+    ORG_BASED_LIST = [ORG_BASED_DESIGNATION_LIST, ORG_USER_COUNT_DATAFRAME_QUERY, ORG_BASED_MDO_ADMIN_COUNT]
+    COURSE_BASED_LIST = [COURSE_COUNT_BY_STATUS_GROUP_BY_ORG]
+    ENROLMENT_BASED_LIST = [OVERALL_METRICS, MDO_WISE_COMPREHENSIVE, CBP_WISE_COMPREHENSIVE]
+    TOP_5_LIST = [TOP_5_USERS_BY_COMPLETION_BY_MDO, TOP_5_COURSES_BY_COMPLETION_BY_MDO,
+                  TOP_5_CONTENT_BY_COMPLETION_BY_ORG, TOP_5_CONTENT_BY_ENROLLMENTS_BY_CBP,
+                  TOP_5_COURSES_BY_RATING, TOP_5_MDO_BY_COMPLETION]
+    TRENDING_LIST = [TRENDING_COURSES_BY_ORG, TRENDING_PROGRAMS_BY_ORG, MOST_ENROLLED_TAG,
+                     TRENDING_COURSES_OVERALL, TRENDING_PROGRAMS_OVERALL]
+    CERTIFICATION_LIST = [CERTIFICATIONS_TILL_TODAY, CERTIFICATIONS_OF_THE_WEEK,
+                          TOP_10_CERTIFICATIONS, TOP_CERTIFICATIONS_BY_MDO]
+    NLW_LIST = [NLW_EVENT_ENROLLMENTS, NLW_CONTENT_ENROLLMENTS, EVENT_CERTIFICATES_NLW,
+                CONTENT_CERTIFICATES_NLW]
+    EVENT_LIST = [TRENDING_EVENTS_BY_MDO, FEATURED_EVENTS_OVERALL, TOTAL_EVENT_ENROLLMENTS,
+                  EVENTS_PUBLISHED_COUNT]
+
+
 def main():
-    print("Defined Static Parquet File Constants:")
-    print(f"ORG_BASED_LIST contains {len(QueryConstants.ORG_BASED_LIST)} queries")
-    print(f"USER_BASED_LIST contains {len(QueryConstants.USER_BASED_LIST)} queries")
-    print(f"COURSE_BASED_LIST contains {len(QueryConstants.COURSE_BASED_LIST)} queries")
-    print(f"ENROLMENT_BASED_LIST contains {len(QueryConstants.ENROLMENT_BASED_LIST)} queries")
+    print("✅ Complete QueryConstants loaded with CORRECTED warehouse joins")
+    print(f"Total ORG queries: {len(QueryConstants.ORG_BASED_LIST)}")
+    print(f"Total COURSE queries: {len(QueryConstants.COURSE_BASED_LIST)}")
+    print(f"Total ENROLMENT queries: {len(QueryConstants.ENROLMENT_BASED_LIST)}")
+    print(f"Total TOP 5 queries: {len(QueryConstants.TOP_5_LIST)}")
+    print(f"Total TRENDING queries: {len(QueryConstants.TRENDING_LIST)}")
+    print(f"Total CERTIFICATION queries: {len(QueryConstants.CERTIFICATION_LIST)}")
+    print(f"Total NLW queries: {len(QueryConstants.NLW_LIST)}")
+    print(f"Total EVENT queries: {len(QueryConstants.EVENT_LIST)}")
+
 
 if __name__ == "__main__":
     main()
