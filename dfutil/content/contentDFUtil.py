@@ -415,7 +415,7 @@ def writeWarehouseParquetFiles(spark, config):
         events = spark.read.parquet(f"{output_path}/eventDetails") \
             .select("event_id", "event_name", "event_provider_mdo_id", "event_start_datetime",
                      F.col("duration").cast("string").alias("duration"), "event_status", "event_type", "presenters", "video_link", "recording_link",
-                    "event_tag", "typeofEvent", "maxEnrolments", "meetingAgenda", "creatorDetails", "recordedMediaLink", "noOfAttendes",
+                    "event_tag", "typeofEvent", "maxEnrolments", "registrationLink", "meetingAgenda", "creatorDetails", "recordedMediaLink", "noOfAttendes",
                     "eventDuration", "meetingSummary", "courseLinked"
                     )
         
