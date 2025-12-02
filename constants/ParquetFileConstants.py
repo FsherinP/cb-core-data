@@ -64,14 +64,14 @@ class ParquetFileConstants:
     BATCH_SELECT_PARQUET_FILE = str(OUTPUT_COMPUTED_DIR / "batch-select/")
     OLD_ASSESSMENT_COMPUTED_PARQUET_FILE = str(OUTPUT_COMPUTED_DIR / "old-assessment/")
     ENROLMENT_WAREHOUSE_COMPUTED_PARQUET_FILE = str(OUTPUT_COMPUTED_DIR / "enrolment-warehouse-computed/")
-    ENROLMENT_CONTENT_USER_COMPUTED_PARQUET_FILE=str(OUTPUT_COMPUTED_DIR / "enrolment-content-user-computed/")
+    ENROLMENT_CONTENT_USER_COMPUTED_PARQUET_FILE= ENROLMENT_COMPUTED_PARQUET_FILE
     USER_WAREHOUSE_COMPUTED_PARQUET_FILE = str(OUTPUT_COMPUTED_DIR / "user-warehouse-computed/")
     CONTENT_WAREHOUSE_COMPUTED_PARQUET_FILE = str(OUTPUT_COMPUTED_DIR / "content-warehouse-computed/")
     ###
     ###  Output CSV File
     ###
     USER_REPORT_CSV = str(OUTPUT_COMPUTED_DIR / "user-report/")
-    USER_ENROLMENT_CSV = str(OUTPUT_COMPUTED_DIR / "user-enrolment/") 
+    USER_ENROLMENT_CSV = str(OUTPUT_COMPUTED_DIR / "user-enrolment/")
 
     DATE_TIME_WITH_AMPM_FORMAT = "yyyy-MM-dd HH:mm:ss a"
     DATE_TIME_FORMAT = "yyyy-MM-dd HH:mm:ss"
