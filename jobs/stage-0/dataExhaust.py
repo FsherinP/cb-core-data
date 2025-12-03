@@ -8,7 +8,7 @@ from pyspark.sql import SparkSession
 from pyspark.sql.functions import (
     col, from_json, explode_outer, concat, substring, lit, when, size, 
     expr, date_format, to_utc_timestamp, current_timestamp, coalesce,
-    to_timestamp, isnan, isnull, format_string
+    to_timestamp, isnan, isnull, format_string, array_contains
 )
 from pyspark.sql.types import StructType, StructField, StringType, IntegerType,BooleanType,FloatType
 from pyspark import StorageLevel
@@ -281,8 +281,8 @@ class DataExhaustModel:
             should_clause = ",".join([f'{{"match":{{"primaryCategory.raw":"{pc}"}}}}' for pc in primary_categories])
             fields = ["identifier", "name", "primaryCategory", "status", "reviewStatus", "channel", 
                      "duration", "leafNodesCount", "lastPublishedOn", "lastStatusChangedOn", 
-                     "createdFor", "competencies_v6", "programDirectorName", "language", "courseCategory","organisation"]
-            array_fields = ["createdFor", "language","organisation"]
+                     "createdFor", "competencies_v6", "programDirectorName", "language", "courseCategory","organisation","childNodes"]
+            array_fields = ["createdFor", "language","organisation","childNodes"]
             fields_clause = ",".join([f'"{f}"' for f in fields])
             query = f'{{"_source":[{fields_clause}],"query":{{"bool":{{"should":[{should_clause}]}}}}}}'
             
@@ -295,7 +295,6 @@ class DataExhaustModel:
                 fields, 
                 array_fields
             )
-            
             self.write_parquet(es_content_df, f"{output_base_path}/esContent")
             es_content_df.unpersist()
             
@@ -541,12 +540,12 @@ class DataExhaustModel:
             must_clause = ",".join([f'{{"match":{{"primaryCategory.raw":"{pc}"}}}}' for pc in primary_categories])
             context_categories = ["Final Program Assessment"]
             context_categories_clause = ",".join([f'{{"match":{{"contextCategory.raw":"{pc}"}}}}' for pc in context_categories])
-            statuses = ["Live"]
-            status_clause = ",".join([f'{{"match":{{"status.raw":"{s}"}}}}' for s in statuses])
-            fields = ["identifier","name","primaryCategory","contextCategory", "status"]
+            fields = ["identifier", "name", "primaryCategory", "status", "reviewStatus", "channel", 
+                     "expectedDuration", "lastPublishedOn", "lastStatusChangedOn", 
+                     "createdFor", "competencies_v6", "programDirectorName", "language", "courseCategory","contextCategory"]
+            array_fields = ["createdFor", "language","organisation"]
             fields_clause = ",".join([f'"{f}"' for f in fields])
-            array_fields = []
-            query = f'{{"_source":[{fields_clause}],"query":{{"bool":{{"must":[{must_clause},{context_categories_clause},{status_clause}]}}}}}}'
+            query = f'{{"_source":[{fields_clause}],"query":{{"bool":{{"must":[{must_clause},{context_categories_clause}]}}}}}}'
 
             es_final_assessment_df = utils.read_elasticsearch_data(
                 self.spark,
@@ -557,7 +556,16 @@ class DataExhaustModel:
                 fields,
                 array_fields
             )
-
+            # courseAsPrimaryCategorydf = es_content_df.filter(col("primaryCategory") == "Course")
+            # courseAsPrimaryCategorydf.show(5, truncate=False)
+            # es_final_assessment_df.show(5, truncate=False)
+            # es_course_filtered_final_assessment_df = courseAsPrimaryCategorydf.join(
+            #     es_final_assessment_df,
+            #     array_contains(courseAsPrimaryCategorydf["childNodes"], es_final_assessment_df["identifier"]),
+            #     "inner"
+            # ).select(
+            #     es_final_assessment_df["*"], courseAsPrimaryCategorydf["identifier"].alias("course_id"))
+            # es_course_filtered_final_assessment_df.show(5, truncate=False)
             self.write_parquet(es_final_assessment_df, f"{output_base_path}/esFinalAssessment")
             es_final_assessment_df.unpersist()
 
