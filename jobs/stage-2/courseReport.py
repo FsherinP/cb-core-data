@@ -383,8 +383,8 @@ class CourseReportModel:
                 lit(None).alias("content_retired_on"),
                 col("status").alias("content_status"),
                 lit(None).alias("resource_count"),
-                lit(None).alias("total_certificates_issued"), # who have cleared final assessment
-                col("reviewStatus").alias("content_substatus"), # should be None
+                lit(None).alias("total_certificates_issued"), 
+                col("reviewStatus").alias("content_substatus"),
                 col("language").getItem(0).alias("language"),
                 col("contextCategory").alias("content_sub_type"),
                 lit(0).alias("scorm_flag"),
@@ -398,7 +398,7 @@ class CourseReportModel:
                 es_final_assessment_df["*"],orgComputedDF["content_provider_name"]
             )
             platformContentWarehouseDF = platformContentWarehouseDF.unionByName(es_final_assessment_df)
-            
+
             df_warehouse = platformContentWarehouseDF.union(marketPlaceContentWarehouseDF)
             df_warehouse.coalesce(1).write.mode("overwrite").option("compression", "snappy").parquet(f"{config.warehouseReportDir}/{config.dwCourseTable}")
 
