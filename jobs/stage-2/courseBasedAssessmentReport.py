@@ -265,7 +265,7 @@ class CourseBasedAssessmentModel:
                     col("incorrect_count").alias("number_of_incorrect_responses"),
                     col("retakes").alias("number_of_retakes"),
                     col("data_last_generated_on"))
-            warehouseDF = warehouseDF.union(finalAssessmentDF)
+            warehouseDF = warehouseDF.unionByName(finalAssessmentDF)
             # mdo_orgids = mdoReportDF.select("mdoid").distinct().collect()
             # mdo_orgid_list = [row.mdoid for row in mdo_orgids]
 
