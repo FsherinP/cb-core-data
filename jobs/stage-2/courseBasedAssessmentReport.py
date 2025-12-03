@@ -240,12 +240,11 @@ class CourseBasedAssessmentModel:
                         col("cut_off_percentage"),
                         col("assessMaxQuestions").alias("total_question"),
                         col("assessIncorrect").alias("number_of_incorrect_responses"),
+                        lit(0).alias("number_of_retakes"),
                         col("data_last_generated_on"))
             
             finalAssessmentDF = self.duration_format(finalAssessmentDF,"assessment_duration")
             finalAssessmentDF = self.duration_format(finalAssessmentDF,"time_spent_by_the_user")
-            finalAssessmentDF.show(5, truncate=False)
-            finalAssessmentDF.printSchema() 
             
             
             warehouseDF = fullReportDF.withColumn("data_last_generated_on", currentDateTime)\
@@ -266,7 +265,7 @@ class CourseBasedAssessmentModel:
                     col("incorrect_count").alias("number_of_incorrect_responses"),
                     col("retakes").alias("number_of_retakes"),
                     col("data_last_generated_on"))
-            warehouseDF.show(5, truncate=False)
+            warehouseDF = warehouseDF.union(finalAssessmentDF)
             # mdo_orgids = mdoReportDF.select("mdoid").distinct().collect()
             # mdo_orgid_list = [row.mdoid for row in mdo_orgids]
 
