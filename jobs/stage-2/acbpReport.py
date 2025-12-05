@@ -252,6 +252,30 @@ class ACBPModel:
                 kcmMappingDF["competency_area_id"],
                 col("competency_area")
             ).distinct()
+
+            resultDF = (
+                kcmMappingDF
+                    .join(
+                        kcmDF,
+                        kcmDF.competency_area_id == kcmMappingDF.competency_area_id,
+                        "left"
+                    )
+                    .select(
+                        "course_id",
+                        kcmMappingDF["competency_area_id"],
+                        "competency_area"
+                    )
+                    .distinct()
+                    .groupBy("course_id")
+                    .agg(
+                        F.concat_ws(
+                            ", ",
+                            F.collect_set("competency_area")
+                        ).alias("competency_areas")
+                    )
+            )
+
+            resultDF.show(5, truncate=False)
             
             print("📝 Preparing Apar enrollment report data...")
             
@@ -260,7 +284,7 @@ class ACBPModel:
     
             # preparing apar enrollment data
             aparEnrolmentData = acbpEnrolmentDF.join(userAdditionalProperties, "userID", "left") \
-                .join(kcmMappingDF, acbpEnrolmentDF.courseID == kcmMappingDF.course_id, "left") \
+                .join(resultDF, acbpEnrolmentDF.courseID == resultDF.course_id, "left") \
                 .withColumn(
                     "content_duration",
                     F.when(F.col("courseDuration").isNull(), None)
@@ -291,11 +315,12 @@ class ACBPModel:
                     when(((col("courseProgress").isNotNull()) & (col("courseProgress") > 0)), col("courseProgress")).otherwise(0).alias("content_progress_percentage"),
                     col("externalSystem").alias("external_system"),
                     col("externalSystemId").alias("external_system_id"),
-                    col("competency_area").alias("competency_type"),
+                    col("competency_areas").alias("competency_type"),
                     lit(None).cast("string").alias("parichay_id"),
                     col("allocatedOn").cast("timestamp").alias("assigned_on")
                 )
-            
+
+            resultDF.unpersist()
             kcmMappingDF.unpersist()
             kcmDF.unpersist()
             print("✅ Apar enrollment report data prepared successfully!")
