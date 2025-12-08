@@ -71,7 +71,7 @@ class ACBPModel:
             enrolmentDF = spark.read.parquet(ParquetFileConstants.ENROLMENT_COMPUTED_PARQUET_FILE)
 
             acbpAllEnrolDF = spark.read.parquet(ParquetFileConstants.ACBP_COMPUTED_FILE)
-            acbpAllEnrolDF.printSchema()
+            #acbpAllEnrolDF.printSchema()
 
             acbpAllEnrolmentDF = (acbpAllEnrolDF\
                 .withColumn("courseID", explode(split(col("acbpCourseIDList"), ",")))\
@@ -253,26 +253,25 @@ class ACBPModel:
                 col("competency_area")
             ).distinct()
 
+            km = kcmMappingDF.alias("km")
+            kc = (
+                kcmDF
+                .alias("kc")
+                .withColumnRenamed("competency_area", "kc_competency_area")  # prevent ambiguity
+            )
+
             resultDF = (
-                kcmMappingDF
-                    .join(
-                        kcmDF,
-                        kcmDF.competency_area_id == kcmMappingDF.competency_area_id,
-                        "left"
-                    )
-                    .select(
-                        "course_id",
-                        kcmMappingDF["competency_area_id"],
-                        "competency_area"
-                    )
-                    .distinct()
-                    .groupBy("course_id")
-                    .agg(
-                        F.concat_ws(
-                            ", ",
-                            F.collect_set("competency_area")
-                        ).alias("competency_areas")
-                    )
+                km.join(kc, kc.competency_area_id == km.competency_area_id, "left")
+                .select(
+                    km.course_id,
+                    km.competency_area_id,
+                    kc.kc_competency_area.alias("competency_area")
+                )
+                .distinct()
+                .groupBy("course_id")
+                .agg(
+                    F.concat_ws(", ", F.collect_set("competency_area")).alias("competency_areas")
+                )
             )
 
             resultDF.show(5, truncate=False)

@@ -432,18 +432,18 @@ class L2AssessmentReport:
                 col("content_content_name").alias("content_name"),
                 col("content_content_type").alias("content_type"),
                 col("content_content_sub_type").alias("content_sub_type"),
-                col("enrol_enrolled_on").alias("enrolled_on"),
+                col("enrol_enrolled_on").cast("timestamp").alias("enrolled_on"),
                 col("enrol_content_progress_percentage").alias("content_progress_percentage"),
                 col("enrol_certificate_id").alias("certificate_id"),
                 when(
-                    (col('enrol_user_consumption_status') == 'completed') & (col("enrol_certificate_id").isNotNull()) & (trim(col("enrol_certificate_id")) != ""), lit("TRUE")
+                    (col('enrol_user_consumption_status') == 'completed') & (col("enrol_certificate_id").isNotNull()) & (trim(col("enrol_certificate_id")) != ""), lit(True)
                 ).when(
-                    (col('enrol_user_consumption_status') == 'in-progress'), lit("FALSE")
+                    (col('enrol_user_consumption_status') == 'in-progress'), lit(False)
                 ).otherwise(
-                    lit("FALSE")
+                    lit(False)
                 ).alias("certificate_generated"),
-                col("enrol_content_last_accessed_on").alias("content_last_accessed_on"),
-                col("enrol_first_completed_on").alias("first_completed_on"),
+                col("enrol_content_last_accessed_on").cast("timestamp").alias("content_last_accessed_on"),
+                col("enrol_first_completed_on").cast("timestamp").alias("first_completed_on"),
                 col("content_content_duration").alias("content_duration"),
                 col("content_content_status").alias("content_status"),
                 col("kcm_competency_type").alias("competency_type"),
@@ -456,13 +456,13 @@ class L2AssessmentReport:
                 col("user_external_system").alias("external_system"),
                 col("apar_isApar").alias("isApar"),
                 col("apar_cbp_plan_id").alias("cbp_plan_id"),
-                col("apar_allocated_on").alias("allocated_on"),
+                col("apar_allocated_on").cast("timestamp").alias("allocated_on"),
                 lit(None).cast("string").alias("comprehensive_level_assessment_status"),
-                col("cbplan_start_date").alias("cbp_plan_start_date"),
-                col("cbplan_due_by").alias("cbp_plan_end_date"),
+                col("cbplan_start_date").cast("timestamp").alias("cbp_plan_start_date"),
+                col("cbplan_due_by").cast("timestamp").alias("cbp_plan_end_date"),
                 lit(None).cast("string").alias("parichay_id"),  # Assuming parichay_id is same as external_system_id
                 col("enrol_user_consumption_status").alias("consumption_status"),
-                lit(None).cast("string").alias("assessment_date")
+                lit(None).alias("assessment_date")
             )
 
             # Map CAP columns to final schema
@@ -480,18 +480,18 @@ class L2AssessmentReport:
                 col("cap_content_name").alias("content_name"),
                 col("cap_content_type").alias("content_type"),
                 col("cap_content_sub_type").alias("content_sub_type"),
-                col("cap_enrol_enrolled_on").alias("enrolled_on"),
+                col("cap_enrol_enrolled_on").cast("timestamp").alias("enrolled_on"),
                 col("cap_enrol_content_progress_percentage").alias("content_progress_percentage"),
                 col("cap_enrol_certificate_id").alias("certificate_id"),
                 when(
-                    (col('cap_enrol_user_consumption_status') == 'completed') & (col("cap_enrol_certificate_id").isNotNull()) & (trim(col("cap_enrol_certificate_id")) != ""), lit("TRUE")
+                    (col('cap_enrol_user_consumption_status') == 'completed') & (col("cap_enrol_certificate_id").isNotNull()) & (trim(col("cap_enrol_certificate_id")) != ""), lit(True)
                 ).when(
-                    (col('cap_enrol_user_consumption_status') == 'in-progress'), lit("FALSE")
+                    (col('cap_enrol_user_consumption_status') == 'in-progress'), lit(False)
                 ).otherwise(
-                    lit("FALSE")
+                    lit(False)
                 ).alias("certificate_generated"),
-                col("cap_enrol_content_last_accessed_on").alias("content_last_accessed_on"),
-                col("cap_enrol_first_completed_on").alias("first_completed_on"),
+                col("cap_enrol_content_last_accessed_on").cast("timestamp").alias("content_last_accessed_on"),
+                col("cap_enrol_first_completed_on").cast("timestamp").alias("first_completed_on"),
                 col("cap_content_duration").alias("content_duration"),
                 col("cap_content_status").alias("content_status"),
                 lit(None).cast("string").alias("competency_type"),
@@ -502,9 +502,9 @@ class L2AssessmentReport:
                 col("assess_user_designation").alias("designation"),
                 col("assess_user_external_system_id").alias("external_system_id"),
                 col("assess_user_external_system").alias("external_system"),
-                lit("FALSE").alias("isApar"),
-                lit(None).cast("string").alias("cbp_plan_id"),
-                lit(None).cast("string").alias("allocated_on"),
+                lit("false").alias("isApar"),
+                lit(None).alias("cbp_plan_id"),
+                lit(None).alias("allocated_on"),
                 when(
                     col("assess_score_achieved") >= col("assess_cut_off_percentage"), 
                     lit("Pass")
@@ -512,11 +512,11 @@ class L2AssessmentReport:
                     col("assess_score_achieved") <= col("assess_cut_off_percentage"), 
                     lit("Fail")
                 ).otherwise(lit(None)).alias("comprehensive_level_assessment_status"),
-                lit(None).cast("string").alias("cbp_plan_start_date"),
-                lit(None).cast("string").alias("cbp_plan_end_date"),
-                lit(None).cast("string").alias("parichay_id"),
+                lit(None).alias("cbp_plan_start_date"),
+                lit(None).alias("cbp_plan_end_date"),
+                lit(None).alias("parichay_id"),
                 col("cap_enrol_user_consumption_status").alias("consumption_status"),
-                col("assess_assessment_date").alias("assessment_date")
+                col("assess_assessment_date").cast("timestamp").alias("assessment_date")
             )
 
             # Union both dataframes
