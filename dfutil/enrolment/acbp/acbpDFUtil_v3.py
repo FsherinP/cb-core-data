@@ -79,8 +79,8 @@ def preComputeACBPData(spark):
                       .na.fill({"cbPlanName": ""})
                       )
 
-    
-    print(f"acbp_select_df data: {acbp_select_df.count():,} rows")
+    #acbp_select_df.show(5, truncate=False)
+    #print(f"acbp_select_df data: {acbp_select_df.count():,} rows")
 
     draft_cbp_data = (acbp_select_df
                       .filter((col("acbpStatus") == "draft") & col("draftdata").isNotNull())
@@ -95,27 +95,27 @@ def preComputeACBPData(spark):
                       .withColumn("acbpCourseIDList", col("draftData.contentList"))
                       .drop("draftData"))
 
-    
-    print(f"draft_cbp_data data: {draft_cbp_data.count():,} rows")
+    #draft_cbp_data.show(5, truncate=False)
+    #print(f"draft_cbp_data data: {draft_cbp_data.count():,} rows")
 
     non_draft_cbp_data = acbp_select_df.filter(col("acbpStatus") != "draft")
-    
-    print(f"non_draft_cbp_data data: {non_draft_cbp_data.count():,} rows")
+    #non_draft_cbp_data.show(5, truncate=False)
+    #print(f"non_draft_cbp_data data: {non_draft_cbp_data.count():,} rows")
 
     draft_cbp_data = draft_cbp_data.withColumn("draftdata", lit(None).cast("string"))
+    #draft_cbp_data.show(5, truncate=False)
+    #print(f"draft_cbp_data data after adding draftdata column: {draft_cbp_data.count():,} rows")
     
-    print(f"draft_cbp_data data after adding draftdata column: {draft_cbp_data.count():,} rows")
-
     final_df = non_draft_cbp_data.unionByName(draft_cbp_data)
-    
-    print(f"final_df data: {final_df.count():,} rows")
+    #final_df.show(5, truncate=False)
+    #print(f"final_df data: {final_df.count():,} rows")
 
     exportDFToParquet(final_df, ParquetFileConstants.ACBP_SELECT_FILE)
     
     live_acbp_df = final_df.filter(col("acbpStatus") == "Live")
     live_count = live_acbp_df.count()
     total_count = final_df.count()
-    print(f"Total plans: {total_count}, Live Plans: {live_count}")
+    #print(f"Total plans: {total_count}, Live Plans: {live_count}")
     
     # Call optimized v4 explode function
     explodeAcbpData(spark, live_acbp_df)
@@ -124,55 +124,29 @@ def preComputeACBPData(spark):
 def explodeAcbpData(spark, acbp_df: DataFrame) -> DataFrame:
     """
     OPTIMIZED VERSION 4.0: Batched Org-Partitioned Strategy with OR Logic Built-In
-
-    Key optimization:
+    
+    Key optimization: 
     - Group plans by org (org-partitioning)
     - Build ONE index per org with multiple criteria groups per plan (OR logic)
     - One broadcast per org instead of one per plan row
     - Performance: 2-3 minutes for 14M users, 9500 plans
-
-    QUICK WIN OPTIMIZATIONS APPLIED:
-    - Increased shuffle partitions to 400 for better parallelism
-    - Pre-filtered inactive users before persist
-    - Removed ALL count() operations except final aggregation (massive speedup)
     """
 
     print("\n" + "="*80)
-    print("ACBP User Allocation - Version 4.0 (QUICK WIN OPTIMIZED)")
+    print("ACBP User Allocation - Version 4.0 (BATCHED ORG-PARTITIONED STRATEGY)")
     print("="*80)
 
     start_time = time.time()
-
-    # QUICK WIN 1: Tune Spark parallelism settings
-    print("\n[0/7] Applying Spark optimizations...")
-    original_shuffle_partitions = spark.conf.get("spark.sql.shuffle.partitions")
-    original_parallelism = spark.conf.get("spark.default.parallelism", "200")
-
-    spark.conf.set("spark.sql.shuffle.partitions", "400")
-    spark.conf.set("spark.default.parallelism", "400")
-    spark.conf.set("spark.sql.adaptive.enabled", "true")
-    spark.conf.set("spark.sql.adaptive.coalescePartitions.enabled", "true")
-    print(f"   Shuffle partitions: {original_shuffle_partitions} → 400")
-    print(f"   Default parallelism: {original_parallelism} → 400")
-    print(f"   Adaptive query execution: enabled")
-
+    
     # Step 1: Load and normalize user data
     print("\n[1/7] Loading user data...")
     user_df = spark.read.parquet(ParquetFileConstants.USER_ORG_COMPUTED_FILE)
-
+    
     existing_columns = set(user_df.columns)
     for col_name, default_val in [('isOnCentralDeputation', False), ('userProfileStatus', False)]:
         if col_name not in existing_columns:
             print(f"   Note: '{col_name}' column not found - adding default ({default_val})")
             user_df = user_df.withColumn(col_name, lit(default_val))
-
-    # QUICK WIN 2: Pre-filter users before normalization and persist
-    print("   Pre-filtering users (active users with valid orgID)...")
-    user_df = user_df.filter(
-        (col('userOrgID').isNotNull()) &
-        (col('userOrgID') != '') &
-        (col('userStatus').isNull() | (col('userStatus') == 'active') | (col('userStatus') == ''))
-    )
 
     user_df = user_df \
         .withColumn("designation_normalized", lower(trim(col("designation")))) \
@@ -182,15 +156,17 @@ def explodeAcbpData(spark, acbp_df: DataFrame) -> DataFrame:
         .withColumn("cadreBatch_normalized", lower(trim(col("cadreBatch"))))
 
     user_df = user_df.persist()
-
-    # QUICK WIN 3: Removed count() here - deferred to final aggregation
-    print(f"   Users loaded and cached")
+    
+    total_users = user_df.count()
+    #print(f"   Total users: {total_users:,}")
 
     # Step 2: Collect and categorize plans
     print("\n[2/7] Analyzing ACBP plans...")
+    #TODO: why do we need to collect here?
     acbp_data = acbp_df.collect()
-    total_plans = len(acbp_data)
-    print(f"   Total plans: {total_plans:,}")
+    #total_plans = len(acbp_data)
+    #print(f"   Total plans: {total_plans:,}")
+
 
     # Step 3: Separate plans by orgId presence
     print("\n[3/7] Categorizing plans by orgId...")
@@ -211,57 +187,62 @@ def explodeAcbpData(spark, acbp_df: DataFrame) -> DataFrame:
         print(f"      Plans in this org: {len(org_plans):,}")
 
         org_users = user_df.filter(col('userOrgID') == org_id)
+        org_user_count = org_users.count()
+        print(f"      Users in this org: {org_user_count:,}")
 
-        # QUICK WIN 3: Removed count() - no longer checking if org has users
-        # Will rely on UDF to return empty results if no users match
+        if org_user_count == 0:
+            print(f"      No users found - skipping")
+            continue
 
         # ✅ KEY CHANGE: Build ONE index for ALL plans in this org (with OR logic built-in)
         org_plan_index = build_plan_index_from_rows(org_plans)
         org_plan_bc = spark.sparkContext.broadcast(org_plan_index)
-
+        
         # Single UDF call for all org plans
         org_matches = match_users_to_plans(org_users, org_plan_bc)
-
+        
         if org_matches:
+            match_count = org_matches.count()
             org_elapsed = time.time() - org_start
-            # QUICK WIN 3: Removed count() call here
-            print(f"      Processed in {org_elapsed:.1f}s")
+            print(f"      Matches found: {match_count:,} ({org_elapsed:.1f}s)")
             org_results.append(org_matches)
         else:
             print(f"      No matches")
-
+        
         org_plan_bc.unpersist()
 
     # Step 5: Combine org results
     print("\n[5/7] Combining org-specific results...")
     if org_results:
         org_combined = reduce(lambda df1, df2: df1.union(df2), org_results)
-        # QUICK WIN 3: Removed count() call here
-        print(f"   Org-specific results combined")
+        org_matches_count = org_combined.count()
+        print(f"   Total org-specific matches: {org_matches_count:,}")
     else:
         org_combined = None
+        org_matches_count = 0
         print(f"   No org-specific matches")
 
     # Step 6: Process plans WITHOUT orgId (global plans, BATCHED)
     print("\n[6/7] Processing plans WITHOUT orgId (global, BATCHED)...")
     global_matches = None
-
+    global_matches_count = 0
+    
     if plans_without_orgid:
         print(f"   Plans to process: {len(plans_without_orgid):,}")
 
         # ✅ KEY CHANGE: Build ONE index for ALL global plans (with OR logic built-in)
         global_plan_index = build_plan_index_from_rows(plans_without_orgid)
         global_plan_bc = spark.sparkContext.broadcast(global_plan_index)
-
+        
         # Single UDF call for all global plans
         global_matches = match_users_to_plans(user_df, global_plan_bc)
-
+        
         if global_matches:
-            # QUICK WIN 3: Removed count() call here
-            print(f"   Global plans processed")
+            global_matches_count = global_matches.count()
+            print(f"   Global matches: {global_matches_count:,}")
         else:
             print(f"   No global matches")
-
+        
         global_plan_bc.unpersist()
     else:
         print(f"   No global plans to process")
@@ -276,7 +257,7 @@ def explodeAcbpData(spark, acbp_df: DataFrame) -> DataFrame:
         print("   No matches found")
         return spark.createDataFrame([], schema=acbp_df.schema)
 
-    # Cache + metrics in one pass (ONLY count operation in entire function)
+    # Cache + metrics in one pass
     final_df.cache()
     metrics = final_df.agg(
         F.count("*").alias("total_matches"),
@@ -294,6 +275,8 @@ def explodeAcbpData(spark, acbp_df: DataFrame) -> DataFrame:
     print("="*80)
     print(f"Total time: {elapsed_time/60:.1f} minutes")
     print(f"Total user-plan matches: {total_matches:,}")
+    print(f"  - From org-specific plans: {org_matches_count:,}")
+    print(f"  - From global plans: {global_matches_count:,}")
     print(f"Unique users matched: {unique_users:,}")
     print(f"Unique plans with matches: {unique_plans:,}")
     print(f"Processing rate: {total_matches/elapsed_time:,.0f} matches/second")
@@ -302,7 +285,7 @@ def explodeAcbpData(spark, acbp_df: DataFrame) -> DataFrame:
 
     # Export
     exportDFToParquet(final_df, ParquetFileConstants.ACBP_COMPUTED_FILE)
-
+    
     final_df.unpersist()
 
     return final_df
