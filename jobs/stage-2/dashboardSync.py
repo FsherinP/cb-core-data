@@ -999,8 +999,8 @@ class DashboardSyncModel:
         try:
             # Check if already run today (Scala lines 1058-1069)
             current_date_str = datetime.now().strftime("%Y-%m-%d")
-            last_run_date = Redis.get("lhp_lastRunDate", config)
-            # last_run_date = ""  # Mock empty for testing
+            # last_run_date = Redis.get("lhp_lastRunDate", config)
+            last_run_date = ""  # Mock empty for testing
             print(f"📝 Redis.get('lhp_lastRunDate') = '{last_run_date}'")
 
             if last_run_date == current_date_str:
