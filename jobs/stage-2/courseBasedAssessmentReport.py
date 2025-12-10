@@ -222,25 +222,50 @@ class CourseBasedAssessmentModel:
                 col("mdoid"),
                 col("Report_Last_Generated_On")
             )
-
+            finalAssessmentDF = spark.read.parquet(ParquetFileConstants.FINAL_ASSESSMENT_PARQUET_FILE)
+            finalAssessmentDF = finalAssessmentDF.join(userAssessmentDF, finalAssessmentDF["Identifier"] == userAssessmentDF["assessChildID"], "inner") \
+                .withColumn("cut_off_percentage", col("assessPassPercentage").cast("float")) \
+                .withColumn("time_spent_by_the_user", unix_timestamp("assessEndTimestamp") - unix_timestamp("assessStartTimestamp")) \
+                .withColumn("data_last_generated_on", currentDateTime) \
+                .select(col("identifier").alias("assessment_id"),
+                        col("userID").alias("user_id"),
+                        col("courseID").alias("content_id"),
+                        col("name").alias("assessment_name"),
+                        col("assessPrimaryCategory").alias("assessment_type"),
+                        col("assessExpectedDuration").alias("assessment_duration"),
+                        col("time_spent_by_the_user"),
+                        date_format(from_unixtime(col("assessEndTime")), ParquetFileConstants.DATE_FORMAT).alias("completion_date"),
+                        col("assessOverallResult").alias("score_achieved"),
+                        col("assessMaxQuestions").alias("overall_score"),
+                        col("cut_off_percentage"),
+                        col("assessMaxQuestions").alias("total_question"),
+                        col("assessIncorrect").alias("number_of_incorrect_responses"),
+                        lit(0).alias("number_of_retakes"),
+                        col("data_last_generated_on"))
+            
+            finalAssessmentDF = self.duration_format(finalAssessmentDF,"assessment_duration")
+            finalAssessmentDF = self.duration_format(finalAssessmentDF,"time_spent_by_the_user")
+            
+            
             warehouseDF = fullReportDF.withColumn("data_last_generated_on", currentDateTime)\
                 .withColumn("cut_off_percentage", col("assessPercentage").cast("float")) \
                 .select(
                     col("userID").alias("user_id"),
                     col("course_id").alias("content_id"),
-                    col("assessment_id"),
+                    col("assessment_id"), #identifier
                     col("assessment_name").alias("assessment_name"),
-                    col("assessment_type").alias("assessment_type"),
+                    col("assessment_type").alias("assessment_type"), 
                     col("assessment_duration").alias("assessment_duration"),
                     col("assessment_duration").alias("time_spent_by_the_user"),
                     date_format(from_unixtime(col("assessEndTime")), ParquetFileConstants.DATE_FORMAT).alias("completion_date"),
-                    col("latest_percentage_achieved").alias("score_achieved"),
+                    col("latest_percentage_achieved").alias("score_achieved"),#enrollment 
                     col("total_questions").alias("overall_score"),
                     col("cut_off_percentage"),
                     col("total_questions").alias("total_question"),
                     col("incorrect_count").alias("number_of_incorrect_responses"),
                     col("retakes").alias("number_of_retakes"),
                     col("data_last_generated_on"))
+            warehouseDF = warehouseDF.unionByName(finalAssessmentDF)
             # mdo_orgids = mdoReportDF.select("mdoid").distinct().collect()
             # mdo_orgid_list = [row.mdoid for row in mdo_orgids]
 
