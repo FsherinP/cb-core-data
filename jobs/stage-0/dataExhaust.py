@@ -8,9 +8,9 @@ from pyspark.sql import SparkSession
 from pyspark.sql.functions import (
     col, from_json, explode_outer, concat, substring, lit, when, size, 
     expr, date_format, to_utc_timestamp, current_timestamp, coalesce,
-    to_timestamp, isnan, isnull, format_string, array_contains
+    to_timestamp, isnan, isnull, format_string, array_contains, array_join
 )
-from pyspark.sql.types import StructType, StructField, StringType, IntegerType,BooleanType,FloatType
+from pyspark.sql.types import StructType, StructField, StringType, IntegerType,BooleanType,FloatType,ArrayType
 from pyspark import StorageLevel
 import logging
 
@@ -430,7 +430,13 @@ class DataExhaustModel:
             array_fields_events = ["createdFor", "recordedLinks"]
             fields_clause_events = ",".join([f'"{f}"' for f in fields_events])
             event_query = f'{{"_source":[{fields_clause_events}],"query":{{"bool":{{"should":[{should_clause_events}]}}}}}}'
-           
+            speaker_schema = ArrayType(
+                StructType([
+                    StructField("id", StringType(), True),
+                    StructField("name", StringType(), True),
+                    StructField("email", StringType(), True)  # nullable
+                ])
+            )
             event_data_df = utils.read_elasticsearch_data(
                 self.spark,
                 self.config.sparkElasticsearchConnectionHost,
@@ -454,6 +460,16 @@ class DataExhaustModel:
                 "durationInSecs", col("duration") * 60
             ).withColumn(
                 "duration_formatted", self.duration_format_udf("durationInSecs")
+            ).withColumn(
+                "eventDurationInSecs", col("eventDuration") * 60
+            ).withColumn(
+                "event_duration_formatted", self.duration_format_udf("eventDurationInSecs")
+            ).withColumn(
+                "speakerArray", from_json(col("speakerDetails"), speaker_schema)
+            ).withColumn(
+                "speaker_id", array_join(expr("transform(speakerArray, x -> x.id)"), ", ")
+            ).withColumn(
+                "speaker_name", array_join(expr("transform(speakerArray, x -> x.name)"), ", ")
             ).select(
                 col("identifier").alias("event_id"),
                 col("name").alias("event_name"),
@@ -468,15 +484,15 @@ class DataExhaustModel:
                 col("resourceType").alias("event_tag").cast(StringType()),
                 col("typeofEvent").cast(StringType()),
                 col("maxEnrolments").cast(IntegerType()),
-                col("registrationLink").cast(StringType()),
                 col("meetingAgenda").cast(StringType()),
-                col("creatorDetails").cast(StringType()),
+                col("speakerDetails").cast(StringType()),
+                col("speaker_id").cast(StringType()),
                 col("recordedMediaLink").cast(StringType()),
                 col("noOfAttendes").cast(IntegerType()),
                 col("eventDuration").cast(IntegerType()),
                 col("meetingSummary").cast(StringType()),
                 col("courseLinked").cast(StringType())
-            ).dropDuplicates(["event_id"]).fillna(0.0, subset=["duration"])
+            ).dropDuplicates(["event_id"]).fillna(0.0, subset=["duration", "eventDuration"])
             
             self.write_parquet(event_details_df, f"{output_base_path}/eventDetails")
             
