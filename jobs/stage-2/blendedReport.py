@@ -56,7 +56,6 @@ class BlendedModel:
 
     def process_data(self, spark,config):
         try:
-            start_time = time.time()
             today = self.get_date()
             currentDateTime = date_format(current_timestamp(), ParquetFileConstants.DATE_TIME_WITH_AMPM_FORMAT)
 
@@ -522,7 +521,6 @@ def main():
         .config("spark.driver.memory", "20g") \
         .config("spark.driver.maxResultSize", "4g") \
         .config("spark.sql.shuffle.partitions", "64") \
-        .config("spark.driver.bindAddress", "127.0.0.1") \
         .config("spark.sql.legacy.timeParserPolicy", "LEGACY") \
         .config("spark.network.timeout", "600s") \
         .config("spark.executor.heartbeatInterval", "60s") \
