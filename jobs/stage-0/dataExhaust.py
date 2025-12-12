@@ -10,7 +10,7 @@ from pyspark.sql.functions import (
     expr, date_format, to_utc_timestamp, current_timestamp, coalesce,
     to_timestamp, isnan, isnull, format_string, array_contains, array_join
 )
-from pyspark.sql.types import StructType, StructField, StringType, IntegerType,BooleanType,FloatType
+from pyspark.sql.types import StructType, StructField, StringType, IntegerType,BooleanType,FloatType,ArrayType
 from pyspark import StorageLevel
 import logging
 
@@ -430,7 +430,13 @@ class DataExhaustModel:
             array_fields_events = ["createdFor", "recordedLinks"]
             fields_clause_events = ",".join([f'"{f}"' for f in fields_events])
             event_query = f'{{"_source":[{fields_clause_events}],"query":{{"bool":{{"should":[{should_clause_events}]}}}}}}'
-           
+            speaker_schema = ArrayType(
+                StructType([
+                    StructField("id", StringType(), True),
+                    StructField("name", StringType(), True),
+                    StructField("email", StringType(), True)  # nullable
+                ])
+            )
             event_data_df = utils.read_elasticsearch_data(
                 self.spark,
                 self.config.sparkElasticsearchConnectionHost,
