@@ -10,7 +10,7 @@
 - name: Write GCP service account file
   copy:
     content: "{{ gcp_artifcats_upload_service_account }}"
-    dest:  "{{ analytics.home }}/gcp_service_account.json"
+    dest:  "{{ analytics.home }}/jobs/gcp_service_account.json"
     mode: "0640"
     
 - name: Copy config.py file to jobs
