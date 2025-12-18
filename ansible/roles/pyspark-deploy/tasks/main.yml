@@ -7,6 +7,12 @@
     dest: "{{ analytics.home }}/"
     mode: '0755'
 
+- name: Write GCP service account file
+  copy:
+    content: "{{ gcp_artifcats_upload_service_account }}"
+    dest:  "{{ analytics.home }}/gcp_service_account.json"
+    mode: "0640"
+    
 - name: Copy config.py file to jobs
   template: src=config.py.j2 dest={{ analytics.home }}/jobs/config.py mode=755 owner={{ analytics_user }} group={{ analytics_group }}
 
