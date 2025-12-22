@@ -154,14 +154,14 @@ class CourseReportModel:
 
             allCBPAndAggDF = allCourseProgramDetailsDF.join(aggregatedDF, ["courseID"], "left")
 
-            courseBatchDF=spark.read.parquet(ParquetFileConstants.BATCH_SELECT_PARQUET_FILE) \
+            courseBatchDF=spark.read.parquet(ParquetFileConstants.BATCH_SELECT_PARQUET_FILE) 
 
             curatedCourseDataDFWithBatchInfo = allCBPAndAggDF \
             .join(
                 broadcast(
                     allCourseProgramDetailsDF
                     .filter(col("category") == "Blended Program")
-                    .select("courseID")
+                    .select("courseID","difficultyLevel")
                     .join(courseBatchDF, ["courseID"], "inner")
                     .select("courseID", "batchID", "courseBatchName", "courseBatchStartDate", "courseBatchEndDate")
                 ), 
@@ -240,6 +240,7 @@ class CourseReportModel:
                 lit("Not Available").alias("language"),  
                 lit("External Content").alias("content_sub_type"),
                 lit("0").alias("scorm_flag"),
+                lit(None).alias("difficulty_level"),
                 col("data_last_generated_on")
             )
 
@@ -362,6 +363,7 @@ class CourseReportModel:
                     col("contentLanguage").alias("language"),
                     col("courseCategory").alias("content_sub_type"),
                     col("scorm_flag"),
+                    col('difficultyLevel').alias('difficulty_level'),
                     col("data_last_generated_on")
                 )
             orgComputedDF = spark.read.parquet(ParquetFileConstants.ORG_SELECT_PARQUET_FILE) \
@@ -388,6 +390,7 @@ class CourseReportModel:
                 col("language").getItem(0).alias("language"),
                 col("contextCategory").alias("content_sub_type"),
                 lit(0).alias("scorm_flag"),
+                lit(None).alias("difficulty_level"),
                 lit(currentDateTime).alias("data_last_generated_on")
             )
             es_final_assessment_df = es_final_assessment_df.join(
