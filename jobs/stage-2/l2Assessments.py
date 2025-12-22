@@ -94,7 +94,7 @@ class L2AssessmentReport:
             print("\nStage 1: Processing APAR plans...")
             apar_plans_exploded = acbpAllEnrolDF \
                 .filter(col("isapar") == 'true') \
-                .withColumn("courseID", explode(split(col("acbpCourseIDList"), ","))) \
+                .withColumn("courseID", explode(col("acbpCourseIDList"))) \
                 .withColumn("courseID", regexp_replace(col("courseID"), r"^\s*\[|\]\s*$|\s+", "")) \
                 .select(
                     col("userID").alias("apar_user_id"),
@@ -454,7 +454,7 @@ class L2AssessmentReport:
                 col("user_designation").alias("designation"),
                 col("user_external_system_id").alias("external_system_id"),
                 col("user_external_system").alias("external_system"),
-                col("apar_isApar").alias("isApar"),
+                col("apar_isApar").cast("string").alias("isApar"),
                 col("apar_cbp_plan_id").alias("cbp_plan_id"),
                 col("apar_allocated_on").cast("timestamp").alias("allocated_on"),
                 lit(None).cast("string").alias("comprehensive_level_assessment_status"),
