@@ -281,7 +281,7 @@ class DataExhaustModel:
             should_clause = ",".join([f'{{"match":{{"primaryCategory.raw":"{pc}"}}}}' for pc in primary_categories])
             fields = ["identifier", "name", "primaryCategory", "status", "reviewStatus", "channel", 
                      "duration", "leafNodesCount", "lastPublishedOn", "lastStatusChangedOn", 
-                     "createdFor", "competencies_v6", "programDirectorName", "language", "courseCategory","organisation","childNodes"]
+                     "createdFor", "competencies_v6", "programDirectorName", "language", "courseCategory","organisation","childNodes","difficultyLevel"]
             array_fields = ["createdFor", "language","organisation","childNodes"]
             fields_clause = ",".join([f'"{f}"' for f in fields])
             query = f'{{"_source":[{fields_clause}],"query":{{"bool":{{"should":[{should_clause}]}}}}}}'

@@ -53,7 +53,8 @@ def preComputeAllCourseProgramESDataFrame(spark: SparkSession) -> DataFrame:
             F.col("competencySubThemeRefId"),
             col("contentLanguage"),
             col("courseCategory"),
-            col("contentCreator")
+            col("contentCreator"),
+            col("difficultyLevel")
         ) \
         .dropDuplicates(["courseID", "category"]) \
         .fillna(0.0, subset=["courseDuration"]) \
