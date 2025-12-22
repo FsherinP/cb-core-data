@@ -487,6 +487,7 @@ class DataExhaustModel:
                 col("meetingAgenda").cast(StringType()),
                 col("speakerDetails").cast(StringType()),
                 col("speaker_id").cast(StringType()),
+                col("speaker_name").cast(StringType()),
                 col("recordedMediaLink").cast(StringType()),
                 col("noOfAttendes").cast(IntegerType()),
                 col("eventDuration").cast(IntegerType()),
