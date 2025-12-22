@@ -426,7 +426,7 @@ class DataExhaustModel:
             fields_events = ["identifier", "name", "objectType", "status", "startDate", "startTime",
                            "duration", "registrationLink", "createdFor", "recordedLinks", "resourceType", "typeofEvent",
                            "maxEnrolments", "meetingAgenda", "creatorDetails", "recordedMediaLink", "noOfAttendes", "eventDuration",
-                           "meetingSummary", "courseLinked", ]
+                           "meetingSummary", "courseLinked", "speakerDetails" ]
             array_fields_events = ["createdFor", "recordedLinks"]
             fields_clause_events = ",".join([f'"{f}"' for f in fields_events])
             event_query = f'{{"_source":[{fields_clause_events}],"query":{{"bool":{{"should":[{should_clause_events}]}}}}}}'
@@ -487,6 +487,7 @@ class DataExhaustModel:
                 col("meetingAgenda").cast(StringType()),
                 col("speakerDetails").cast(StringType()),
                 col("speaker_id").cast(StringType()),
+                col("speaker_name").cast(StringType()),
                 col("recordedMediaLink").cast(StringType()),
                 col("noOfAttendes").cast(IntegerType()),
                 col("eventDuration").cast(IntegerType()),
