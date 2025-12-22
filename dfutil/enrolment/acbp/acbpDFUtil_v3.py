@@ -1,11 +1,14 @@
 import sys
 from pathlib import Path
+
 sys.path.append(str(Path(__file__).resolve().parents[3]))
 from util import schemas
 from constants.ParquetFileConstants import ParquetFileConstants
 
-import sys
-from pathlib import Path
+import os
+import shutil
+import time
+import duckdb
 from dfutil.user.userDFUtil import exportDFToParquet
 from pyspark.sql.types import *
 from pyspark.sql import SparkSession, DataFrame
@@ -13,32 +16,28 @@ from pyspark.sql.functions import (
     struct, explode, col, from_json, when, expr, concat_ws, array_join, lit, lower, trim, split, array_position, size
 )
 from pyspark.sql import functions as F
-from functools import reduce
-import time
-from collections import defaultdict
 
 
 def preComputeACBPData(spark):
     """
     Pre-process ACBP data from raw parquet files.
-    Uses v4 optimized org-partitioned strategy with batched broadcasts.
+    Uses DuckDB for memory-efficient joins (v5.0 - DuckDB optimized).
     """
-    print("="*80)
-    print("ACBP Pre-Processing - Version 4.0 (Batched Org-Partitioned)")
-    print("="*80)
+    print("=" * 80)
+    print("ACBP Pre-Processing - Version 5.0 (DuckDB Optimized)")
+    print("=" * 80)
 
     spark.conf.set("spark.sql.parquet.enableVectorizedReader", "false")
     spark.conf.set("spark.sql.parquet.outputTimestampType", "TIMESTAMP_MICROS")
 
     acbp_df = spark.read.parquet(ParquetFileConstants.ACBP_PARQUET_FILE)
-    acbp_df.printSchema()
 
     # CRITICAL FIX: Pre-process contextdata to wrap ALL scalar criteriaValue in arrays
     acbp_df = acbp_df.withColumn("contextdata",
                                  F.regexp_replace(col("contextdata"),
-                                                '"criteriaValue":((?!\\[)(true|false|"[^"]*"|[0-9]+(?:\\.[0-9]+)?))',
-                                                '"criteriaValue":[$1]'
-                                                )
+                                                  '"criteriaValue":((?!\\[)(true|false|"[^"]*"|[0-9]+(?:\\.[0-9]+)?))',
+                                                  '"criteriaValue":[$1]'
+                                                  )
                                  )
 
     acbp_select_df = (acbp_df.withColumn("context_data", from_json(col("contextdata"), schemas.accessControlSchema))
@@ -79,8 +78,8 @@ def preComputeACBPData(spark):
                       .na.fill({"cbPlanName": ""})
                       )
 
-    #acbp_select_df.show(5, truncate=False)
-    #print(f"acbp_select_df data: {acbp_select_df.count():,} rows")
+    acbp_select_count = acbp_select_df.count()
+    print(f"  ACBP select data: {acbp_select_count:,} rows")
 
     draft_cbp_data = (acbp_select_df
                       .filter((col("acbpStatus") == "draft") & col("draftdata").isNotNull())
@@ -91,514 +90,593 @@ def preComputeACBPData(spark):
                       .withColumn("assignmentTypeInfo",
                                   array_join(col("draftData.assignmentTypeInfo"), ","))
                       .withColumn("completionDueDate", col("draftData.endDate").cast("string"))
-                      .withColumn("allocatedOn", lit("not published"))
+                      .withColumn("allocatedOn", lit(None).cast("string"))  # Use None instead of "not published"
                       .withColumn("acbpCourseIDList", col("draftData.contentList"))
                       .drop("draftData"))
 
-    #draft_cbp_data.show(5, truncate=False)
-    #print(f"draft_cbp_data data: {draft_cbp_data.count():,} rows")
+    draft_count = draft_cbp_data.count()
+    print(f"  Draft CBP data: {draft_count:,} rows")
 
     non_draft_cbp_data = acbp_select_df.filter(col("acbpStatus") != "draft")
-    #non_draft_cbp_data.show(5, truncate=False)
-    #print(f"non_draft_cbp_data data: {non_draft_cbp_data.count():,} rows")
+    non_draft_count = non_draft_cbp_data.count()
+    print(f"  Non-draft CBP data: {non_draft_count:,} rows")
 
     draft_cbp_data = draft_cbp_data.withColumn("draftdata", lit(None).cast("string"))
-    #draft_cbp_data.show(5, truncate=False)
-    #print(f"draft_cbp_data data after adding draftdata column: {draft_cbp_data.count():,} rows")
 
     final_df = non_draft_cbp_data.unionByName(draft_cbp_data)
-    #final_df.show(5, truncate=False)
-    #print(f"final_df data: {final_df.count():,} rows")
+    total_plans = final_df.count()
+    print(f"  Total plans (final_df): {total_plans:,} rows")
 
     exportDFToParquet(final_df, ParquetFileConstants.ACBP_SELECT_FILE)
 
+    # Filter to Live plans only for explosion
     live_acbp_df = final_df.filter(col("acbpStatus") == "Live")
     live_count = live_acbp_df.count()
-    total_count = final_df.count()
-    #print(f"Total plans: {total_count}, Live Plans: {live_count}")
+    print(f"  Live plans for processing: {live_count:,} rows")
 
-    # Call optimized v4 explode function
+    # Call DuckDB-optimized explode function
     explodeAcbpData(spark, live_acbp_df)
 
 
 def explodeAcbpData(spark, acbp_df: DataFrame) -> DataFrame:
     """
-    OPTIMIZED VERSION 4.0: Batched Org-Partitioned Strategy with OR Logic Built-In
+    DuckDB-optimized ACBP explosion - Version 5.2 (Full Criteria Matching with OR Logic)
 
-    Key optimization:
-    - Group plans by org (org-partitioning)
-    - Build ONE index per org with multiple criteria groups per plan (OR logic)
-    - One broadcast per org instead of one per plan row
-    - Performance: 2-3 minutes for 14M users, 9500 plans
+    Strategy:
+    1. Use Spark to parse and explode criteria into individual rows
+    2. Write expanded criteria data to temp parquet
+    3. Use DuckDB for memory-efficient joins with full criteria matching
+    4. Support OR logic: Same acbpID with different criteria combinations
+    5. Support global plans (without orgID)
+    6. Write final output to parquet
+
+    Supported criteria types:
+    - rootorgid: User's org must match
+    - alluser: All users in the plan's org
+    - user/customuser: Specific user IDs
+    - designation: User's designation must match
+    - cadre: User's cadre name must match
+    - group: User's group must match
+    - batch: User's cadre batch must match
+    - service: User's civil service name must match
     """
-
-    print("\n" + "="*80)
-    print("ACBP User Allocation - Version 4.0 (BATCHED ORG-PARTITIONED STRATEGY)")
-    print("="*80)
+    print("\n" + "=" * 80)
+    print("ACBP User Allocation - Version 5.2 (DuckDB + Full Criteria + OR Logic)")
+    print("=" * 80)
 
     start_time = time.time()
 
-    # Step 1: Load and normalize user data
-    print("\n[1/7] Loading user data...")
-    user_df = spark.read.parquet(ParquetFileConstants.USER_ORG_COMPUTED_FILE)
+    # Step 1: Create temp directory
+    project_dir = str(Path(__file__).resolve().parents[3])
+    temp_dir = f"{project_dir}/temp_acbp_duckdb"
+    if os.path.exists(temp_dir):
+        shutil.rmtree(temp_dir)
+    os.makedirs(temp_dir, exist_ok=True)
 
-    existing_columns = set(user_df.columns)
-    for col_name, default_val in [('isOnCentralDeputation', False), ('userProfileStatus', False)]:
-        if col_name not in existing_columns:
-            print(f"   Note: '{col_name}' column not found - adding default ({default_val})")
-            user_df = user_df.withColumn(col_name, lit(default_val))
+    print(f"\n[1/7] Parsing ACBP assignment types...")
+    print(f"  Temp directory: {temp_dir}")
 
-    user_df = user_df \
-        .withColumn("designation_normalized", lower(trim(col("designation")))) \
-        .withColumn("group_normalized", lower(trim(col("group")))) \
-        .withColumn("cadreName_normalized", lower(trim(col("cadreName")))) \
-        .withColumn("civilServiceName_normalized", lower(trim(col("civilServiceName")))) \
-        .withColumn("cadreBatch_normalized", lower(trim(col("cadreBatch"))))
+    # Parse criteria into arrays and explode to get one row per criteria
+    acbp_expanded = acbp_df \
+        .withColumn("criteria_types_arr", split(lower(col("assignmentType")), "\\|")) \
+        .withColumn("criteria_values_arr", split(col("assignmentTypeInfo"), "\\|")) \
+        .withColumn("criteria_idx", F.expr("sequence(0, size(criteria_types_arr) - 1)")) \
+        .withColumn("criteria_exploded", F.explode(col("criteria_idx"))) \
+        .withColumn("criteria_type", F.expr("criteria_types_arr[criteria_exploded]")) \
+        .withColumn("criteria_value", F.expr("criteria_values_arr[criteria_exploded]")) \
+        .withColumn("criteria_value_lower", lower(trim(col("criteria_value")))) \
+        .select(
+        "acbpID", "orgID", "acbpStatus", "acbpCreatedBy", "isapar", "cbPlanName",
+        "completionDueDate", "allocatedOn", "acbpCourseIDList",
+        "assignmentType", "assignmentTypeInfo",
+        "criteria_type", "criteria_value", "criteria_value_lower"
+    )
 
-    user_df = user_df.persist()
+    # Separate plans by whether they have orgID
+    acbp_with_org = acbp_expanded.filter(col("orgID").isNotNull() & (col("orgID") != ""))
+    acbp_without_org = acbp_expanded.filter(col("orgID").isNull() | (col("orgID") == ""))
 
-    total_users = user_df.count()
-    #print(f"   Total users: {total_users:,}")
+    # Get counts
+    plans_with_org_count = acbp_with_org.select("acbpID").distinct().count()
+    plans_without_org_count = acbp_without_org.select("acbpID").distinct().count()
+    print(f"  Plans WITH orgID: {plans_with_org_count:,}")
+    print(f"  Plans WITHOUT orgID: {plans_without_org_count:,}")
 
-    # Step 2: Collect and categorize plans
-    print("\n[2/7] Analyzing ACBP plans...")
-    #TODO: why do we need to collect here?
-    acbp_data = acbp_df.collect()
-    #total_plans = len(acbp_data)
-    #print(f"   Total plans: {total_plans:,}")
+    # Write expanded ACBP data
+    acbp_with_org_path = f"{temp_dir}/acbp_with_org.parquet"
+    acbp_without_org_path = f"{temp_dir}/acbp_without_org.parquet"
 
+    print("  Writing expanded ACBP criteria...")
+    acbp_with_org.write.mode("overwrite").parquet(acbp_with_org_path)
+    if plans_without_org_count > 0:
+        acbp_without_org.write.mode("overwrite").parquet(acbp_without_org_path)
 
-    # Step 3: Separate plans by orgId presence
-    print("\n[3/7] Categorizing plans by orgId...")
-    plans_with_orgid, plans_without_orgid, org_to_plans = categorize_plans_by_org(acbp_data)
+    # User data path and output path
+    user_data_path = ParquetFileConstants.USER_ORG_COMPUTED_FILE
+    output_path = ParquetFileConstants.ACBP_COMPUTED_FILE
 
-    print(f"   Plans WITH orgId: {len(plans_with_orgid):,}")
-    print(f"   Plans WITHOUT orgId: {len(plans_without_orgid):,}")
-    print(f"   Unique orgs in plans: {len(org_to_plans):,}")
+    print(f"\n[2/7] Initializing DuckDB...")
+    print(f"  User data path: {user_data_path}")
+    print(f"  Output path: {output_path}")
 
-    # Step 4: Process plans WITH orgId (org-partitioned, batched)
-    print("\n[4/7] Processing plans WITH orgId (org-partitioned, BATCHED)...")
-    org_results = []
+    # Remove existing output
+    if os.path.exists(output_path):
+        shutil.rmtree(output_path)
 
-    for org_idx, (org_id, org_plans) in enumerate(sorted(org_to_plans.items()), 1):
-        org_start = time.time()
+    # Initialize DuckDB
+    db_path = f"{temp_dir}/acbp_processing.duckdb"
+    con = duckdb.connect(database=db_path)
+    con.execute(f"SET temp_directory='{temp_dir}'")
+    con.execute("SET memory_limit='8GB'")
+    con.execute("SET threads=4")
+    con.execute("SET preserve_insertion_order=false")
 
-        print(f"\n   Org {org_idx}/{len(org_to_plans)}: {org_id}")
-        print(f"      Plans in this org: {len(org_plans):,}")
+    # Get user count
+    user_count = con.execute(f"""
+        SELECT COUNT(*) FROM read_parquet('{user_data_path}/*.parquet')
+    """).fetchone()[0]
+    print(f"  Total users: {user_count:,}")
 
-        org_users = user_df.filter(col('userOrgID') == org_id)
-        org_user_count = org_users.count()
-        print(f"      Users in this org: {org_user_count:,}")
+    print("\n[3/7] Creating user criteria matching view...")
 
-        if org_user_count == 0:
-            print(f"      No users found - skipping")
-            continue
+    # Create a view with normalized user data for matching
+    con.execute(f"""
+        CREATE OR REPLACE VIEW users AS
+        SELECT 
+            userID,
+            fullName,
+            userPrimaryEmail,
+            userMobile,
+            designation,
+            "group",
+            userOrgID,
+            ministry_name,
+            dept_name,
+            userOrgName,
+            cadreName,
+            civilServiceType,
+            civilServiceName,
+            cadreBatch,
+            organised_service,
+            userStatus,
+            LOWER(TRIM(COALESCE(designation, ''))) as designation_lower,
+            LOWER(TRIM(COALESCE("group", ''))) as group_lower,
+            LOWER(TRIM(COALESCE(cadreName, ''))) as cadre_lower,
+            LOWER(TRIM(COALESCE(civilServiceName, ''))) as service_lower,
+            LOWER(TRIM(COALESCE(cadreBatch, ''))) as batch_lower
+        FROM read_parquet('{user_data_path}/*.parquet')
+    """)
 
-        # ✅ KEY CHANGE: Build ONE index for ALL plans in this org (with OR logic built-in)
-        org_plan_index = build_plan_index_from_rows(org_plans)
-        org_plan_bc = spark.sparkContext.broadcast(org_plan_index)
+    print("\n[4/7] Processing org-based plans with OR logic...")
 
-        # Single UDF call for all org plans
-        org_matches = match_users_to_plans(org_users, org_plan_bc)
+    # Create view for org-based ACBP data
+    con.execute(f"""
+        CREATE OR REPLACE VIEW acbp_criteria AS
+        SELECT * FROM read_parquet('{acbp_with_org_path}/*.parquet')
+    """)
 
-        if org_matches:
-            match_count = org_matches.count()
-            org_elapsed = time.time() - org_start
-            print(f"      Matches found: {match_count:,} ({org_elapsed:.1f}s)")
-            org_results.append(org_matches)
-        else:
-            print(f"      No matches")
+    # Explode criteria values with criteria_group_id for OR logic
+    print("  Creating exploded criteria lookup with group tracking...")
+    con.execute(f"""
+        CREATE OR REPLACE TABLE criteria_exploded AS
+        SELECT 
+            a.acbpID,
+            a.orgID,
+            a.assignmentType,
+            a.assignmentTypeInfo,
+            a.criteria_type,
+            LOWER(TRIM(cv.value)) as criteria_value,
+            MD5(a.assignmentType || '|' || a.assignmentTypeInfo) as criteria_group_id
+        FROM acbp_criteria a,
+        LATERAL (SELECT unnest(string_split(a.criteria_value_lower, ',')) as value) cv
+        WHERE LENGTH(TRIM(cv.value)) > 0
+    """)
 
-        org_plan_bc.unpersist()
+    # Get plan info
+    print("  Creating plan info table...")
+    con.execute(f"""
+        CREATE OR REPLACE TABLE plan_info AS
+        SELECT DISTINCT
+            acbpID, orgID, isapar, assignmentType, assignmentTypeInfo, completionDueDate,
+            allocatedOn, acbpCourseIDList, acbpStatus, acbpCreatedBy, cbPlanName
+        FROM acbp_criteria
+    """)
 
-    # Step 5: Combine org results
-    print("\n[5/7] Combining org-specific results...")
-    if org_results:
-        org_combined = reduce(lambda df1, df2: df1.union(df2), org_results)
-        org_matches_count = org_combined.count()
-        print(f"   Total org-specific matches: {org_matches_count:,}")
+    # Get criteria count per criteria group (for OR logic)
+    print("  Computing criteria counts per criteria group...")
+    con.execute(f"""
+        CREATE OR REPLACE TABLE criteria_group_count AS
+        SELECT 
+            acbpID, 
+            criteria_group_id,
+            assignmentType,
+            assignmentTypeInfo,
+            COUNT(DISTINCT criteria_type) as total_criteria_types
+        FROM criteria_exploded
+        GROUP BY acbpID, criteria_group_id, assignmentType, assignmentTypeInfo
+    """)
+
+    # Match users to criteria groups
+    print("  Matching users to criteria groups...")
+    con.execute(f"""
+        CREATE OR REPLACE TABLE user_criteria_matches AS
+        -- rootorgid
+        SELECT DISTINCT 
+            u.userID, 
+            ce.acbpID, 
+            ce.criteria_group_id,
+            'rootorgid' as matched_type
+        FROM users u
+        INNER JOIN criteria_exploded ce 
+            ON ce.criteria_type = 'rootorgid'
+            AND u.userOrgID = ce.criteria_value
+
+        UNION ALL
+
+        -- alluser
+        SELECT DISTINCT 
+            u.userID, 
+            ce.acbpID, 
+            ce.criteria_group_id,
+            'alluser' as matched_type
+        FROM users u
+        INNER JOIN criteria_exploded ce 
+            ON ce.criteria_type = 'alluser'
+            AND u.userOrgID = ce.orgID
+
+        UNION ALL
+
+        -- user/customuser
+        SELECT DISTINCT 
+            u.userID, 
+            ce.acbpID, 
+            ce.criteria_group_id,
+            ce.criteria_type as matched_type
+        FROM users u
+        INNER JOIN criteria_exploded ce 
+            ON ce.criteria_type IN ('user', 'customuser')
+            AND LOWER(u.userID) = ce.criteria_value
+        INNER JOIN plan_info pi ON ce.acbpID = pi.acbpID AND u.userOrgID = pi.orgID
+
+        UNION ALL
+
+        -- designation
+        SELECT DISTINCT 
+            u.userID, 
+            ce.acbpID, 
+            ce.criteria_group_id,
+            'designation' as matched_type
+        FROM users u
+        INNER JOIN criteria_exploded ce 
+            ON ce.criteria_type = 'designation'
+            AND u.designation_lower = ce.criteria_value
+        INNER JOIN plan_info pi ON ce.acbpID = pi.acbpID AND u.userOrgID = pi.orgID
+
+        UNION ALL
+
+        -- cadre
+        SELECT DISTINCT 
+            u.userID, 
+            ce.acbpID, 
+            ce.criteria_group_id,
+            'cadre' as matched_type
+        FROM users u
+        INNER JOIN criteria_exploded ce 
+            ON ce.criteria_type = 'cadre'
+            AND u.cadre_lower = ce.criteria_value
+        INNER JOIN plan_info pi ON ce.acbpID = pi.acbpID AND u.userOrgID = pi.orgID
+
+        UNION ALL
+
+        -- group
+        SELECT DISTINCT 
+            u.userID, 
+            ce.acbpID, 
+            ce.criteria_group_id,
+            'group' as matched_type
+        FROM users u
+        INNER JOIN criteria_exploded ce 
+            ON ce.criteria_type = 'group'
+            AND u.group_lower = ce.criteria_value
+        INNER JOIN plan_info pi ON ce.acbpID = pi.acbpID AND u.userOrgID = pi.orgID
+
+        UNION ALL
+
+        -- batch
+        SELECT DISTINCT 
+            u.userID, 
+            ce.acbpID, 
+            ce.criteria_group_id,
+            'batch' as matched_type
+        FROM users u
+        INNER JOIN criteria_exploded ce 
+            ON ce.criteria_type = 'batch'
+            AND u.batch_lower = ce.criteria_value
+        INNER JOIN plan_info pi ON ce.acbpID = pi.acbpID AND u.userOrgID = pi.orgID
+
+        UNION ALL
+
+        -- service
+        SELECT DISTINCT 
+            u.userID, 
+            ce.acbpID, 
+            ce.criteria_group_id,
+            'service' as matched_type
+        FROM users u
+        INNER JOIN criteria_exploded ce 
+            ON ce.criteria_type = 'service'
+            AND u.service_lower = ce.criteria_value
+        INNER JOIN plan_info pi ON ce.acbpID = pi.acbpID AND u.userOrgID = pi.orgID
+    """)
+
+    # Aggregate by criteria_group_id
+    print("  Aggregating matches per criteria group...")
+    con.execute(f"""
+        CREATE OR REPLACE TABLE complete_matches AS
+        SELECT 
+            ucm.userID, 
+            ucm.acbpID, 
+            ucm.criteria_group_id,
+            COUNT(DISTINCT ucm.matched_type) as matched_types
+        FROM user_criteria_matches ucm
+        GROUP BY ucm.userID, ucm.acbpID, ucm.criteria_group_id
+    """)
+
+    # Write org-based results
+    print("  Creating org-based matched results...")
+    con.execute(f"""
+        COPY (
+            SELECT DISTINCT
+                u.userID, u.fullName, u.userPrimaryEmail, u.userMobile,
+                u.designation, u."group", u.userOrgID,
+                u.ministry_name, u.dept_name, u.userOrgName,
+                u.cadreName, u.civilServiceType, u.civilServiceName,
+                u.cadreBatch, u.organised_service, u.userStatus,
+                p.isapar, p.acbpID, 
+                cgc.assignmentType,
+                cgc.assignmentTypeInfo,
+                p.completionDueDate,
+                p.allocatedOn, p.acbpCourseIDList, p.acbpStatus,
+                p.acbpCreatedBy, p.cbPlanName
+            FROM complete_matches cm
+            INNER JOIN criteria_group_count cgc 
+                ON cm.acbpID = cgc.acbpID 
+                AND cm.criteria_group_id = cgc.criteria_group_id
+            INNER JOIN users u ON cm.userID = u.userID
+            INNER JOIN plan_info p ON cm.acbpID = p.acbpID
+            WHERE cm.matched_types = cgc.total_criteria_types
+        ) TO '{temp_dir}/result_org_based.parquet' (FORMAT PARQUET, COMPRESSION SNAPPY)
+    """)
+
+    print("\n[5/7] Processing global plans (without orgID)...")
+
+    if plans_without_org_count > 0:
+        print(f"  Found {plans_without_org_count} global plans")
+
+        # Create view for global plans
+        con.execute(f"""
+            CREATE OR REPLACE VIEW global_acbp_criteria AS
+            SELECT * FROM read_parquet('{acbp_without_org_path}/*.parquet')
+        """)
+
+        # Explode global criteria
+        con.execute(f"""
+            CREATE OR REPLACE TABLE global_criteria_exploded AS
+            SELECT 
+                a.acbpID,
+                a.assignmentType,
+                a.assignmentTypeInfo,
+                a.criteria_type,
+                LOWER(TRIM(cv.value)) as criteria_value,
+                MD5(a.assignmentType || '|' || a.assignmentTypeInfo) as criteria_group_id
+            FROM global_acbp_criteria a,
+            LATERAL (SELECT unnest(string_split(a.criteria_value_lower, ',')) as value) cv
+            WHERE LENGTH(TRIM(cv.value)) > 0
+        """)
+
+        # Get global criteria group counts
+        con.execute(f"""
+            CREATE OR REPLACE TABLE global_criteria_group_count AS
+            SELECT 
+                acbpID, 
+                criteria_group_id,
+                assignmentType,
+                assignmentTypeInfo,
+                COUNT(DISTINCT criteria_type) as total_criteria_types
+            FROM global_criteria_exploded
+            GROUP BY acbpID, criteria_group_id, assignmentType, assignmentTypeInfo
+        """)
+
+        # Get global plan info
+        con.execute(f"""
+            CREATE OR REPLACE TABLE global_plan_info AS
+            SELECT DISTINCT
+                acbpID, isapar, assignmentType, assignmentTypeInfo, completionDueDate,
+                allocatedOn, acbpCourseIDList, acbpStatus, acbpCreatedBy, cbPlanName
+            FROM global_acbp_criteria
+        """)
+
+        # Match users to global criteria (NO orgID filtering)
+        con.execute(f"""
+            CREATE OR REPLACE TABLE global_user_matches AS
+            -- user/customuser
+            SELECT DISTINCT 
+                u.userID, 
+                ce.acbpID, 
+                ce.criteria_group_id,
+                ce.criteria_type as matched_type
+            FROM users u
+            INNER JOIN global_criteria_exploded ce 
+                ON ce.criteria_type IN ('user', 'customuser')
+                AND LOWER(u.userID) = ce.criteria_value
+
+            UNION ALL
+
+            -- designation
+            SELECT DISTINCT 
+                u.userID, 
+                ce.acbpID, 
+                ce.criteria_group_id,
+                'designation' as matched_type
+            FROM users u
+            INNER JOIN global_criteria_exploded ce 
+                ON ce.criteria_type = 'designation'
+                AND u.designation_lower = ce.criteria_value
+
+            UNION ALL
+
+            -- cadre
+            SELECT DISTINCT 
+                u.userID, 
+                ce.acbpID, 
+                ce.criteria_group_id,
+                'cadre' as matched_type
+            FROM users u
+            INNER JOIN global_criteria_exploded ce 
+                ON ce.criteria_type = 'cadre'
+                AND u.cadre_lower = ce.criteria_value
+
+            UNION ALL
+
+            -- group
+            SELECT DISTINCT 
+                u.userID, 
+                ce.acbpID, 
+                ce.criteria_group_id,
+                'group' as matched_type
+            FROM users u
+            INNER JOIN global_criteria_exploded ce 
+                ON ce.criteria_type = 'group'
+                AND u.group_lower = ce.criteria_value
+
+            UNION ALL
+
+            -- batch
+            SELECT DISTINCT 
+                u.userID, 
+                ce.acbpID, 
+                ce.criteria_group_id,
+                'batch' as matched_type
+            FROM users u
+            INNER JOIN global_criteria_exploded ce 
+                ON ce.criteria_type = 'batch'
+                AND u.batch_lower = ce.criteria_value
+
+            UNION ALL
+
+            -- service
+            SELECT DISTINCT 
+                u.userID, 
+                ce.acbpID, 
+                ce.criteria_group_id,
+                'service' as matched_type
+            FROM users u
+            INNER JOIN global_criteria_exploded ce 
+                ON ce.criteria_type = 'service'
+                AND u.service_lower = ce.criteria_value
+        """)
+
+        # Aggregate global matches
+        con.execute(f"""
+            CREATE OR REPLACE TABLE global_complete_matches AS
+            SELECT 
+                gum.userID, 
+                gum.acbpID, 
+                gum.criteria_group_id,
+                COUNT(DISTINCT gum.matched_type) as matched_types
+            FROM global_user_matches gum
+            GROUP BY gum.userID, gum.acbpID, gum.criteria_group_id
+        """)
+
+        # Write global results
+        con.execute(f"""
+            COPY (
+                SELECT DISTINCT
+                    u.userID, u.fullName, u.userPrimaryEmail, u.userMobile,
+                    u.designation, u."group", u.userOrgID,
+                    u.ministry_name, u.dept_name, u.userOrgName,
+                    u.cadreName, u.civilServiceType, u.civilServiceName,
+                    u.cadreBatch, u.organised_service, u.userStatus,
+                    p.isapar, p.acbpID, 
+                    gcgc.assignmentType,
+                    gcgc.assignmentTypeInfo,
+                    p.completionDueDate,
+                    p.allocatedOn, p.acbpCourseIDList, p.acbpStatus,
+                    p.acbpCreatedBy, p.cbPlanName
+                FROM global_complete_matches gcm
+                INNER JOIN global_criteria_group_count gcgc 
+                    ON gcm.acbpID = gcgc.acbpID 
+                    AND gcm.criteria_group_id = gcgc.criteria_group_id
+                INNER JOIN users u ON gcm.userID = u.userID
+                INNER JOIN global_plan_info p ON gcm.acbpID = p.acbpID
+                WHERE gcm.matched_types = gcgc.total_criteria_types
+            ) TO '{temp_dir}/result_global.parquet' (FORMAT PARQUET, COMPRESSION SNAPPY)
+        """)
+
+        print(f"  Global plans processed")
     else:
-        org_combined = None
-        org_matches_count = 0
-        print(f"   No org-specific matches")
+        print("  No global plans found")
 
-    # Step 6: Process plans WITHOUT orgId (global plans, BATCHED)
-    print("\n[6/7] Processing plans WITHOUT orgId (global, BATCHED)...")
-    global_matches = None
-    global_matches_count = 0
+    print("\n[6/7] Combining and writing final output...")
 
-    if plans_without_orgid:
-        print(f"   Plans to process: {len(plans_without_orgid):,}")
+    # Create output directory
+    os.makedirs(output_path, exist_ok=True)
+    output_file = f"{output_path}/part-00000.parquet"
 
-        # ✅ KEY CHANGE: Build ONE index for ALL global plans (with OR logic built-in)
-        global_plan_index = build_plan_index_from_rows(plans_without_orgid)
-        global_plan_bc = spark.sparkContext.broadcast(global_plan_index)
-
-        # Single UDF call for all global plans
-        global_matches = match_users_to_plans(user_df, global_plan_bc)
-
-        if global_matches:
-            global_matches_count = global_matches.count()
-            print(f"   Global matches: {global_matches_count:,}")
-        else:
-            print(f"   No global matches")
-
-        global_plan_bc.unpersist()
+    # Combine both result files
+    if plans_without_org_count > 0:
+        con.execute(f"""
+            COPY (
+                SELECT DISTINCT * FROM (
+                    SELECT * FROM read_parquet('{temp_dir}/result_org_based.parquet')
+                    UNION ALL
+                    SELECT * FROM read_parquet('{temp_dir}/result_global.parquet')
+                )
+            ) TO '{output_file}' (FORMAT PARQUET, COMPRESSION SNAPPY, ROW_GROUP_SIZE 100000)
+        """)
     else:
-        print(f"   No global plans to process")
+        con.execute(f"""
+            COPY (
+                SELECT DISTINCT * FROM read_parquet('{temp_dir}/result_org_based.parquet')
+            ) TO '{output_file}' (FORMAT PARQUET, COMPRESSION SNAPPY, ROW_GROUP_SIZE 100000)
+        """)
 
-    # Unpersist user_df
-    user_df.unpersist()
+    # Get final count
+    count_result = con.execute(f"""
+        SELECT COUNT(*) FROM read_parquet('{output_file}')
+    """).fetchone()[0]
 
-    # Step 7: Combine all results
-    print("\n[7/7] Finalizing results...")
-    final_df = combine_results(spark, org_combined, global_matches)
-    if final_df is None:
-        print("   No matches found")
-        return spark.createDataFrame([], schema=acbp_df.schema)
+    # Get unique counts
+    unique_users = con.execute(f"""
+        SELECT COUNT(DISTINCT userID) FROM read_parquet('{output_file}')
+    """).fetchone()[0]
 
-    # Cache + metrics in one pass
-    final_df.cache()
-    metrics = final_df.agg(
-        F.count("*").alias("total_matches"),
-        F.countDistinct("userID").alias("unique_users"),
-        F.countDistinct("acbpID").alias("unique_plans")
-    ).collect()[0]
-
-    total_matches = metrics['total_matches']
-    unique_users = metrics['unique_users']
-    unique_plans = metrics['unique_plans']
+    unique_plans = con.execute(f"""
+        SELECT COUNT(DISTINCT acbpID) FROM read_parquet('{output_file}')
+    """).fetchone()[0]
 
     elapsed_time = time.time() - start_time
-    print("\n" + "="*80)
+
+    print("\n[7/7] Processing complete!")
+    print("\n" + "=" * 80)
     print("PROCESSING COMPLETE!")
-    print("="*80)
-    print(f"Total time: {elapsed_time/60:.1f} minutes")
-    print(f"Total user-plan matches: {total_matches:,}")
-    print(f"  - From org-specific plans: {org_matches_count:,}")
-    print(f"  - From global plans: {global_matches_count:,}")
+    print("=" * 80)
+    print(f"Total time: {elapsed_time:.1f} seconds ({elapsed_time / 60:.1f} minutes)")
+    print(f"Total user-plan matches: {count_result:,}")
     print(f"Unique users matched: {unique_users:,}")
     print(f"Unique plans with matches: {unique_plans:,}")
-    print(f"Processing rate: {total_matches/elapsed_time:,.0f} matches/second")
-    print(f"Output location: {ParquetFileConstants.ACBP_COMPUTED_FILE}")
-    print("="*80 + "\n")
+    print(f"Processing rate: {count_result / elapsed_time:,.0f} matches/second")
+    print(f"Output location: {output_path}")
+    print("=" * 80 + "\n")
 
-    # Export
-    exportDFToParquet(final_df, ParquetFileConstants.ACBP_COMPUTED_FILE)
+    # Cleanup
+    print("Cleaning up temporary files...")
+    con.close()
 
-    final_df.unpersist()
+    if os.path.exists(temp_dir):
+        shutil.rmtree(temp_dir)
 
-    return final_df
-
-
-def categorize_plans_by_org(acbp_data):
-    """
-    Separate plans into:
-    1. Plans with orgId (can be processed per-org)
-    2. Plans without orgId (must process against all users)
-    3. Dictionary mapping orgId -> list of plans
-    """
-    plans_with_orgid = []
-    plans_without_orgid = []
-    org_to_plans = defaultdict(list)
-
-    for row in acbp_data:
-        row_dict = row.asDict()
-        assignment_type = row_dict.get('assignmentType', '')
-        assignment_info = row_dict.get('assignmentTypeInfo', '')
-
-        # Skip empty assignments
-        if not assignment_type or not assignment_info or str(assignment_info).strip() == '':
-            continue
-
-        # Check if this plan has rootOrgId
-        types = [t.strip().lower() for t in str(assignment_type).split('|') if t.strip()]
-
-        if 'rootorgid' in types:
-            # Extract orgId value
-            infos = [i.strip() for i in str(assignment_info).split('|') if i.strip()]
-            if len(types) == len(infos):
-                rootorgid_idx = types.index('rootorgid')
-                org_ids_str = infos[rootorgid_idx]
-                # Handle multiple org IDs (comma-separated)
-                org_ids = [oid.strip() for oid in org_ids_str.split(',') if oid.strip()]
-
-                for org_id in org_ids:
-                    org_to_plans[org_id].append(row)
-
-                plans_with_orgid.append(row)
-        else:
-            plans_without_orgid.append(row)
-
-    return plans_with_orgid, plans_without_orgid, dict(org_to_plans)
-
-
-def build_plan_index_from_rows(plan_rows):
-    """
-    Build plan index from a list of plan rows.
-
-    ✅ KEY CHANGE: Stores multiple criteria groups per acbpID for OR logic
-    Structure: {
-        acbpID: [
-            {criteria, display_type, display_info, metadata},  # Criteria group 1
-            {criteria, display_type, display_info, metadata}   # Criteria group 2 (OR)
-        ]
-    }
-    """
-    plan_index = defaultdict(list)
-
-    display_mapping = {
-        'rootorgid': 'mdo_id',
-        'user': 'user',
-        'customuser': 'user',
-        'alluser': 'user',
-        'designation': 'designation',
-        'cadre': 'cadre',
-        'group': 'groups',
-        'batch': 'cadre_batch',
-        'service': 'civil_services',
-        'isprofileverified': 'is_verified_karmayogi',
-        'isoncentraldeputation': 'is_on_central_deputation'
-    }
-
-    for row in plan_rows:
-        row_dict = row.asDict()
-        acbp_id = row_dict['acbpID']
-        assignment_type = row_dict.get('assignmentType', '')
-        assignment_info = row_dict.get('assignmentTypeInfo', '')
-
-        if not assignment_type or not assignment_info or str(assignment_info).strip() == '':
-            continue
-
-        types = [t.strip().lower() for t in str(assignment_type).split('|') if t.strip()]
-        infos = [i.strip() for i in str(assignment_info).split('|') if i.strip()]
-
-        if len(types) != len(infos):
-            continue
-
-        criteria = []
-        for ctype, cinfo in zip(types, infos):
-            values_list = [v.strip().lower() for v in cinfo.split(',') if v.strip()]
-            criteria.append({
-                'type': ctype,
-                'values': set(values_list),
-                'raw_values': values_list
-            })
-
-        display_type = '|'.join([display_mapping.get(t, t) for t in types])
-
-        if len(types) == 1 and types[0] == 'alluser':
-            display_info = 'AllUser'
-        else:
-            display_info = '|'.join([', '.join(c['raw_values']) for c in criteria])
-
-        # ✅ KEY CHANGE: Append to list (OR logic between rows)
-        plan_index[acbp_id].append({
-            'criteria': criteria,
-            'display_type': display_type,
-            'display_info': display_info,
-            'metadata': {
-                'acbpStatus': row_dict.get('acbpStatus', ''),
-                'cbPlanName': row_dict.get('cbPlanName', ''),
-                'completionDueDate': row_dict.get('completionDueDate', ''),
-                'allocatedOn': row_dict.get('allocatedOn', ''),
-                'acbpCourseIDList': row_dict.get('acbpCourseIDList', ''),
-                'acbpCreatedBy': row_dict.get('acbpCreatedBy', ''),
-                'isapar': row_dict.get('isapar', ''),
-                'orgID': (row_dict.get('orgID') or '').strip()
-            }
-        })
-
-    return dict(plan_index)
-
-
-def match_users_to_plans(user_df, plan_index_bc):
-    """
-    Match a DataFrame of users against a broadcast plan index.
-
-    ✅ KEY CHANGE: Implements OR logic between criteria groups for same acbpID
-    """
-
-    def match_user(userID, userOrgID, designation, cadre, group, batch, service,
-                   isOnCentralDeputation, userProfileStatus):
-        """Self-contained UDF for matching with OR logic."""
-        matches = []
-        plans = plan_index_bc.value
-
-        user_profile = {
-            'userID': (userID or '').strip(),
-            'userOrgID': (userOrgID or '').strip(),
-            'designation': (designation or '').strip(),
-            'cadre': (cadre or '').strip(),
-            'group': (group or '').strip(),
-            'batch': (batch or '').strip(),
-            'service': (service or '').strip(),
-            'isOnCentralDeputation': bool(isOnCentralDeputation) if isOnCentralDeputation is not None else False,
-            'userProfileStatus': bool(userProfileStatus) if userProfileStatus is not None else False
-        }
-
-        for acbp_id, criteria_groups in plans.items():
-            # ✅ KEY CHANGE: Loop through all criteria groups for this plan (OR logic)
-            matches_any_group = False
-            matched_display_type = None
-            matched_display_info = None
-            matched_metadata = None
-
-            for criteria_group in criteria_groups:
-                criteria_list = criteria_group['criteria']
-                plan_org_id = (criteria_group['metadata'].get('orgID') or '').strip()
-
-                # AND logic within this criteria group
-                matches_all = True
-
-                for criterion in criteria_list:
-                    ctype = criterion['type']
-                    cvalues = criterion['values']
-
-                    if ctype == 'rootorgid':
-                        if user_profile['userOrgID'] not in cvalues:
-                            matches_all = False
-                            break
-                    elif ctype in ['user', 'customuser']:
-                        if user_profile['userID'] not in cvalues:
-                            matches_all = False
-                            break
-                    elif ctype == 'alluser':
-                        if user_profile['userOrgID'] != plan_org_id:
-                            matches_all = False
-                            break
-                    elif ctype == 'designation':
-                        if user_profile['designation'] not in cvalues:
-                            matches_all = False
-                            break
-                    elif ctype == 'cadre':
-                        if user_profile['cadre'] not in cvalues:
-                            matches_all = False
-                            break
-                    elif ctype == 'group':
-                        if user_profile['group'] not in cvalues:
-                            matches_all = False
-                            break
-                    elif ctype == 'batch':
-                        if user_profile['batch'] not in cvalues:
-                            matches_all = False
-                            break
-                    elif ctype == 'service':
-                        if user_profile['service'] not in cvalues:
-                            matches_all = False
-                            break
-                    elif ctype == 'isoncentraldeputation':
-                        if not cvalues or 'true' in cvalues or 'yes' in cvalues or '1' in cvalues:
-                            if not user_profile['isOnCentralDeputation']:
-                                matches_all = False
-                                break
-                        else:
-                            if user_profile['isOnCentralDeputation']:
-                                matches_all = False
-                                break
-                    elif ctype == 'isprofileverified':
-                        if not cvalues or 'true' in cvalues or 'yes' in cvalues or '1' in cvalues:
-                            if not user_profile['userProfileStatus']:
-                                matches_all = False
-                                break
-                        else:
-                            if user_profile['userProfileStatus']:
-                                matches_all = False
-                                break
-                    else:
-                        matches_all = False
-                        break
-
-                if matches_all:
-                    # ✅ This criteria group matched, store and break (OR logic)
-                    matches_any_group = True
-                    matched_display_type = criteria_group['display_type']
-                    matched_display_info = criteria_group['display_info']
-                    matched_metadata = criteria_group['metadata']
-                    break  # Stop checking other groups for this plan
-
-            # Only add if ANY criteria group matched
-            if matches_any_group:
-                matches.append({
-                    'acbpID': acbp_id,
-                    'assignmentType': matched_display_type,
-                    'assignmentTypeInfo': matched_display_info,
-                    'acbpStatus': matched_metadata['acbpStatus'],
-                    'cbPlanName': matched_metadata['cbPlanName'],
-                    'completionDueDate': matched_metadata['completionDueDate'],
-                    'allocatedOn': matched_metadata['allocatedOn'],
-                    'acbpCourseIDList': matched_metadata['acbpCourseIDList'],
-                    'acbpCreatedBy': matched_metadata['acbpCreatedBy'],
-                    'isapar': matched_metadata['isapar']
-                })
-
-        return matches
-
-    # Register UDF
-    match_schema = ArrayType(StructType([
-        StructField("acbpID", StringType(), True),
-        StructField("assignmentType", StringType(), True),
-        StructField("assignmentTypeInfo", StringType(), True),
-        StructField("acbpStatus", StringType(), True),
-        StructField("cbPlanName", StringType(), True),
-        StructField("completionDueDate", StringType(), True),
-        StructField("allocatedOn", StringType(), True),
-        StructField("acbpCourseIDList", StringType(), True),
-        StructField("acbpCreatedBy", StringType(), True),
-        StructField("isapar", StringType(), True)
-    ]))
-
-    match_udf = F.udf(match_user, match_schema)
-
-    # Apply UDF
-    users_with_matches = user_df.withColumn(
-        'plan_matches',
-        match_udf(
-            col('userID'), col('userOrgID'),
-            col('designation_normalized'), col('cadreName_normalized'),
-            col('group_normalized'), col('cadreBatch_normalized'),
-            col('civilServiceName_normalized'),
-            col('isOnCentralDeputation'), col('userProfileStatus')
-        )
-    )
-
-    # Filter and explode
-    users_with_matches = users_with_matches.filter(size(col('plan_matches')) > 0)
-    exploded = users_with_matches.withColumn('plan_match', explode(col('plan_matches')))
-
-    # Select final columns
-    result = exploded.select(
-        col('userID'), col('fullName'), col('userPrimaryEmail'), col('userMobile'),
-        col('designation'), col('group'), col('userOrgID'),
-        col('ministry_name'), col('dept_name'), col('userOrgName'),
-        col('cadreName'), col('civilServiceType'), col('civilServiceName'),
-        col('cadreBatch'), col('organised_service'), col('userStatus'),
-        col('plan_match.acbpID').alias('acbpID'),
-        col('plan_match.assignmentType').alias('assignmentType'),
-        col('plan_match.assignmentTypeInfo').alias('assignmentTypeInfo'),
-        col('plan_match.acbpStatus').alias('acbpStatus'),
-        col('plan_match.cbPlanName').alias('cbPlanName'),
-        col('plan_match.completionDueDate').alias('completionDueDate'),
-        col('plan_match.allocatedOn').alias('allocatedOn'),
-        col('plan_match.acbpCourseIDList').alias('acbpCourseIDList'),
-        col('plan_match.acbpCreatedBy').alias('acbpCreatedBy'),
-        col('plan_match.isapar').alias('isapar')
-    )
-
-    return result
-
-
-def combine_results(spark, org_results, global_results):
-    """Combine org-specific and global results."""
-    if org_results is not None and global_results is not None:
-        combined = org_results.unionByName(global_results, allowMissingColumns=True)
-        return combined.dropDuplicates(['userID', 'acbpID'])
-    elif org_results is not None:
-        return org_results
-    elif global_results is not None:
-        return global_results
-    else:
-        return None
+    print("DuckDB-based ACBP explosion complete!")
 
 
 def cast_ntz_to_string_recursively(schema, prefix=""):
@@ -607,14 +685,10 @@ def cast_ntz_to_string_recursively(schema, prefix=""):
     """
     fields = []
     for field in schema.fields:
-        print(f"{field.name}")
-        print(f"{field.dataType}")
         full_name = f"{prefix}.{field.name}" if prefix else field.name
 
         if isinstance(field.dataType, TimestampNTZType):
-            print("----------------------------------->")
             fields.append(col(full_name).cast("string").alias(field.name))
-
         elif isinstance(field.dataType, StructType):
             nested_cols = cast_ntz_to_string_recursively(field.dataType, prefix=full_name)
             fields.append(struct(*nested_cols).alias(field.name))

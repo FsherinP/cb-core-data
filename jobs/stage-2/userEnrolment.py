@@ -152,7 +152,7 @@ class UserEnrolmentModel:
 
             # Load and process ACBP data
             acbpAllEnrolmentDF = (spark.read.parquet(ParquetFileConstants.ACBP_COMPUTED_FILE)
-                                  .withColumn("courseID", explode(split(col("acbpCourseIDList"), ",")))\
+                                  .withColumn("courseID", explode(col("acbpCourseIDList")))\
                                   .withColumn("courseID", regexp_replace(col("courseID"), r"^\s*\[|\]\s*$|\s+", ""))\
                                   .withColumn("liveCBPlan", lit(True))
                                   .select(col("userOrgID"), col("courseID"), col("userID"),
