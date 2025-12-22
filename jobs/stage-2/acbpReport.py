@@ -74,7 +74,7 @@ class ACBPModel:
             #acbpAllEnrolDF.printSchema()
 
             acbpAllEnrolmentDF = (acbpAllEnrolDF\
-                .withColumn("courseID", explode(split(col("acbpCourseIDList"), ",")))\
+                .withColumn("courseID", explode(col("acbpCourseIDList")))\
                 .withColumn("courseID", regexp_replace(col("courseID"), r"^\s*\[|\]\s*$|\s+", ""))\
                 .join(allCourseProgramDetailsDF, ["courseID"], "left")\
                 .join(enrolmentDF, ["courseID", "userID"], "left")\
