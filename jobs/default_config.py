@@ -13,6 +13,10 @@ DEFAULT_CONFIG = {
     'redisPort': '6379',
     'redisDB': '12',
 
+    # Kfaka configuration
+    'brokerList': '10.175.5.154:9092,10.175.5.155:9092,10.175.5.156:9092',
+    'compression': None,
+
     # Spark Connection Hosts
     'sparkCassandraConnectionHost': '192.168.3.211',
     'sparkDruidRouterHost': '192.168.3.91',

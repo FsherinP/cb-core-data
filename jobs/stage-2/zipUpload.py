@@ -89,13 +89,13 @@ class ZipUploadModel:
             today_date = datetime.today().strftime('%Y-%m-%d')
             merged_dir = os.path.join(config.localReportDir, config.destinationDirectoryPath)
             kcm_dir = os.path.join(base_dir, "kcm-report", today_date, "ContentCompetencyMapping")
-            
+
             # Better KCM file detection
             kcm_file = None
             if os.path.exists(kcm_dir):
                 kcm_files = glob.glob(os.path.join(kcm_dir, "*.csv"))
                 kcm_file = kcm_files[0] if kcm_files else None
-            
+
             password = config.password
 
             # Clean and recreate merged directory
@@ -130,10 +130,10 @@ class ZipUploadModel:
                                 mdoid_value = item.replace(".csv", "")
                             else:
                                 mdoid_value = item
-                            
+
                             # Track this MDOID for KCM distribution
                             all_mdoids.add(mdoid_value)
-                            
+
                             dest_dir = os.path.join(merged_dir, mdoid_value)
                             os.makedirs(dest_dir, exist_ok=True)
 
@@ -153,7 +153,7 @@ class ZipUploadModel:
                     if os.path.exists(dest_dir):
                         # Copy KCM file with its original name
                         shutil.copy(kcm_file, os.path.join(dest_dir, "ContentCompetencyMapping.csv"))
-                
+
                 # Separate KCM sync (existing functionality)
                 print(f"Syncing KCM file separately: {kcm_file} -> {config.kcmSyncPath}")
                 try:

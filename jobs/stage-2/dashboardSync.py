@@ -34,11 +34,11 @@ from pyspark.sql.functions import (
     col, when, expr, collect_list, concat_ws, concat, lit, struct, to_json,
     row_number, window, desc, coalesce, countDistinct, first, last,
     avg, round as spark_round, element_at, size, bround, date_trunc,
-    date_sub, split, from_json, schema_of_json
+    date_sub, split, from_json, schema_of_json, lower
 )
 from pyspark.sql.functions import col, desc
 from pyspark.sql.window import Window
-from pyspark.sql.types import DoubleType, StructType, StructField, StringType, LongType
+from pyspark.sql.types import FloatType, DoubleType, StructType, StructField, StringType, LongType
 from dateutil import tz
 from datetime import datetime, timedelta, timezone
 import pytz
@@ -52,10 +52,10 @@ from constants.ParquetFileConstants import ParquetFileConstants
 from dfutil.enrolment import enrolmentDFUtil
 from constants.QueryConstants import QueryConstants
 from dfutil.assessment import assessmentDFUtil
+from dfutil.utils import utils
 from jobs.default_config import create_config
 from jobs.config import get_environment_config
-
-
+from dfutil.utils.utils import dispatch_df_to_kafka
 class DashboardDuckDBExecutor:
     """DuckDB Query Executor for optimized SQL queries"""
 
@@ -110,7 +110,7 @@ class DashboardSyncModel:
     # MAIN ORCHESTRATOR - Complete processData from Scala (Line 32)
     # =========================================================================
 
-    def processData(self, spark, config, timestamp=None):
+    def process_data(self, spark, config, timestamp=None):
         """
         Master method - does all the work (Scala line 32)
         100% COMPLETE with ALL Scala functionality
@@ -137,11 +137,92 @@ class DashboardSyncModel:
 
             # ===== PHASE 4: CBP Top 10 Reviews (Scala line 114) =====
             self.cbp_top_10_reviews(spark, config)
+            # ===== PHASE 5: Kafka displatches for druid ingest =====
+            enrolmentWarehouseComputed = spark.read.parquet(ParquetFileConstants.ENROLMENT_WAREHOUSE_COMPUTED_PARQUET_FILE)
+            contentWarehouseComputed = spark.read.parquet(ParquetFileConstants.CONTENT_WAREHOUSE_COMPUTED_PARQUET_FILE)
+            #userDF = spark.read.parquet(ParquetFileConstants.USER_SELECT_PARQUET_FILE)
+            #orgDF = spark.read.parquet(ParquetFileConstants.ORG_SELECT_PARQUET_FILE)
+           # STEP 1: Select only needed columns from each DF to reduce size
+            enrolment_slim = enrolmentWarehouseComputed.select(
+                col("userID"),
+                col("content_id"),
+                col("batchID"),
+                col("first_completed_on"),
+                col("enrolled_on"),
+                col("user_consumption_status"),
+                col("content_progress_percentage")
+            ).repartition(200, "content_id")
 
+            # STEP 6: Apply all transformations
+            allCourseProgramCompletionWithDetailsDF = (enrolment_slim.select(
+                # User & course identification
+                col("userID").alias("userID"),
+                col("content_id").alias("courseID"),
+                col("batchID").alias("batchID"),
+
+                # Timestamps -> 10-digit epoch (seconds)
+                unix_timestamp(col("first_completed_on"), "yyyy-MM-dd HH:mm:ss")
+                    .cast(LongType())
+                    .alias("courseCompletedTimestamp"),
+                unix_timestamp(col("enrolled_on"), "yyyy-MM-dd HH:mm:ss")
+                    .cast(LongType())
+                    .alias("courseEnrolledTimestamp"),
+                unix_timestamp(col("first_completed_on"), "yyyy-MM-dd HH:mm:ss")
+                    .cast(LongType())
+                    .alias("lastContentAccessTimestamp"),
+
+                # Progress mapping (0/1/2)
+                when(col("user_consumption_status") == "enrolled", 0)
+                    .when(col("user_consumption_status").contains("progress"), 1)
+                    .when(col("user_consumption_status") == "completed", 2)
+                    .otherwise(0)
+                    .cast(LongType())
+                    .alias("courseProgress"),
+
+                when(col("user_consumption_status") == "enrolled", 0)
+                    .when(col("user_consumption_status").contains("progress"), 1)
+                    .when(col("user_consumption_status") == "completed", 2)
+                    .otherwise(0)
+                    .cast(LongType())
+                    .alias("dbCompletionStatus"),
+
+                # Placeholders for content fields (to be filled by join with content DF)
+                lit(None).cast("string").alias("category"),
+                lit(None).cast("string").alias("courseName"),
+                lit(None).cast("string").alias("courseStatus"),
+                lit(None).cast("string").alias("courseReviewStatus"),
+                lit(None).cast(FloatType()).alias("courseDuration"),
+                lit(None).cast(LongType()).alias("courseResourceCount"),
+                lit(None).cast("string").alias("courseOrgID"),
+                lit(None).cast("string").alias("courseOrgName"),
+                lit(None).cast(LongType()).alias("courseOrgStatus"),
+
+                # Placeholders for user org & user details (to be filled by user/org joins)
+                lit(None).cast("string").alias("userOrgID"),
+                lit(None).cast("string").alias("userOrgName"),
+                lit(None).cast(LongType()).alias("userOrgStatus"),
+                lit(None).cast("string").alias("firstName"),
+                lit(None).cast("string").alias("lastName"),
+                lit(None).cast("string").alias("maskedEmail"),
+                lit(None).cast(LongType()).alias("userStatus"),
+
+                # Completion metrics
+                col("content_progress_percentage")
+                    .cast(FloatType())
+                    .alias("completionPercentage"),
+                col("user_consumption_status").alias("completionStatus"),
+            )
+        )
+            # Final checkpoint
+            allCourseProgramCompletionWithDetailsDF = allCourseProgramCompletionWithDetailsDF.checkpoint()
+
+            print(f"Final dataset: {allCourseProgramCompletionWithDetailsDF.count()} records")
+            allCourseProgramCompletionWithDetailsDF.show(5)
+            df_with_ts = allCourseProgramCompletionWithDetailsDF.withColumn("timestamp", lit(timestamp))
+            dispatch_df_to_kafka(df_with_ts, "prod.dashboards.user.course.program.progress", broker_list=config.brokerList)
             print("✅ COMPLETE Dashboard Sync finished successfully")
             # Redis.closeRedisConnect(config)
             print("📝 Redis connection close called")
-
         except Exception as e:
             print(f"❌ Error in processData: {str(e)}")
             import traceback
@@ -253,15 +334,6 @@ class DashboardSyncModel:
                 org_admin_count = org_admin_count_df.collect()[0]["org_with_admin_count"]
                 Redis.update("dashboard_org_with_mdo_admin_count", str(org_admin_count), conf = config)
                 print(f"📝 Redis Key: dashboard_org_with_mdo_admin_count, Value: {org_admin_count}")
-
-            # ===== USERS REGISTERED YESTERDAY (Scala lines 138-145) =====
-            users_registered_yesterday_df = self.duckdb_executor.execute_query(
-                spark, "users_registered_yesterday", QueryConstants.USER_REGISTERED_YESTERDAY
-            )
-            if users_registered_yesterday_df and users_registered_yesterday_df.count() > 0:
-                users_count = users_registered_yesterday_df.collect()[0]["count"]
-                Redis.update("dashboard_new_users_registered_yesterday", str(users_count), conf = config)
-                print(f"📝 Redis Key: dashboard_new_users_registered_yesterday, Value: {users_count}")
 
             # ===== OVERALL METRICS (SINGLE MEGA QUERY) =====
             overall_metrics_df = self.duckdb_executor.execute_query(
@@ -491,16 +563,25 @@ class DashboardSyncModel:
                 certs_by_mdo_df.show(5, truncate=False)
 
             # ===== CORE COMPETENCIES BY MDO (Scala lines 792-796) =====
-            core_comp_by_mdo_df = self.duckdb_executor.execute_query(
-                spark, "core_comp_by_mdo", QueryConstants.CORE_COMPETENCIES_BY_MDO
-            )
-            if core_comp_by_mdo_df and core_comp_by_mdo_df.count() > 0:
-                Redis.dispatchDataFrame("dashboard_core_competencies_by_user_org",
-                                        core_comp_by_mdo_df, "userOrgID", "courseIDs", conf = config)
-                print(f"📝 Redis Map Key: dashboard_core_competencies_by_user_org")
-                print(f"   DataFrame (first 5 rows):")
-                core_comp_by_mdo_df.show(5, truncate=False)
-
+            try:
+                print("🎯 Processing core competencies by MDO...")
+                core_comp_by_mdo_df = self.duckdb_executor.execute_query(
+                spark, "core_comp_by_mdo", QueryConstants.CORE_COMPETENCIES_BY_MDO)
+                if core_comp_by_mdo_df and core_comp_by_mdo_df.count() > 0:
+                    core_comp_by_mdo_df = core_comp_by_mdo_df.repartition(128, "userOrgID")
+                    # Persist in memory to avoid recomputation
+                    core_comp_by_mdo_df.persist()
+                    row_count = core_comp_by_mdo_df.count()
+                    print(f"✓ Core competencies: {row_count:,} rows")
+                    Redis.dispatchDataFrame("dashboard_core_competencies_by_user_org", core_comp_by_mdo_df, "userOrgID", "courseIDs", conf = config)
+                    print(f"📝 Redis Map Key: dashboard_core_competencies_by_user_org")
+                    print(f"   DataFrame (first 5 rows):")
+                    core_comp_by_mdo_df.show(5, truncate=False)
+                    core_comp_by_mdo_df.unpersist()
+            except Exception as e:
+                print(f"⚠️ Core competencies failed: {e}")
+                import traceback
+                traceback.print_exc()
             # ===== COURSES COMPLETED AT LEAST ONCE BY MDO (Scala lines 783-784) =====
             courses_completed_mdo_df = self.duckdb_executor.execute_query(
                 spark, "courses_completed_mdo", QueryConstants.COURSES_COMPLETED_AT_LEAST_ONCE_BY_MDO
@@ -578,33 +659,11 @@ class DashboardSyncModel:
             FROM "nps-upgraded-users-data" 
             WHERE submitted = true AND activityID = '{platform_rating_survey_id}'
             """
-
-            # Execute Druid query
-            try:
-                response = requests.post(
-                    f"http://{druid_host}/druid/v2/sql",
-                    headers={"Content-Type": "application/json"},
-                    json={"query": nps_query}
-                )
-
-                if response.status_code == 200:
-                    result = response.json()
-                    if result and len(result) > 0:
-                        avg_nps = result[0].get("avgNps", 0.0)
-                        Redis.update("dashboard_nps_across_platform", str(avg_nps), conf = config)
-                        print(f"📝 Redis Key: dashboard_nps_across_platform, Value: {avg_nps}")
-                    else:
-                        Redis.update("dashboard_nps_across_platform", "0.0", conf = config)
-                        print(f"📝 Redis Key: dashboard_nps_across_platform, Value: 0.0")
-                else:
-                    print(f"⚠️ Druid query failed with status: {response.status_code}")
-                    Redis.update("dashboard_nps_across_platform", "0.0", conf = config)
-                    print(f"📝 Redis Key: dashboard_nps_across_platform, Value: 0.0")
-
-            except Exception as druid_error:
-                print(f"⚠️ Druid connection error: {druid_error}")
-                Redis.update("dashboard_nps_across_platform", "0.0", conf = config)
-                print(f"📝 Redis Key: dashboard_nps_across_platform, Value: 0.0")
+            npsDF = utils.druidDFOption(nps_query, config.sparkDruidRouterHost, limit=10000000, spark=spark)
+            if npsDF is None:
+                npsDF = self._empty_df(spark, "avgNps")
+            np_score = npsDF.select("avgNps").first()[0]
+            Redis.update("dashboard_nps_across_platform", str(np_score), conf= config)
 
         except Exception as e:
             print(f"❌ NPS score calculation failed: {e}")
@@ -1456,45 +1515,40 @@ class DashboardSyncModel:
 # ============================================================================
 # MAIN EXECUTION
 # ============================================================================
-
 def main():
-    """Main entry point for dashboard sync"""
-    print("=" * 80)
-    print("🚀 COMPLETE DASHBOARD SYNC - WITH PRINT STATEMENTS")
-    print("=" * 80)
-
-    try:
-        # Initialize Spark
-        spark = SparkSession.builder \
-            .appName("DashboardSyncComplete") \
-            .config("spark.sql.adaptive.enabled", "true") \
-            .config("spark.sql.adaptive.coalescePartitions.enabled", "true") \
-            .getOrCreate()
-
-        # Load configuration
-        env = get_environment_config()
-        config = create_config(env)
-
-        # Create model and run
-        model = DashboardSyncModel()
-        timestamp = int(datetime.now().timestamp() * 1000)
-
-        model.processData(spark, config, timestamp)
-
-        print("=" * 80)
-        print("✅ COMPLETE DASHBOARD SYNC FINISHED SUCCESSFULLY")
-        print("=" * 80)
-
-    except Exception as e:
-        print("=" * 80)
-        print(f"❌ DASHBOARD SYNC FAILED: {str(e)}")
-        print("=" * 80)
-        import traceback
-        traceback.print_exc()
-        raise
-    finally:
-        spark.stop()
-
+    # Initialize Spark Session with optimized settings for caching
+    spark = SparkSession.builder \
+    .appName("DashboardSync") \
+    .config("spark.executor.memory", "25g") \
+    .config("spark.driver.memory", "20g") \
+    .config("spark.driver.maxResultSize", "4g") \
+    .config("spark.sql.shuffle.partitions", "64") \
+    .config("spark.driver.bindAddress", "127.0.0.1") \
+    .config("spark.sql.legacy.timeParserPolicy", "LEGACY") \
+    .config("spark.network.timeout", "600s") \
+    .config("spark.executor.heartbeatInterval", "60s") \
+    .config("spark.shuffle.io.connectionTimeout", "300s") \
+    .config("spark.shuffle.io.maxRetries", "20") \
+    .config("spark.shuffle.io.retryWait", "10s") \
+    .config("spark.executor.memoryOverhead", "5g")\
+    .config("spark.sql.adaptive.enabled", "true") \
+    .config("spark.sql.adaptive.coalescePartitions.enabled", "true") \
+    .config("spark.sql.adaptive.skewJoin.enabled", "true") \
+    .getOrCreate()
+    spark.sparkContext.setCheckpointDir("/home/analytics/spark-checkpoints")
+    # Create model instance
+    start_time = datetime.now()
+    print(f"[START] DashboardSync processing started at: {start_time.strftime('%Y-%m-%d %H:%M:%S')}")
+    config_dict = get_environment_config()
+    config = create_config(config_dict)
+    model = DashboardSyncModel()
+    timestamp = int(datetime.now().timestamp() * 1000)
+    model.process_data(spark,config, timestamp)
+    end_time = datetime.now()
+    duration = end_time - start_time
+    print(f"[END] DashboardSync processing completed at: {end_time.strftime('%Y-%m-%d %H:%M:%S')}")
+    print(f"[INFO] Total duration: {duration}")
+    spark.stop()
 
 if __name__ == "__main__":
     main()

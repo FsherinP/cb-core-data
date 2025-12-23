@@ -2,7 +2,7 @@ from pathlib import Path
 from pyspark.sql import SparkSession, DataFrame
 from pyspark import StorageLevel
 from pyspark.sql.functions import (
-    col)
+    col, lit)
 import requests
 import json
 from typing import Optional
@@ -10,6 +10,8 @@ from google.cloud import storage
 import os
 import zipfile
 import shutil
+from confluent_kafka import Producer
+from kafka import KafkaProducer
 
 
 def druidDFOption(query: str, host: str, result_format: str = "object", limit: int = 10000,
@@ -271,8 +273,11 @@ def read_elasticsearch_data(spark: SparkSession, host: str, port: str, index: st
     # Select only the specified fields
     if fields:
         # Create column expressions for field selection
-        field_cols = [col(f) for f in fields]
-        df = df.select(*field_cols)
+        for f in fields:
+            #Add missing column with null
+            if f not in df.columns:
+                df = df.withColumn(f, lit(None))
+        df = df.select(*[col(f) for f in fields])
 
     # Persist with MEMORY_ONLY storage level for performance
     df = df.persist(StorageLevel.MEMORY_ONLY)
@@ -290,3 +295,27 @@ def writeToCassandra(df, keyspace: str, table: str, mode: str = "append"):
         .option("table", table) \
         .mode(mode) \
         .save()
+
+def dispatch_df_to_kafka(df, topic: str, broker_list: str):
+    if not topic:
+        print("ERROR: topic is blank, skipping kafka dispatch")
+        return
+    if not broker_list:
+        print("ERROR: broker list is blank, skipping kafka dispatch")
+        return
+
+    def send_partition(rows_iter):
+        producer = KafkaProducer(
+            bootstrap_servers=broker_list.split(","),
+            value_serializer=lambda v: v.encode("utf-8"),
+        )
+        try:
+            for row in rows_iter:
+                # adjust serialization as needed
+                value = json.dumps(row.asDict())
+                producer.send(topic, value)
+            producer.flush()
+        finally:
+            producer.close()
+
+    df.foreachPartition(send_partition)
