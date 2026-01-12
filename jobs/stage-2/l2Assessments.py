@@ -5,10 +5,10 @@ findspark.init()
 import sys
 import time
 from pathlib import Path
-from pyspark.sql import SparkSession
+from pyspark.sql import SparkSession, functions as F
 from pyspark.sql.window import Window
 from pyspark.sql.functions import (
-    col,explode,split,regexp_replace, 
+    col,explode,split,regexp_replace,trim,
     when, lit, row_number
 )
 
@@ -41,260 +41,501 @@ class L2AssessmentReport:
             today = self.get_date()
             primary_categories = ["Course", "Program", "Blended Program", "Curated Program", "Standalone Assessment"]
             
-            # load dataframes
+            # Load dataframes
+            print("Loading base dataframes...")
             kcmDF = spark.read.parquet(f"{config.warehouseReportDir}/{config.dwKcmDictionaryTable}")
             kcmMappingDF = spark.read.parquet(f"{config.warehouseReportDir}/{config.dwKcmContentTable}")
             dwEnrolmentDF = spark.read.parquet(f"{config.warehouseReportDir}/{config.dwEnrollmentsTable}")
-            enrolmentDF = spark.read.parquet(ParquetFileConstants.ENROLMENT_COMPUTED_PARQUET_FILE)
             acbpAllEnrolDF = spark.read.parquet(ParquetFileConstants.ACBP_COMPUTED_FILE)
             contentDF = spark.read.parquet(f"{config.warehouseReportDir}/{config.dwCourseTable}")
-            finalAssessmentDF = spark.read.parquet(ParquetFileConstants.FINAL_ASSESSMENT_PARQUET_FILE)
-            userAssessmentDF = spark.read.parquet(f"{config.warehouseReportDir}/{config.dwAssessmentTable}")
+            assessmentDetailDF = spark.read.parquet(f"{config.warehouseReportDir}/{config.dwAssessmentTable}")
+            dwOrgDF = spark.read.parquet(f"{config.warehouseReportDir}/{config.dwOrgTable}")
             userDF = spark.read.parquet(f"{config.warehouseReportDir}/{config.dwUserTable}")
-            orgHierarchyDF = spark.read.parquet(f"{config.warehouseReportDir}/{config.dwOrgTable}")
+            userDF = userDF.join(dwOrgDF.select("mdo_id", "mdo_name"), "mdo_id", "left")
             dwcbPlanDF = spark.read.parquet(f"{config.warehouseReportDir}/{config.dwCBPlanTable}")
-            contentHierarchyDF = spark.read.parquet(ParquetFileConstants.CONTENT_HIERARCHY_SELECT_PARQUET_FILE)
-            allCourseProgramESDF = spark.read.parquet(
-                ParquetFileConstants.ALL_COURSE_PROGRAM_COMPUTED_PARQUET_FILE).filter(
-                col("category").isin(primary_categories))
-            allCourseProgramDetailsDF = contentDFUtil.allCourseProgramDetailsWithCompetenciesJsonDataFrame(
-                allCourseProgramESDF, contentHierarchyDF,
-                spark.read.parquet(ParquetFileConstants.ORG_SELECT_PARQUET_FILE)).drop("competenciesJson")
-
-            #print("userAssessmentDF count:", userAssessmentDF.count())
-            #userAssessmentDF.show(5, truncate=False)
-
-            #finalAssessmentDF.printSchema()
-            #print("finalAssessmentDF count:", finalAssessmentDF.count())
-            #finalAssessmentDF.show(5, truncate=False)
             
-            # kcm dictionary dataframe
-            kcmMappingDF = kcmMappingDF.join(kcmDF, kcmDF.competency_area_id == kcmMappingDF.competency_area_id, "left").select(
-                col("course_id"),
-                kcmMappingDF["competency_area_id"],
-                col("competency_area")
-            ).distinct()
-
-            kcmDF.unpersist()
-            #print("kcmMappingDF count:", kcmMappingDF.count())
-            #kcmMappingDF.show(5, truncate=False)
-
-            # process cb_plan dataframe
-            cbPlanDF = acbpAllEnrolDF\
-                .withColumn("courseID", explode(split(col("acbpCourseIDList"), ",")))\
-                .withColumn("courseID", regexp_replace(col("courseID"), r"^\s*\[|\]\s*$|\s+", ""))\
-                .join(allCourseProgramDetailsDF, ["courseID"], "left")\
-                .join(enrolmentDF, ["courseID", "userID"], "left")\
-                .na.drop(subset=["userID", "courseID"])\
-                .drop("acbpCourseIDList")\
             
-            #print("cbPlanDF count:", cbPlanDF.count())
-            #cbPlanDF.show(5, truncate=False)
-
-            # process content dataframe
-            contentDF = contentDF \
-            .filter(col("content_status") == "Live")
-
-            #print("contentDF count:", contentDF.count())
-            #contentDF.show(5, truncate=False)
-        
-            # user details dataframe
-            #userDF = userDF.filter((col("status") == 1) & (col("mdo_id") == '0135502316148080641003'))
-            userDF = userDF.filter(col("status") == 1)
-
-            #print("userDF count:", userDF.count())
-            #userDF.show(5, truncate=False)
-
-            # organization hierarchy dataframe
-            orgHierarchyDF = orgHierarchyDF.select(
-                col("mdo_id"),
-                col("is_cca"))
-            
-            print("orgHierarchyDF count:", orgHierarchyDF.count())
-
-            #enrolment dataframe
-            dwEnrolmentDF = dwEnrolmentDF.withColumnRenamed("user_id", "enrol_user_id") \
-                            .withColumnRenamed("content_id", "enrol_content_id")
-            
-            #print("enrolmentDF count:", enrolmentDF.count())
-            #enrolmentDF.show(5, truncate=False)
-
-            cbPlanDF = cbPlanDF.join(dwcbPlanDF, dwcbPlanDF.cb_plan_id == cbPlanDF.acbpID, "left") \
-                .select(cbPlanDF["*"],dwcbPlanDF["due_by"])
-
-            # cb_plan (cbp_org_id, cbp_content_id, allotment_type, allotment_to, isapar) 
-            # JOIN content (content_id, content_name, content_status)
-            # join userDF with cp_plan when(allotment_type == 'User') then allotment_to == user_id 
-            # | when (allotment_type == 'Designation') then allotment_to == user_designation
-            # | when (allotment_type == 'all') then allotment_to == org_id
-
-
-            #join1 = contentDF.join(cbPlanDF, cbPlanDF.cbp_content_id == contentDF.content_id, "inner") \
-            #.join(kcmMappingDF, kcmMappingDF.course_id == contentDF.content_id, "left") \
-            #.select(cbPlanDF["*"], contentDF["content_name"], contentDF["content_status"], 
-            #        contentDF["content_type"], contentDF["content_sub_type"],contentDF["content_duration"], kcmMappingDF["competency_area"]) \
-            #.withColumnRenamed("competency_area", "competency_type")
-
-            join1 = cbPlanDF.join(kcmMappingDF, kcmMappingDF.course_id == cbPlanDF.courseID, "left") \
-            .select(cbPlanDF["*"], kcmMappingDF["competency_area"]) \
-            .withColumnRenamed("competency_area", "competency_type")
-
-            #unpersist
-            #contentDF.unpersist()
-            #cbPlanDF.unpersist()
-            #kcmMappingDF.unpersist()
-
-            print("join1 count after join:", join1.count())
-            #join1.show(5, truncate=False)
-
-            # join userDF with cbPlanDF
-            join2 = join1.join(contentDF, join1.courseID == contentDF.content_id, "left") \
-                    .join(userDF, join1.userID == userDF.user_id, "inner") \
-                    .select(join1["*"], userDF["external_system_id"], userDF["external_system"], contentDF["content_sub_type"], contentDF["content_type"],contentDF["content_status"],contentDF["content_duration"])
-
-            #unpersist userDF
-            #userDF.unpersist()
-            #join1.unpersist()
-            
-            print("join2 count after userDF join:", join2.count())
-            #join2.show(5, truncate=False)
-
-            # join with orgHierarchyDF to get mdo_name and is_cca
-            join3 = join2.join(orgHierarchyDF, join2.userOrgID == orgHierarchyDF.mdo_id, "left") \
-            .select(join2["*"], orgHierarchyDF.is_cca)
-
-            #unpersist orgHierarchyDF
-            #orgHierarchyDF.unpersist()
-            #join2.unpersist()
-
-            print("join3 count after orgHierarchyDF join:", join3.count())
-            #join3.printSchema()
-
-            content_consumption_window_spec = Window.partitionBy("user_id", "content_id").orderBy(col("content_last_accessed_on").desc())
-
-            #print("dwEnrolmentDF schema")
-            #dwEnrolmentDF.printSchema()
-
-            #join with enrolmentDF to get enrolment details
-            join4 = dwEnrolmentDF.join(join3, (join3.userID == dwEnrolmentDF.enrol_user_id) &
-            (join3.courseID == dwEnrolmentDF.enrol_content_id), "left") \
-                .filter((col("userID").isNotNull()) & (col("isapar") == 'true') & (col("enrol_content_id").isNotNull())) \
+            kcmCourseDF = kcmDF.join(kcmMappingDF, kcmDF.competency_area_id == kcmMappingDF.competency_area_id, "inner") \
                 .select(
-                    join3["userID"].alias("user_id"),
-                    col("userOrgID").alias("mdo_id"),
-                    col("userOrgName").alias("mdo_name"),
-                    col("fullName").alias("full_name"),
-                    lit(None).cast("string").alias("assessment_id"),
-                    lit(None).cast("string").alias("assessment_name"),
-                    lit(None).cast("string").alias("assessment_type"),
-                    lit(None).cast("string").alias("score_achieved"),
-                    join3["courseID"].alias("content_id"),
-                    join3["batchID"].alias("batch_id"),
-                    join3["courseName"].alias("content_name"),
-                    join3["content_type"],
-                    join3["content_sub_type"],
-                    dwEnrolmentDF["enrolled_on"].cast("timestamp").alias("enrolled_on"),
-                    dwEnrolmentDF["content_progress_percentage"],
-                    dwEnrolmentDF["certificate_id"],
-                    when(((dwEnrolmentDF["certificate_id"].isNotNull()) & (dwEnrolmentDF["certificate_id"] != "")), True).otherwise(False).alias("certificate_generated"),
-                    dwEnrolmentDF["content_last_accessed_on"].cast("timestamp").alias("content_last_accessed_on"),
-                    dwEnrolmentDF["first_completed_on"].cast("timestamp").alias("first_completed_on"),
-                    join3["content_duration"],
-                    join3["content_status"],
-                    join3["competency_type"],
-                    join3["userMobile"].alias("phone"),
-                    join3["userPrimaryEmail"].alias("email"),
-                    join3["cadreName"].alias("cadre"),
-                    join3["group"].alias("groups"),
-                    join3["designation"],
-                    join3["external_system_id"],
-                    join3["external_system"],
-                    join3["isapar"].alias("isApar"),
-                    join3["acbpID"].alias("cbp_plan_id"),
-                    join3["allocatedOn"].cast("timestamp").alias("allocated_on"),
-                    lit(None).cast("string").alias("comprehensive_level_assessment_status"),
-                    join3["allocatedOn"].cast("timestamp").alias("cbp_plan_start_date"),
-                    join3["due_by"].cast("timestamp").alias("cbp_plan_end_date"),
-                    lit(None).cast("string").alias("parichay_id"),
-                    dwEnrolmentDF["user_consumption_status"].alias("consumption_status"),
-                    lit(None).cast("timestamp").alias("assessment_date")
-                    ) \
-                .withColumn("rn", row_number().over(content_consumption_window_spec)) \
-                .filter(col("rn") == 1) \
-                .drop("rn") \
-                .orderBy(col("content_last_accessed_on").desc())
+                    col("course_id").alias("course_id"),
+                    kcmMappingDF["competency_area_id"],
+                    col("competency_area").alias("competency_area")
+                ).dropDuplicates()
             
-            join3.printSchema()
+            kcmCourseDF.show(5, truncate=False)
 
+            resultDF = (
+                kcmMappingDF
+                    .join(
+                        kcmDF,
+                        kcmDF.competency_area_id == kcmMappingDF.competency_area_id,
+                        "left"
+                    )
+                    .select(
+                        "course_id",
+                        kcmMappingDF["competency_area_id"],
+                        "competency_area"
+                    )
+                    .distinct()
+                    .groupBy("course_id")
+                    .agg(
+                        F.concat_ws(
+                            ", ",
+                            F.collect_set("competency_area")
+                        ).alias("competency_areas")
+                    )
+            )
 
-            #unpersist 
-            join3.unpersist()
-            #enrolmentDF.printSchema()
+            resultDF.show(5, truncate=False)
             
-
-            print("join4 count after enrolmentDF join:", join4.count())
-            #join4.show(5, truncate=False)
-            #join4.printSchema()
-
-            #join4.unpersist()
+            print("PART 1: PROCESSING APAR CONSUMPTION DATA")
             
-            assessment_window_spec = Window.partitionBy("user_id", "assessment_id").orderBy(col("assessment_date").desc())
+            # ==================== APAR CONSUMPTION PROCESSING ====================
+            print("\nStage 1: Processing APAR plans...")
+            apar_plans_exploded = acbpAllEnrolDF \
+                .filter(col("isapar") == 'true') \
+                .withColumn("courseID", explode(col("acbpCourseIDList"))) \
+                .withColumn("courseID", regexp_replace(col("courseID"), r"^\s*\[|\]\s*$|\s+", "")) \
+                .select(
+                    col("userID").alias("apar_user_id"),
+                    col("acbpID").alias("apar_cbp_plan_id"),
+                    col("courseID").alias("apar_content_id"),
+                    col("isapar").alias("apar_isApar"),
+                    col("allocatedOn").alias("apar_allocated_on"),
+                    col("cbPlanName").alias("apar_cbPlanName"),
+                    col("userOrgID").alias("apar_mdo_id"),
+                    col("userOrgName").alias("apar_mdo_name"),
+                    col("fullName").alias("apar_full_name")
+                )
 
-            join5 = userAssessmentDF.join(join4, (userAssessmentDF.user_id == join4.user_id) & (userAssessmentDF.content_id == join4.content_id), "left") \
-            .join(finalAssessmentDF, finalAssessmentDF.identifier == userAssessmentDF.assessment_id, "left") \
-            .filter((col("content_sub_type") == "Comprehensive Assessment Program") & (col("contextCategory") == "Final Program Assessment") & (col("isapar")== 'true')) \
-            .select(
-                join4["user_id"],
-                col("mdo_id").alias("mdo_id"),
-                col("mdo_name").alias("mdo_name"),
-                col("full_name").alias("full_name"),
-                userAssessmentDF["assessment_id"],
-                userAssessmentDF["assessment_name"],
-                userAssessmentDF["assessment_type"],
-                userAssessmentDF["score_achieved"],
-                join4["content_id"].alias("content_id"),
-                join4["batch_id"].alias("batch_id"),
-                join4["content_name"].alias("content_name"),
-                join4["content_type"],
-                join4["content_sub_type"],
-                join4["enrolled_on"].cast("timestamp").alias("enrolled_on"),
-                join4["content_progress_percentage"],
-                join4["certificate_id"],
-                when(((join4["certificate_id"].isNotNull()) & (join4["certificate_id"] != "")), True).otherwise(False).alias("certificate_generated"),
-                join4["content_last_accessed_on"].cast("timestamp").alias("content_last_accessed_on"),
-                join4["first_completed_on"].cast("timestamp").alias("first_completed_on"),
-                join4["content_duration"],
-                join4["content_status"],
-                join4["competency_type"],
-                join4["phone"].alias("phone"),
-                join4["email"].alias("email"),
-                join4["cadre"].alias("cadre"),
-                join4["groups"].alias("groups"),
-                join4["designation"],
-                join4["external_system_id"],
-                join4["external_system"],
-                join4["isApar"].alias("isApar"),
-                join4["cbp_plan_id"].alias("cbp_plan_id"),
-                join4["allocated_on"].cast("timestamp").alias("allocated_on"),
-                when(userAssessmentDF["score_achieved"] >= userAssessmentDF["cut_off_percentage"], lit("Pass")).otherwise(lit("Fail")).cast("string").alias("comprehensive_level_assessment_status"),
-                join4["allocated_on"].cast("timestamp").alias("cbp_plan_start_date"),
-                join4["cbp_plan_end_date"].cast("timestamp").alias("cbp_plan_end_date"),
-                lit(None).cast("string").alias("parichay_id"),
-                join4["consumption_status"].alias("consumption_status"),
-                userAssessmentDF["completion_date"].cast("timestamp").alias("assessment_date")
+            # Step 2: Join with enrolment data
+            print("\nStage 2: Joining with enrolment data...")
+            apar_with_consumption = apar_plans_exploded \
+                .join(
+                    dwEnrolmentDF,
+                    (apar_plans_exploded.apar_user_id == dwEnrolmentDF.user_id) &
+                    (apar_plans_exploded.apar_content_id == dwEnrolmentDF.content_id),
+                    "left"
                 ) \
-                .withColumn("rn", row_number().over(assessment_window_spec)) \
-                .filter(col("rn") == 1) \
-                .drop("rn") \
-                .orderBy(col("assessment_date").desc())
+                .select(
+                    col("apar_user_id"),
+                    col("apar_content_id"),
+                    col("apar_cbp_plan_id"),
+                    col("apar_isApar"),
+                    col("apar_allocated_on"),
+                    col("apar_cbPlanName"),
+                    col("apar_mdo_id"),
+                    col("apar_mdo_name"),
+                    col("apar_full_name"),
+                    col("batch_id").alias("enrol_batch_id"),
+                    col("enrolled_on").alias("enrol_enrolled_on"),
+                    col("content_progress_percentage").alias("enrol_content_progress_percentage"),
+                    col("certificate_id").alias("enrol_certificate_id"),
+                    col("content_last_accessed_on").alias("enrol_content_last_accessed_on"),
+                    col("first_completed_on").alias("enrol_first_completed_on"),
+                    col("user_consumption_status").alias("enrol_user_consumption_status")
+                )
+
+            # Step 3: Join with content data
+            print("\nStage 3: Joining with content data...")
+            apar_with_content = apar_with_consumption \
+                .join(
+                    contentDF,
+                    apar_with_consumption.apar_content_id == contentDF.content_id,
+                    "left"
+                ) \
+                .select(
+                    col("apar_user_id"),
+                    col("apar_content_id"),
+                    col("apar_cbp_plan_id"),
+                    col("apar_isApar"),
+                    col("apar_allocated_on"),
+                    col("apar_cbPlanName"),
+                    col("apar_mdo_id"),
+                    col("apar_mdo_name"),
+                    col("apar_full_name"),
+                    col("enrol_batch_id"),
+                    col("enrol_enrolled_on"),
+                    col("enrol_content_progress_percentage"),
+                    col("enrol_certificate_id"),
+                    col("enrol_content_last_accessed_on"),
+                    col("enrol_first_completed_on"),
+                    col("enrol_user_consumption_status"),
+                    col("content_name").alias("content_content_name"),
+                    col("content_type").alias("content_content_type"),
+                    col("content_sub_type").alias("content_content_sub_type"),
+                    col("content_duration").alias("content_content_duration"),
+                    col("content_status").alias("content_content_status")
+                )
+
+            # Step 4: Join with user data
+            print("\nStage 4: Joining with user data...")
+            apar_with_user = apar_with_content \
+                .join(
+                    userDF,
+                    apar_with_content.apar_user_id == userDF.user_id,
+                    "inner"
+                ) \
+                .select(
+                    col("apar_user_id"),
+                    col("apar_content_id"),
+                    col("apar_cbp_plan_id"),
+                    col("apar_isApar"),
+                    col("apar_allocated_on"),
+                    col("apar_cbPlanName"),
+                    col("apar_mdo_id"),
+                    col("apar_mdo_name"),
+                    col("apar_full_name"),
+                    col("enrol_batch_id"),
+                    col("enrol_enrolled_on"),
+                    col("enrol_content_progress_percentage"),
+                    col("enrol_certificate_id"),
+                    col("enrol_content_last_accessed_on"),
+                    col("enrol_first_completed_on"),
+                    col("enrol_user_consumption_status"),
+                    col("content_content_name"),
+                    col("content_content_type"),
+                    col("content_content_sub_type"),
+                    col("content_content_duration"),
+                    col("content_content_status"),
+                    col("external_system_id").alias("user_external_system_id"),
+                    col("external_system").alias("user_external_system"),
+                    col("phone_number").alias("user_phone_number"),
+                    col("email").alias("user_email"),
+                    col("cadre").alias("user_cadre"),
+                    col("groups").alias("user_groups"),
+                    col("designation").alias("user_designation")
+                )
+
+            # Step 5: Join with CB Plan data
+            print("\nStage 5: Joining with CB plan data...")
+            apar_with_cbplan = apar_with_user \
+                .join(
+                    dwcbPlanDF,
+                    apar_with_user.apar_cbp_plan_id == dwcbPlanDF.cb_plan_id,
+                    "left"
+                ) \
+                .select(
+                    col("apar_user_id"),
+                    col("apar_content_id"),
+                    col("apar_cbp_plan_id"),
+                    col("apar_isApar"),
+                    col("apar_allocated_on"),
+                    col("apar_cbPlanName"),
+                    col("apar_mdo_id"),
+                    col("apar_mdo_name"),
+                    col("apar_full_name"),
+                    col("enrol_batch_id"),
+                    col("enrol_enrolled_on"),
+                    col("enrol_content_progress_percentage"),
+                    col("enrol_certificate_id"),
+                    col("enrol_content_last_accessed_on"),
+                    col("enrol_first_completed_on"),
+                    col("enrol_user_consumption_status"),
+                    col("content_content_name"),
+                    col("content_content_type"),
+                    col("content_content_sub_type"),
+                    col("content_content_duration"),
+                    col("content_content_status"),
+                    col("user_external_system_id"),
+                    col("user_external_system"),
+                    col("user_phone_number"),
+                    col("user_email"),
+                    col("user_cadre"),
+                    col("user_groups"),
+                    col("user_designation"),
+                    col("due_by").alias("cbplan_due_by"),
+                    col("apar_allocated_on").alias("cbplan_start_date")
+                )
+
+            # Step 6: Join with KCM mapping
+            print("\nStage 6: Joining with KCM mapping...")
+            apar_final = apar_with_cbplan \
+                .join(
+                    resultDF,
+                    apar_with_cbplan.apar_content_id == resultDF.course_id,
+                    "left"
+                ) \
+                .select(
+                    col("apar_user_id"),
+                    col("apar_content_id"),
+                    col("apar_cbp_plan_id"),
+                    col("apar_isApar"),
+                    col("apar_allocated_on"),
+                    col("apar_cbPlanName"),
+                    col("apar_mdo_id"),
+                    col("apar_mdo_name"),
+                    col("apar_full_name"),
+                    col("enrol_batch_id"),
+                    col("enrol_enrolled_on"),
+                    col("enrol_content_progress_percentage"),
+                    col("enrol_certificate_id"),
+                    col("enrol_content_last_accessed_on"),
+                    col("enrol_first_completed_on"),
+                    col("enrol_user_consumption_status"),
+                    col("content_content_name"),
+                    col("content_content_type"),
+                    col("content_content_sub_type"),
+                    col("content_content_duration"),
+                    col("content_content_status"),
+                    col("user_external_system_id"),
+                    col("user_external_system"),
+                    col("user_phone_number"),
+                    col("user_email"),
+                    col("user_cadre"),
+                    col("user_groups"),
+                    col("user_designation"),
+                    col("cbplan_due_by"),
+                    col("cbplan_start_date"),
+                    col("competency_areas").alias("kcm_competency_type")
+                )
+
+            # Filter for valid APAR consumption
+            validAparConsumptionDF = apar_final \
+                .filter(col("enrol_user_consumption_status").isin("in-progress", "completed")) \
+                .dropDuplicates()
             
-            print("join5 count after userAssessmentDF done")
+            print("PART 2: PROCESSING CAP (COMPREHENSIVE ASSESSMENT PROGRAM) DATA")
+            
+            # ==================== CAP ASSESSMENT PROCESSING ====================
+            print("\nStage 1: Getting CAP content...")
+            capContentDF = contentDF \
+                .drop(col("data_last_generated_on")) \
+                .filter(
+                    (col("content_sub_type") == "Comprehensive Assessment Program") &
+                    (col("content_status") == "Live")
+                ) \
+                .select(
+                    col("content_id").alias("cap_content_id"),
+                    col("content_name").alias("cap_content_name"),
+                    col("content_type").alias("cap_content_type"),
+                    col("content_sub_type").alias("cap_content_sub_type"),
+                    col("content_duration").alias("cap_content_duration"),
+                    col("content_status").alias("cap_content_status")
+                )
+            cap_with_enrolment = capContentDF \
+                .join(
+                    dwEnrolmentDF.filter(col("user_consumption_status").isin("in-progress", "completed")),
+                    capContentDF.cap_content_id == dwEnrolmentDF.content_id,
+                    "inner"
+                ) \
+                .select(
+                    col("cap_content_id"),
+                    col("cap_content_name"),
+                    col("cap_content_type"),
+                    col("cap_content_sub_type"),
+                    col("cap_content_duration"),
+                    col("cap_content_status"),
+                    col("user_id").alias("cap_user_id"),
+                    col("batch_id").alias("cap_enrol_batch_id"),
+                    col("enrolled_on").alias("cap_enrol_enrolled_on"),
+                    col("content_progress_percentage").alias("cap_enrol_content_progress_percentage"),
+                    col("certificate_id").alias("cap_enrol_certificate_id"),
+                    col("content_last_accessed_on").alias("cap_enrol_content_last_accessed_on"),
+                    col("first_completed_on").alias("cap_enrol_first_completed_on"),
+                    col("user_consumption_status").alias("cap_enrol_user_consumption_status")
+                ) \
+                .dropDuplicates()
+            print(f"CAP with enrolment count: {cap_with_enrolment.count()}")
 
-            apar_assessment_data = join4.union(join5)
+            # Step 3: Join with assessment details (left join - in-progress may not have assessment data)
+            print("\nStage 3: Joining with assessment details...")
+            cap_with_assessment = cap_with_enrolment \
+                .join(
+                    assessmentDetailDF,
+                    (cap_with_enrolment.cap_user_id == assessmentDetailDF.user_id) &
+                    (cap_with_enrolment.cap_content_id == assessmentDetailDF.content_id),
+                    "left"  # Left join so in-progress records without assessment data are kept
+                ) \
+                .select(
+                    col("cap_content_id"),
+                    col("cap_content_name"),
+                    col("cap_content_type"),
+                    col("cap_content_sub_type"),
+                    col("cap_content_duration"),
+                    col("cap_content_status"),
+                    col("cap_user_id"),
+                    col("cap_enrol_batch_id"),
+                    col("cap_enrol_enrolled_on"),
+                    col("cap_enrol_content_progress_percentage"),
+                    col("cap_enrol_certificate_id"),
+                    col("cap_enrol_content_last_accessed_on"),
+                    col("cap_enrol_first_completed_on"),
+                    col("cap_enrol_user_consumption_status"),
+                    col("assessment_id").alias("assess_assessment_id"),
+                    col("assessment_name").alias("assess_assessment_name"),
+                    col("assessment_type").alias("assess_assessment_type"),
+                    col("score_achieved").alias("assess_score_achieved"),
+                    col("cut_off_percentage").alias("assess_cut_off_percentage"),
+                    col("completion_date").alias("assess_assessment_date")
+                ) \
+                .dropDuplicates()
+            print(f"CAP with assessment count: {cap_with_assessment.count()}")
+            print("\nStage 4: Joining with user data...")
+            validL2AssessmentConsumptionDF = cap_with_assessment \
+                .join(
+                    userDF,
+                    cap_with_assessment.cap_user_id == userDF.user_id,
+                    "inner"
+                ) \
+                .select(
+                    col("cap_user_id").alias("assess_user_id"),
+                    col("cap_content_id").alias("assess_content_id"),
+                    col("assess_assessment_id"),
+                    col("assess_assessment_name"),
+                    col("assess_assessment_type"),
+                    col("assess_score_achieved"),
+                    col("assess_cut_off_percentage"),
+                    col("assess_assessment_date"),
+                    col("external_system_id").alias("assess_user_external_system_id"),
+                    col("external_system").alias("assess_user_external_system"),
+                    col("phone_number").alias("assess_user_phone_number"),
+                    col("email").alias("assess_user_email"),
+                    col("cadre").alias("assess_user_cadre"),
+                    col("groups").alias("assess_user_groups"),
+                    col("designation").alias("assess_user_designation"),
+                    col("full_name").alias("assess_user_full_name"),
+                    col("mdo_id").alias("assess_user_mdo_id"),
+                    col("mdo_name").alias("assess_user_mdo_name"),
+                    col("cap_content_name"),
+                    col("cap_content_type"),
+                    col("cap_content_sub_type"),
+                    col("cap_content_duration"),
+                    col("cap_content_status"),
+                    col("cap_enrol_batch_id"),
+                    col("cap_enrol_enrolled_on"),
+                    col("cap_enrol_content_progress_percentage"),
+                    col("cap_enrol_certificate_id"),
+                    col("cap_enrol_content_last_accessed_on"),
+                    col("cap_enrol_first_completed_on"),
+                    col("cap_enrol_user_consumption_status")
+                ) \
+                .dropDuplicates()
 
-            print("Stage 10: Generating final report...")
+            print("PART 3: CREATING MASTER DATAFRAME")
+            
+            # ==================== UNION BOTH DATAFRAMES ====================
+            print("\nCreating unified dataframe structure...")
+            
+            # Map APAR columns to final schema
+            apar_unified = validAparConsumptionDF.select(
+                col("apar_user_id").alias("user_id"),
+                col("apar_mdo_id").alias("mdo_id"),
+                col("apar_mdo_name").alias("mdo_name"),
+                col("apar_full_name").alias("full_name"),
+                lit(None).cast("string").alias("assessment_id"),
+                lit(None).cast("string").alias("assessment_name"),
+                lit(None).cast("string").alias("assessment_type"),
+                lit(None).cast("double").alias("score_achieved"),
+                col("apar_content_id").alias("content_id"),
+                col("enrol_batch_id").alias("batch_id"),
+                col("content_content_name").alias("content_name"),
+                col("content_content_type").alias("content_type"),
+                col("content_content_sub_type").alias("content_sub_type"),
+                col("enrol_enrolled_on").cast("timestamp").alias("enrolled_on"),
+                col("enrol_content_progress_percentage").alias("content_progress_percentage"),
+                col("enrol_certificate_id").alias("certificate_id"),
+                when(
+                    (col('enrol_user_consumption_status') == 'completed') & (col("enrol_certificate_id").isNotNull()) & (trim(col("enrol_certificate_id")) != ""), lit(True)
+                ).when(
+                    (col('enrol_user_consumption_status') == 'in-progress'), lit(False)
+                ).otherwise(
+                    lit(False)
+                ).alias("certificate_generated"),
+                col("enrol_content_last_accessed_on").cast("timestamp").alias("content_last_accessed_on"),
+                col("enrol_first_completed_on").cast("timestamp").alias("first_completed_on"),
+                col("content_content_duration").alias("content_duration"),
+                col("content_content_status").alias("content_status"),
+                col("kcm_competency_type").alias("competency_type"),
+                col("user_phone_number").alias("phone"),
+                col("user_email").alias("email"),
+                col("user_cadre").alias("cadre"),
+                col("user_groups").alias("groups"),
+                col("user_designation").alias("designation"),
+                col("user_external_system_id").alias("external_system_id"),
+                col("user_external_system").alias("external_system"),
+                col("apar_isApar").cast("string").alias("isApar"),
+                col("apar_cbp_plan_id").alias("cbp_plan_id"),
+                col("apar_allocated_on").cast("timestamp").alias("allocated_on"),
+                lit(None).cast("string").alias("comprehensive_level_assessment_status"),
+                col("cbplan_start_date").cast("timestamp").alias("cbp_plan_start_date"),
+                col("cbplan_due_by").cast("timestamp").alias("cbp_plan_end_date"),
+                lit(None).cast("string").alias("parichay_id"),  # Assuming parichay_id is same as external_system_id
+                col("enrol_user_consumption_status").alias("consumption_status"),
+                lit(None).alias("assessment_date")
+            )
+
+            # Map CAP columns to final schema
+            cap_unified = validL2AssessmentConsumptionDF.select(
+                col("assess_user_id").alias("user_id"),
+                col("assess_user_mdo_id").alias("mdo_id"),
+                col("assess_user_mdo_name").alias("mdo_name"),
+                col("assess_user_full_name").alias("full_name"),
+                col("assess_assessment_id").alias("assessment_id"),
+                col("assess_assessment_name").alias("assessment_name"),
+                col("assess_assessment_type").alias("assessment_type"),
+                col("assess_score_achieved").alias("score_achieved"),
+                col("assess_content_id").alias("content_id"),
+                col("cap_enrol_batch_id").alias("batch_id"),
+                col("cap_content_name").alias("content_name"),
+                col("cap_content_type").alias("content_type"),
+                col("cap_content_sub_type").alias("content_sub_type"),
+                col("cap_enrol_enrolled_on").cast("timestamp").alias("enrolled_on"),
+                col("cap_enrol_content_progress_percentage").alias("content_progress_percentage"),
+                col("cap_enrol_certificate_id").alias("certificate_id"),
+                when(
+                    (col('cap_enrol_user_consumption_status') == 'completed') & (col("cap_enrol_certificate_id").isNotNull()) & (trim(col("cap_enrol_certificate_id")) != ""), lit(True)
+                ).when(
+                    (col('cap_enrol_user_consumption_status') == 'in-progress'), lit(False)
+                ).otherwise(
+                    lit(False)
+                ).alias("certificate_generated"),
+                col("cap_enrol_content_last_accessed_on").cast("timestamp").alias("content_last_accessed_on"),
+                col("cap_enrol_first_completed_on").cast("timestamp").alias("first_completed_on"),
+                col("cap_content_duration").alias("content_duration"),
+                col("cap_content_status").alias("content_status"),
+                lit(None).cast("string").alias("competency_type"),
+                col("assess_user_phone_number").alias("phone"),
+                col("assess_user_email").alias("email"),
+                col("assess_user_cadre").alias("cadre"),
+                col("assess_user_groups").alias("groups"),
+                col("assess_user_designation").alias("designation"),
+                col("assess_user_external_system_id").alias("external_system_id"),
+                col("assess_user_external_system").alias("external_system"),
+                lit("false").alias("isApar"),
+                lit(None).alias("cbp_plan_id"),
+                lit(None).alias("allocated_on"),
+                when(
+                    col("assess_score_achieved") >= col("assess_cut_off_percentage"), 
+                    lit("Pass")
+                ).when(
+                    col("assess_score_achieved") <= col("assess_cut_off_percentage"), 
+                    lit("Fail")
+                ).otherwise(lit(None)).alias("comprehensive_level_assessment_status"),
+                lit(None).alias("cbp_plan_start_date"),
+                lit(None).alias("cbp_plan_end_date"),
+                lit(None).alias("parichay_id"),
+                col("cap_enrol_user_consumption_status").alias("consumption_status"),
+                col("assess_assessment_date").cast("timestamp").alias("assessment_date")
+            )
+
+            # Union both dataframes
+            print("\nUnioning APAR and CAP dataframes...")
+            masterFinalDF = apar_unified.unionByName(cap_unified).dropDuplicates()
+
+            # Print schema and sample data
+            print("\nFinal Schema:")
+            masterFinalDF.printSchema()
+            
+            print("\nSample data (10 rows):")
+            masterFinalDF.show(10, truncate=False)
+            masterFinalDF.filter(col("user_id") == "b4bb7eea-9af7-4b55-bf0e-65d32146fe27").show(20, truncate=False)
+            
+            
+            print("\nReport generation completed successfully!")
+
             # Export report
-            apar_assessment_data.coalesce(1).write.mode("overwrite").parquet("/mount/data/analytics/igot-reports/assessment-report-apar/parquet")
+            masterFinalDF.coalesce(1).write.mode("overwrite").parquet("/mount/data/analytics/igot-reports/assessment-report-apar/parquet")
             #csv
             #apar_assessment_data.coalesce(1).write.mode("overwrite").option("header", "true").csv("/home/analytics/shishir/assessment-report-apar/csv")
 

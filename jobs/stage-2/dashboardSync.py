@@ -34,11 +34,11 @@ from pyspark.sql.functions import (
     col, when, expr, collect_list, concat_ws, concat, lit, struct, to_json,
     row_number, window, desc, coalesce, countDistinct, first, last,
     avg, round as spark_round, element_at, size, bround, date_trunc,
-    date_sub, split, from_json, schema_of_json
+    date_sub, split, from_json, schema_of_json, lower
 )
 from pyspark.sql.functions import col, desc
 from pyspark.sql.window import Window
-from pyspark.sql.types import DoubleType, StructType, StructField, StringType, LongType
+from pyspark.sql.types import FloatType, DoubleType, StructType, StructField, StringType, LongType
 from dateutil import tz
 from datetime import datetime, timedelta, timezone
 import pytz
@@ -52,10 +52,10 @@ from constants.ParquetFileConstants import ParquetFileConstants
 from dfutil.enrolment import enrolmentDFUtil
 from constants.QueryConstants import QueryConstants
 from dfutil.assessment import assessmentDFUtil
+from dfutil.utils import utils
 from jobs.default_config import create_config
 from jobs.config import get_environment_config
-
-
+from dfutil.utils.utils import dispatch_df_to_kafka
 class DashboardDuckDBExecutor:
     """DuckDB Query Executor for optimized SQL queries"""
 
@@ -110,7 +110,7 @@ class DashboardSyncModel:
     # MAIN ORCHESTRATOR - Complete processData from Scala (Line 32)
     # =========================================================================
 
-    def processData(self, spark, config, timestamp=None):
+    def process_data(self, spark, config, timestamp=None):
         """
         Master method - does all the work (Scala line 32)
         100% COMPLETE with ALL Scala functionality
@@ -123,7 +123,7 @@ class DashboardSyncModel:
         try:
             # Update timestamp (Scala line 34-35)
             processing_time = datetime.fromtimestamp(timestamp / 1000).strftime("%Y-%m-%dT%H:%M:%SZ")
-            # Redis.update("dashboard_update_time", processing_time, config)
+            Redis.update("dashboard_update_time", processing_time, conf = config)
             print(f"📝 Redis Key: dashboard_update_time, Value: {processing_time}")
 
             # ===== PHASE 1: Org & User Data (Scala lines 38-100) =====
@@ -137,11 +137,92 @@ class DashboardSyncModel:
 
             # ===== PHASE 4: CBP Top 10 Reviews (Scala line 114) =====
             self.cbp_top_10_reviews(spark, config)
+            # ===== PHASE 5: Kafka displatches for druid ingest =====
+            enrolmentWarehouseComputed = spark.read.parquet(ParquetFileConstants.ENROLMENT_WAREHOUSE_COMPUTED_PARQUET_FILE)
+            contentWarehouseComputed = spark.read.parquet(ParquetFileConstants.CONTENT_WAREHOUSE_COMPUTED_PARQUET_FILE)
+            #userDF = spark.read.parquet(ParquetFileConstants.USER_SELECT_PARQUET_FILE)
+            #orgDF = spark.read.parquet(ParquetFileConstants.ORG_SELECT_PARQUET_FILE)
+           # STEP 1: Select only needed columns from each DF to reduce size
+            enrolment_slim = enrolmentWarehouseComputed.select(
+                col("userID"),
+                col("content_id"),
+                col("batchID"),
+                col("first_completed_on"),
+                col("enrolled_on"),
+                col("user_consumption_status"),
+                col("content_progress_percentage")
+            ).repartition(200, "content_id")
 
+            # STEP 6: Apply all transformations
+            allCourseProgramCompletionWithDetailsDF = (enrolment_slim.select(
+                # User & course identification
+                col("userID").alias("userID"),
+                col("content_id").alias("courseID"),
+                col("batchID").alias("batchID"),
+
+                # Timestamps -> 10-digit epoch (seconds)
+                unix_timestamp(col("first_completed_on"), "yyyy-MM-dd HH:mm:ss")
+                    .cast(LongType())
+                    .alias("courseCompletedTimestamp"),
+                unix_timestamp(col("enrolled_on"), "yyyy-MM-dd HH:mm:ss")
+                    .cast(LongType())
+                    .alias("courseEnrolledTimestamp"),
+                unix_timestamp(col("first_completed_on"), "yyyy-MM-dd HH:mm:ss")
+                    .cast(LongType())
+                    .alias("lastContentAccessTimestamp"),
+
+                # Progress mapping (0/1/2)
+                when(col("user_consumption_status") == "enrolled", 0)
+                    .when(col("user_consumption_status").contains("progress"), 1)
+                    .when(col("user_consumption_status") == "completed", 2)
+                    .otherwise(0)
+                    .cast(LongType())
+                    .alias("courseProgress"),
+
+                when(col("user_consumption_status") == "enrolled", 0)
+                    .when(col("user_consumption_status").contains("progress"), 1)
+                    .when(col("user_consumption_status") == "completed", 2)
+                    .otherwise(0)
+                    .cast(LongType())
+                    .alias("dbCompletionStatus"),
+
+                # Placeholders for content fields (to be filled by join with content DF)
+                lit(None).cast("string").alias("category"),
+                lit(None).cast("string").alias("courseName"),
+                lit(None).cast("string").alias("courseStatus"),
+                lit(None).cast("string").alias("courseReviewStatus"),
+                lit(None).cast(FloatType()).alias("courseDuration"),
+                lit(None).cast(LongType()).alias("courseResourceCount"),
+                lit(None).cast("string").alias("courseOrgID"),
+                lit(None).cast("string").alias("courseOrgName"),
+                lit(None).cast(LongType()).alias("courseOrgStatus"),
+
+                # Placeholders for user org & user details (to be filled by user/org joins)
+                lit(None).cast("string").alias("userOrgID"),
+                lit(None).cast("string").alias("userOrgName"),
+                lit(None).cast(LongType()).alias("userOrgStatus"),
+                lit(None).cast("string").alias("firstName"),
+                lit(None).cast("string").alias("lastName"),
+                lit(None).cast("string").alias("maskedEmail"),
+                lit(None).cast(LongType()).alias("userStatus"),
+
+                # Completion metrics
+                col("content_progress_percentage")
+                    .cast(FloatType())
+                    .alias("completionPercentage"),
+                col("user_consumption_status").alias("completionStatus"),
+            )
+        )
+            # Final checkpoint
+            allCourseProgramCompletionWithDetailsDF = allCourseProgramCompletionWithDetailsDF.checkpoint()
+
+            print(f"Final dataset: {allCourseProgramCompletionWithDetailsDF.count()} records")
+            allCourseProgramCompletionWithDetailsDF.show(5)
+            df_with_ts = allCourseProgramCompletionWithDetailsDF.withColumn("timestamp", lit(timestamp))
+            dispatch_df_to_kafka(df_with_ts, "prod.dashboards.user.course.program.progress", broker_list=config.brokerList)
             print("✅ COMPLETE Dashboard Sync finished successfully")
             # Redis.closeRedisConnect(config)
             print("📝 Redis connection close called")
-
         except Exception as e:
             print(f"❌ Error in processData: {str(e)}")
             import traceback
@@ -172,22 +253,22 @@ class DashboardSyncModel:
             active_user_count = org_user_count_df.agg(spark_sum("registeredCount")).collect()[0][0]
 
             # Redis dispatch (Scala lines 82-86)
-            # Redis.dispatch("redis_registered_officer_count_key", org_registered_user_count_map, config)
+            Redis.dispatch("redis_registered_officer_count_key", org_registered_user_count_map, conf = config)
             print(f"📝 Redis Key: redis_registered_officer_count_key")
             print(f"   Value (first 5): {dict(list(org_registered_user_count_map.items())[:5])}")
 
-            # Redis.dispatch("redis_total_officer_count_key", org_total_user_count_map, config)
+            Redis.dispatch("redis_total_officer_count_key", org_total_user_count_map, conf = config)
             print(f"📝 Redis Key: redis_total_officer_count_key")
             print(f"   Value (first 5): {dict(list(org_total_user_count_map.items())[:5])}")
 
-            # Redis.dispatch("redis_org_name_key", org_name_map, config)
+            Redis.dispatch("redis_org_name_key", org_name_map, conf = config)
             print(f"📝 Redis Key: redis_org_name_key")
             print(f"   Value (first 5): {dict(list(org_name_map.items())[:5])}")
 
-            # Redis.update("redis_total_registered_officer_count_key", str(active_user_count), config)
+            Redis.update("redis_total_registered_officer_count_key", str(active_user_count), conf = config)
             print(f"📝 Redis Key: redis_total_registered_officer_count_key, Value: {active_user_count}")
 
-            # Redis.update("redis_total_org_count_key", str(active_org_count), config)
+            Redis.update("redis_total_org_count_key", str(active_org_count), conf = config)
             print(f"📝 Redis Key: redis_total_org_count_key, Value: {active_org_count}")
 
             # Top 10 learners by MDO (Scala lines 88-100)
@@ -195,8 +276,8 @@ class DashboardSyncModel:
                 spark, "top_10_learners", QueryConstants.TOP_10_LEARNERS_BY_MDO_QUERY
             )
             if top_10_learners_df and top_10_learners_df.count() > 0:
-                # Redis.dispatchDataFrame("dashboard_top_10_learners_on_kp_by_user_org",
-                #                         top_10_learners_df, "userOrgID", "top_learners", config)
+                Redis.dispatchDataFrame("dashboard_top_10_learners_on_kp_by_user_org",
+                                        top_10_learners_df, "userOrgID", "top_learners", conf = config)
                 print(f"📝 Redis Map Key: dashboard_top_10_learners_on_kp_by_user_org")
                 print(f"   DataFrame (first 5 rows):")
                 top_10_learners_df.show(5, truncate=False)
@@ -206,8 +287,8 @@ class DashboardSyncModel:
                 spark, "org_designations", QueryConstants.ORG_BASED_DESIGNATION_LIST
             )
             if org_designations_df and org_designations_df.count() > 0:
-                # Redis.dispatchDataFrame("org_designations", org_designations_df,
-                #                         "userOrgID", "org_designations", config, replace=False)
+                Redis.dispatchDataFrame("org_designations", org_designations_df,
+                                        "userOrgID", "org_designations", conf = config, replace=False)
                 print(f"📝 Redis Map Key: org_designations")
                 print(f"   DataFrame (first 5 rows):")
                 org_designations_df.show(5, truncate=False)
@@ -251,17 +332,8 @@ class DashboardSyncModel:
             )
             if org_admin_count_df and org_admin_count_df.count() > 0:
                 org_admin_count = org_admin_count_df.collect()[0]["org_with_admin_count"]
-                # Redis.update("dashboard_org_with_mdo_admin_count", str(org_admin_count), config)
+                Redis.update("dashboard_org_with_mdo_admin_count", str(org_admin_count), conf = config)
                 print(f"📝 Redis Key: dashboard_org_with_mdo_admin_count, Value: {org_admin_count}")
-
-            # ===== USERS REGISTERED YESTERDAY (Scala lines 138-145) =====
-            users_registered_yesterday_df = self.duckdb_executor.execute_query(
-                spark, "users_registered_yesterday", QueryConstants.USER_REGISTERED_YESTERDAY
-            )
-            if users_registered_yesterday_df and users_registered_yesterday_df.count() > 0:
-                users_count = users_registered_yesterday_df.collect()[0]["count"]
-                # Redis.update("dashboard_new_users_registered_yesterday", str(users_count), config)
-                print(f"📝 Redis Key: dashboard_new_users_registered_yesterday, Value: {users_count}")
 
             # ===== OVERALL METRICS (SINGLE MEGA QUERY) =====
             overall_metrics_df = self.duckdb_executor.execute_query(
@@ -272,36 +344,36 @@ class DashboardSyncModel:
                 metrics = overall_metrics_df.first().asDict()
 
                 # Update all overall metrics (Scala lines ~200-250)
-                # Redis.update("dashboard_unique_users_enrolled_count", str(metrics["enrolment_unique_user_count"]), config)
+                Redis.update("dashboard_unique_users_enrolled_count", str(metrics["enrolment_unique_user_count"]), conf = config)
                 print(
                     f"📝 Redis Key: dashboard_unique_users_enrolled_count, Value: {metrics['enrolment_unique_user_count']}")
 
-                # Redis.update("dashboard_unique_users_not_started_count", str(metrics["not_started_unique_user_count"]), config)
+                Redis.update("dashboard_unique_users_not_started_count", str(metrics["not_started_unique_user_count"]), conf = config)
                 print(
                     f"📝 Redis Key: dashboard_unique_users_not_started_count, Value: {metrics['not_started_unique_user_count']}")
 
-                # Redis.update("dashboard_unique_users_started_count", str(metrics["started_unique_user_count"]), config)
+                Redis.update("dashboard_unique_users_started_count", str(metrics["started_unique_user_count"]), conf = config)
                 print(
                     f"📝 Redis Key: dashboard_unique_users_started_count, Value: {metrics['started_unique_user_count']}")
 
-                # Redis.update("dashboard_unique_users_in_progress_count", str(metrics["in_progress_unique_user_count"]), config)
+                Redis.update("dashboard_unique_users_in_progress_count", str(metrics["in_progress_unique_user_count"]), conf = config)
                 print(
                     f"📝 Redis Key: dashboard_unique_users_in_progress_count, Value: {metrics['in_progress_unique_user_count']}")
 
-                # Redis.update("dashboard_unique_users_completed_count", str(metrics["completed_unique_user_count"]), config)
+                Redis.update("dashboard_unique_users_completed_count", str(metrics["completed_unique_user_count"]), conf = config)
                 print(
                     f"📝 Redis Key: dashboard_unique_users_completed_count, Value: {metrics['completed_unique_user_count']}")
 
-                # Redis.update("dashboard_not_started_count", str(metrics["not_started_count"]), config)
+                Redis.update("dashboard_not_started_count", str(metrics["not_started_count"]), conf = config)
                 print(f"📝 Redis Key: dashboard_not_started_count, Value: {metrics['not_started_count']}")
 
-                # Redis.update("dashboard_started_count", str(metrics["started_count"]), config)
+                Redis.update("dashboard_started_count", str(metrics["started_count"]), conf = config)
                 print(f"📝 Redis Key: dashboard_started_count, Value: {metrics['started_count']}")
 
-                # Redis.update("dashboard_in_progress_count", str(metrics["in_progress_count"]), config)
+                Redis.update("dashboard_in_progress_count", str(metrics["in_progress_count"]), conf = config)
                 print(f"📝 Redis Key: dashboard_in_progress_count, Value: {metrics['in_progress_count']}")
 
-                # Redis.update("lp_completed_count", str(metrics["landing_page_completed_count"]), config)
+                Redis.update("lp_completed_count", str(metrics["landing_page_completed_count"]), conf = config)
                 print(f"📝 Redis Key: lp_completed_count, Value: {metrics['landing_page_completed_count']}")
 
                 # External content metrics
@@ -315,10 +387,10 @@ class DashboardSyncModel:
                     total_completed = metrics["content_completed_count"] + ext_metrics[
                         "external_content_completed_count"]
 
-                    # Redis.update("dashboard_enrolment_count", str(total_enrolment), config)
+                    Redis.update("dashboard_enrolment_count", str(total_enrolment), conf = config)
                     print(f"📝 Redis Key: dashboard_enrolment_count, Value: {total_enrolment}")
 
-                    # Redis.update("dashboard_completed_count", str(total_completed), config)
+                    Redis.update("dashboard_completed_count", str(total_completed), conf = config)
                     print(f"📝 Redis Key: dashboard_completed_count, Value: {total_completed}")
 
             # ===== MDO-WISE COMPREHENSIVE METRICS =====
@@ -328,62 +400,62 @@ class DashboardSyncModel:
 
             if mdo_metrics_df and mdo_metrics_df.count() > 0:
                 # All MDO-level dispatches (Scala lines ~250-290)
-                # Redis.dispatchDataFrame("dashboard_enrolment_count_by_user_org",
-                #                         mdo_metrics_df.select("userOrgID", col("course_enrolment_count").alias("count")),
-                #                         "userOrgID", "count", config)
+                Redis.dispatchDataFrame("dashboard_enrolment_count_by_user_org",
+                                        mdo_metrics_df.select("userOrgID", col("course_enrolment_count").alias("count")),
+                                        "userOrgID", "count", conf = config)
                 print(f"📝 Redis Map Key: dashboard_enrolment_count_by_user_org")
                 print(f"   DataFrame (first 5 rows):")
                 mdo_metrics_df.select("userOrgID", col("course_enrolment_count").alias("count")).show(5, truncate=False)
 
-                # Redis.dispatchDataFrame("dashboard_enrolment_content_by_user_org",
-                #                         mdo_metrics_df.select("userOrgID", col("content_enrolment_count").alias("count")),
-                #                         "userOrgID", "count", config)
+                Redis.dispatchDataFrame("dashboard_enrolment_content_by_user_org",
+                                        mdo_metrics_df.select("userOrgID", col("content_enrolment_count").alias("count")),
+                                        "userOrgID", "count", conf = config)
                 print(f"📝 Redis Map Key: dashboard_enrolment_content_by_user_org")
                 print(f"   DataFrame (first 5 rows):")
                 mdo_metrics_df.select("userOrgID", col("content_enrolment_count").alias("count")).show(5,
                                                                                                        truncate=False)
 
-                # Redis.dispatchDataFrame("dashboard_enrolment_unique_user_count_by_user_org",
-                #                         mdo_metrics_df.select("userOrgID", col("course_enrolment_unique_user_count").alias("uniqueUserCount")),
-                #                         "userOrgID", "uniqueUserCount", config)
+                Redis.dispatchDataFrame("dashboard_enrolment_unique_user_count_by_user_org",
+                                        mdo_metrics_df.select("userOrgID", col("course_enrolment_unique_user_count").alias("uniqueUserCount")),
+                                        "userOrgID", "uniqueUserCount", conf = config)
                 print(f"📝 Redis Map Key: dashboard_enrolment_unique_user_count_by_user_org")
                 print(f"   DataFrame (first 5 rows):")
                 mdo_metrics_df.select("userOrgID",
                                       col("course_enrolment_unique_user_count").alias("uniqueUserCount")).show(5,
                                                                                                                truncate=False)
 
-                # Redis.dispatchDataFrame("dashboard_active_users_last_12_months_by_org",
-                #                         mdo_metrics_df.select("userOrgID", col("active_users_last_12_months").alias("uniqueUserCount")),
-                #                         "userOrgID", "uniqueUserCount", config)
+                Redis.dispatchDataFrame("dashboard_active_users_last_12_months_by_org",
+                                        mdo_metrics_df.select("userOrgID", col("active_users_last_12_months").alias("uniqueUserCount")),
+                                        "userOrgID", "uniqueUserCount", conf = config)
                 print(f"📝 Redis Map Key: dashboard_active_users_last_12_months_by_org")
                 print(f"   DataFrame (first 5 rows):")
                 mdo_metrics_df.select("userOrgID", col("active_users_last_12_months").alias("uniqueUserCount")).show(5,
                                                                                                                      truncate=False)
 
-                # Redis.dispatchDataFrame("dashboard_not_started_count_by_user_org",
-                #                         mdo_metrics_df.select("userOrgID", col("not_started_count").alias("count")),
-                #                         "userOrgID", "count", config)
+                Redis.dispatchDataFrame("dashboard_not_started_count_by_user_org",
+                                        mdo_metrics_df.select("userOrgID", col("not_started_count").alias("count")),
+                                        "userOrgID", "count", conf = config)
                 print(f"📝 Redis Map Key: dashboard_not_started_count_by_user_org")
                 print(f"   DataFrame (first 5 rows):")
                 mdo_metrics_df.select("userOrgID", col("not_started_count").alias("count")).show(5, truncate=False)
 
-                # Redis.dispatchDataFrame("dashboard_started_count_by_user_org",
-                #                         mdo_metrics_df.select("userOrgID", col("started_count").alias("count")),
-                #                         "userOrgID", "count", config)
+                Redis.dispatchDataFrame("dashboard_started_count_by_user_org",
+                                        mdo_metrics_df.select("userOrgID", col("started_count").alias("count")),
+                                        "userOrgID", "count", conf = config)
                 print(f"📝 Redis Map Key: dashboard_started_count_by_user_org")
                 print(f"   DataFrame (first 5 rows):")
                 mdo_metrics_df.select("userOrgID", col("started_count").alias("count")).show(5, truncate=False)
 
-                # Redis.dispatchDataFrame("dashboard_in_progress_count_by_user_org",
-                #                         mdo_metrics_df.select("userOrgID", col("in_progress_count").alias("count")),
-                #                         "userOrgID", "count", config)
+                Redis.dispatchDataFrame("dashboard_in_progress_count_by_user_org",
+                                        mdo_metrics_df.select("userOrgID", col("in_progress_count").alias("count")),
+                                        "userOrgID", "count", conf = config)
                 print(f"📝 Redis Map Key: dashboard_in_progress_count_by_user_org")
                 print(f"   DataFrame (first 5 rows):")
                 mdo_metrics_df.select("userOrgID", col("in_progress_count").alias("count")).show(5, truncate=False)
 
-                # Redis.dispatchDataFrame("dashboard_completed_count_by_user_org",
-                #                         mdo_metrics_df.select("userOrgID", col("completed_count").alias("count")),
-                #                         "userOrgID", "count", config)
+                Redis.dispatchDataFrame("dashboard_completed_count_by_user_org",
+                                        mdo_metrics_df.select("userOrgID", col("completed_count").alias("count")),
+                                        "userOrgID", "count", conf = config)
                 print(f"📝 Redis Map Key: dashboard_completed_count_by_user_org")
                 print(f"   DataFrame (first 5 rows):")
                 mdo_metrics_df.select("userOrgID", col("completed_count").alias("count")).show(5, truncate=False)
@@ -395,50 +467,50 @@ class DashboardSyncModel:
 
             if cbp_metrics_df and cbp_metrics_df.count() > 0:
                 # All CBP-level dispatches (Scala lines ~290-340)
-                # Redis.dispatchDataFrame("dashboard_content_completed_count_by_course_org",
-                #                         cbp_metrics_df.select("courseOrgID", col("content_completed_count").alias("count")),
-                #                         "courseOrgID", "count", config)
+                Redis.dispatchDataFrame("dashboard_content_completed_count_by_course_org",
+                                        cbp_metrics_df.select("courseOrgID", col("content_completed_count").alias("count")),
+                                        "courseOrgID", "count", conf = config)
                 print(f"📝 Redis Map Key: dashboard_content_completed_count_by_course_org")
                 print(f"   DataFrame (first 5 rows):")
                 cbp_metrics_df.select("courseOrgID", col("content_completed_count").alias("count")).show(5,
                                                                                                          truncate=False)
 
-                # Redis.dispatchDataFrame("dashboard_enrolment_count_by_course_org",
-                #                         cbp_metrics_df.select("courseOrgID", col("course_enrolment_count").alias("count")),
-                #                         "courseOrgID", "count", config)
+                Redis.dispatchDataFrame("dashboard_enrolment_count_by_course_org",
+                                        cbp_metrics_df.select("courseOrgID", col("course_enrolment_count").alias("count")),
+                                        "courseOrgID", "count", conf = config)
                 print(f"📝 Redis Map Key: dashboard_enrolment_count_by_course_org")
                 print(f"   DataFrame (first 5 rows):")
                 cbp_metrics_df.select("courseOrgID", col("course_enrolment_count").alias("count")).show(5,
                                                                                                         truncate=False)
 
-                # Redis.dispatchDataFrame("dashboard_enrolment_content_by_course_org",
-                #                         cbp_metrics_df.select("courseOrgID", col("content_enrolment_count").alias("count")),
-                #                         "courseOrgID", "count", config)
+                Redis.dispatchDataFrame("dashboard_enrolment_content_by_course_org",
+                                        cbp_metrics_df.select("courseOrgID", col("content_enrolment_count").alias("count")),
+                                        "courseOrgID", "count", conf = config)
                 print(f"📝 Redis Map Key: dashboard_enrolment_content_by_course_org")
                 print(f"   DataFrame (first 5 rows):")
                 cbp_metrics_df.select("courseOrgID", col("content_enrolment_count").alias("count")).show(5,
                                                                                                          truncate=False)
 
-                # Redis.dispatchDataFrame("dashboard_certificates_generated_count_by_course_org",
-                #                         cbp_metrics_df.select("courseOrgID", col("certificates_generated_count").alias("count")),
-                #                         "courseOrgID", "count", config)
+                Redis.dispatchDataFrame("dashboard_certificates_generated_count_by_course_org",
+                                        cbp_metrics_df.select("courseOrgID", col("certificates_generated_count").alias("count")),
+                                        "courseOrgID", "count", conf = config)
                 print(f"📝 Redis Map Key: dashboard_certificates_generated_count_by_course_org")
                 print(f"   DataFrame (first 5 rows):")
                 cbp_metrics_df.select("courseOrgID", col("certificates_generated_count").alias("count")).show(5,
                                                                                                               truncate=False)
 
-                # Redis.dispatchDataFrame("dashboard_course_moderated_course_enrolment_count_by_course_org",
-                #                         cbp_metrics_df.select("courseOrgID", col("course_moderated_course_enrolment_count").alias("count")),
-                #                         "courseOrgID", "count", config)
+                Redis.dispatchDataFrame("dashboard_course_moderated_course_enrolment_count_by_course_org",
+                                        cbp_metrics_df.select("courseOrgID", col("course_moderated_course_enrolment_count").alias("count")),
+                                        "courseOrgID", "count", conf =  config)
                 print(f"📝 Redis Map Key: dashboard_course_moderated_course_enrolment_count_by_course_org")
                 print(f"   DataFrame (first 5 rows):")
                 cbp_metrics_df.select("courseOrgID",
                                       col("course_moderated_course_enrolment_count").alias("count")).show(5,
                                                                                                           truncate=False)
 
-                # Redis.dispatchDataFrame("dashboard_course_moderated_course_certificates_generated_count_by_course_org",
-                #                         cbp_metrics_df.select("courseOrgID", col("course_moderated_course_certificates_generated_count").alias("count")),
-                #                         "courseOrgID", "count", config)
+                Redis.dispatchDataFrame("dashboard_course_moderated_course_certificates_generated_count_by_course_org",
+                                        cbp_metrics_df.select("courseOrgID", col("course_moderated_course_certificates_generated_count").alias("count")),
+                                        "courseOrgID", "count", conf = config)
                 print(f"📝 Redis Map Key: dashboard_course_moderated_course_certificates_generated_count_by_course_org")
                 print(f"   DataFrame (first 5 rows):")
                 cbp_metrics_df.select("courseOrgID",
@@ -450,8 +522,8 @@ class DashboardSyncModel:
                 spark, "top_courses_by_org", QueryConstants.TOP_COURSES_BY_ORG
             )
             if top_courses_by_org_df and top_courses_by_org_df.count() > 0:
-                # Redis.dispatchDataFrame("dashboard_competencies_count_by_course_org",
-                #                         top_courses_by_org_df, "courseOrgID", "courseIDs", config)
+                Redis.dispatchDataFrame("dashboard_competencies_count_by_course_org",
+                                        top_courses_by_org_df, "courseOrgID", "courseIDs", conf = config)
                 print(f"📝 Redis Map Key: dashboard_competencies_count_by_course_org")
                 print(f"   DataFrame (first 5 rows):")
                 top_courses_by_org_df.show(5, truncate=False)
@@ -461,8 +533,8 @@ class DashboardSyncModel:
                 spark, "live_enrolment_counts", QueryConstants.LIVE_COURSE_PROGRAM_ENROLMENT_COUNTS
             )
             if live_enrolment_counts_df and live_enrolment_counts_df.count() > 0:
-                # Redis.dispatchDataFrame("live_course_program_enrolment_count",
-                #                         live_enrolment_counts_df, "courseID", "enrolmentCount", config)
+                Redis.dispatchDataFrame("live_course_program_enrolment_count",
+                                        live_enrolment_counts_df, "courseID", "enrolmentCount", conf = config)
                 print(f"📝 Redis Map Key: live_course_program_enrolment_count")
                 print(f"   DataFrame (first 5 rows):")
                 live_enrolment_counts_df.show(5, truncate=False)
@@ -484,30 +556,39 @@ class DashboardSyncModel:
                 spark, "certs_by_mdo", QueryConstants.CERTIFICATES_GENERATED_BY_USER_ORG
             )
             if certs_by_mdo_df and certs_by_mdo_df.count() > 0:
-                # Redis.dispatchDataFrame("dashboard_certificates_generated_count_by_user_org",
-                #                         certs_by_mdo_df, "userOrgID", "count", config)
+                Redis.dispatchDataFrame("dashboard_certificates_generated_count_by_user_org",
+                                        certs_by_mdo_df, "userOrgID", "count", conf = config)
                 print(f"📝 Redis Map Key: dashboard_certificates_generated_count_by_user_org")
                 print(f"   DataFrame (first 5 rows):")
                 certs_by_mdo_df.show(5, truncate=False)
 
             # ===== CORE COMPETENCIES BY MDO (Scala lines 792-796) =====
-            core_comp_by_mdo_df = self.duckdb_executor.execute_query(
-                spark, "core_comp_by_mdo", QueryConstants.CORE_COMPETENCIES_BY_MDO
-            )
-            if core_comp_by_mdo_df and core_comp_by_mdo_df.count() > 0:
-                # Redis.dispatchDataFrame("dashboard_core_competencies_by_user_org",
-                #                         core_comp_by_mdo_df, "userOrgID", "courseIDs", config)
-                print(f"📝 Redis Map Key: dashboard_core_competencies_by_user_org")
-                print(f"   DataFrame (first 5 rows):")
-                core_comp_by_mdo_df.show(5, truncate=False)
-
+            try:
+                print("🎯 Processing core competencies by MDO...")
+                core_comp_by_mdo_df = self.duckdb_executor.execute_query(
+                spark, "core_comp_by_mdo", QueryConstants.CORE_COMPETENCIES_BY_MDO)
+                if core_comp_by_mdo_df and core_comp_by_mdo_df.count() > 0:
+                    core_comp_by_mdo_df = core_comp_by_mdo_df.repartition(128, "userOrgID")
+                    # Persist in memory to avoid recomputation
+                    core_comp_by_mdo_df.persist()
+                    row_count = core_comp_by_mdo_df.count()
+                    print(f"✓ Core competencies: {row_count:,} rows")
+                    Redis.dispatchDataFrame("dashboard_core_competencies_by_user_org", core_comp_by_mdo_df, "userOrgID", "courseIDs", conf = config)
+                    print(f"📝 Redis Map Key: dashboard_core_competencies_by_user_org")
+                    print(f"   DataFrame (first 5 rows):")
+                    core_comp_by_mdo_df.show(5, truncate=False)
+                    core_comp_by_mdo_df.unpersist()
+            except Exception as e:
+                print(f"⚠️ Core competencies failed: {e}")
+                import traceback
+                traceback.print_exc()
             # ===== COURSES COMPLETED AT LEAST ONCE BY MDO (Scala lines 783-784) =====
             courses_completed_mdo_df = self.duckdb_executor.execute_query(
                 spark, "courses_completed_mdo", QueryConstants.COURSES_COMPLETED_AT_LEAST_ONCE_BY_MDO
             )
             if courses_completed_mdo_df and courses_completed_mdo_df.count() > 0:
-                # Redis.dispatchDataFrame("dashboard_courses_completed_at_least_once_by_user_org",
-                #                         courses_completed_mdo_df, "userOrgID", "count", config)
+                Redis.dispatchDataFrame("dashboard_courses_completed_at_least_once_by_user_org",
+                                        courses_completed_mdo_df, "userOrgID", "count", conf = config)
                 print(f"📝 Redis Map Key: dashboard_courses_completed_at_least_once_by_user_org")
                 print(f"   DataFrame (first 5 rows):")
                 courses_completed_mdo_df.show(5, truncate=False)
@@ -518,11 +599,11 @@ class DashboardSyncModel:
             )
             if courses_enrolled_df and courses_enrolled_df.count() > 0:
                 row = courses_enrolled_df.first()
-                # Redis.update("dashboard_courses_enrolled_in_at_least_once", str(row["courses_enrolled_count"]), config)
+                Redis.update("dashboard_courses_enrolled_in_at_least_once", str(row["courses_enrolled_count"]), conf = config)
                 print(
                     f"📝 Redis Key: dashboard_courses_enrolled_in_at_least_once, Value: {row['courses_enrolled_count']}")
 
-                # Redis.update("dashboard_courses_enrolled_in_at_least_once_id_list", row["course_id_list"], config)
+                Redis.update("dashboard_courses_enrolled_in_at_least_once_id_list", row["course_id_list"], conf = config)
                 print(
                     f"📝 Redis Key: dashboard_courses_enrolled_in_at_least_once_id_list, Value: {row['course_id_list'][:200]}...")
 
@@ -531,11 +612,11 @@ class DashboardSyncModel:
             )
             if courses_completed_df and courses_completed_df.count() > 0:
                 row = courses_completed_df.first()
-                # Redis.update("dashboard_courses_completed_at_least_once", str(row["courses_completed_count"]), config)
+                Redis.update("dashboard_courses_completed_at_least_once", str(row["courses_completed_count"]), conf = config)
                 print(
                     f"📝 Redis Key: dashboard_courses_completed_at_least_once, Value: {row['courses_completed_count']}")
 
-                # Redis.update("dashboard_courses_completed_at_least_once_id_list", row["course_id_list"], config)
+                Redis.update("dashboard_courses_completed_at_least_once_id_list", row["course_id_list"], conf = config)
                 print(
                     f"📝 Redis Key: dashboard_courses_completed_at_least_once_id_list, Value: {row['course_id_list'][:200]}...")
 
@@ -578,33 +659,11 @@ class DashboardSyncModel:
             FROM "nps-upgraded-users-data" 
             WHERE submitted = true AND activityID = '{platform_rating_survey_id}'
             """
-
-            # Execute Druid query
-            try:
-                response = requests.post(
-                    f"http://{druid_host}/druid/v2/sql",
-                    headers={"Content-Type": "application/json"},
-                    json={"query": nps_query}
-                )
-
-                if response.status_code == 200:
-                    result = response.json()
-                    if result and len(result) > 0:
-                        avg_nps = result[0].get("avgNps", 0.0)
-                        # Redis.update("dashboard_nps_across_platform", str(avg_nps), config)
-                        print(f"📝 Redis Key: dashboard_nps_across_platform, Value: {avg_nps}")
-                    else:
-                        # Redis.update("dashboard_nps_across_platform", "0.0", config)
-                        print(f"📝 Redis Key: dashboard_nps_across_platform, Value: 0.0")
-                else:
-                    print(f"⚠️ Druid query failed with status: {response.status_code}")
-                    # Redis.update("dashboard_nps_across_platform", "0.0", config)
-                    print(f"📝 Redis Key: dashboard_nps_across_platform, Value: 0.0")
-
-            except Exception as druid_error:
-                print(f"⚠️ Druid connection error: {druid_error}")
-                # Redis.update("dashboard_nps_across_platform", "0.0", config)
-                print(f"📝 Redis Key: dashboard_nps_across_platform, Value: 0.0")
+            npsDF = utils.druidDFOption(nps_query, config.sparkDruidRouterHost, limit=10000000, spark=spark)
+            if npsDF is None:
+                npsDF = self._empty_df(spark, "avgNps")
+            np_score = npsDF.select("avgNps").first()[0]
+            Redis.update("dashboard_nps_across_platform", str(np_score), conf= config)
 
         except Exception as e:
             print(f"❌ NPS score calculation failed: {e}")
@@ -689,8 +748,8 @@ class DashboardSyncModel:
             )
 
             # Dispatch to Redis (Scala line 683)
-            # Redis.dispatchDataFrame("dashboard_competency_coverage_by_org",
-            #                         result_df, "courseOrgID", "jsonData", config)
+            Redis.dispatchDataFrame("dashboard_competency_coverage_by_org",
+                                    result_df, "courseOrgID", "jsonData", conf = config)
             print(f"📝 Redis Map Key: dashboard_competency_coverage_by_org")
             print(f"   DataFrame (first 5 rows):")
             result_df.show(5, truncate=False)
@@ -713,8 +772,8 @@ class DashboardSyncModel:
                 spark, "top_10_combined", QueryConstants.TOP_10_COURSES_PROGRAMS_ASSESSMENTS_COMBINED
             )
             if top_10_combined_df and top_10_combined_df.count() > 0:
-                # Redis.dispatchDataFrame("dashboard_top_10_courses_by_completion_by_course_org",
-                #                         top_10_combined_df, "courseOrgID_content", "sorted_courseIDs", config)
+                Redis.dispatchDataFrame("dashboard_top_10_courses_by_completion_by_course_org",
+                                        top_10_combined_df, "courseOrgID_content", "sorted_courseIDs", conf = config)
                 print(f"📝 Redis Map Key: dashboard_top_10_courses_by_completion_by_course_org")
                 print(f"   DataFrame (first 5 rows):")
                 top_10_combined_df.show(5, truncate=False)
@@ -734,8 +793,8 @@ class DashboardSyncModel:
                 spark, "top_5_users", QueryConstants.TOP_5_USERS_BY_COMPLETION_BY_MDO
             )
             if top_5_users_df and top_5_users_df.count() > 0:
-                # Redis.dispatchDataFrame("dashboard_top_5_users_by_completion_by_org",
-                #                         top_5_users_df, "userOrgID", "jsonData", config)
+                Redis.dispatchDataFrame("dashboard_top_5_users_by_completion_by_org",
+                                        top_5_users_df, "userOrgID", "jsonData", conf = config)
                 print(f"📝 Redis Map Key: dashboard_top_5_users_by_completion_by_org")
                 print(f"   DataFrame (first 5 rows):")
                 top_5_users_df.show(5, truncate=False)
@@ -745,8 +804,8 @@ class DashboardSyncModel:
                 spark, "top_5_courses", QueryConstants.TOP_5_COURSES_BY_COMPLETION_BY_MDO
             )
             if top_5_courses_df and top_5_courses_df.count() > 0:
-                # Redis.dispatchDataFrame("dashboard_top_5_courses_by_completion_by_org",
-                #                         top_5_courses_df, "userOrgID", "jsonData", config)
+                Redis.dispatchDataFrame("dashboard_top_5_courses_by_completion_by_org",
+                                        top_5_courses_df, "userOrgID", "jsonData", conf = config)
                 print(f"📝 Redis Map Key: dashboard_top_5_courses_by_completion_by_org")
                 print(f"   DataFrame (first 5 rows):")
                 top_5_courses_df.show(5, truncate=False)
@@ -756,8 +815,8 @@ class DashboardSyncModel:
                 spark, "top_5_content", QueryConstants.TOP_5_CONTENT_BY_COMPLETION_BY_ORG
             )
             if top_5_content_df and top_5_content_df.count() > 0:
-                # Redis.dispatchDataFrame("dashboard_top_5_content_by_completion_by_course_org",
-                #                         top_5_content_df, "courseOrgID", "jsonData", config)
+                Redis.dispatchDataFrame("dashboard_top_5_content_by_completion_by_course_org",
+                                        top_5_content_df, "courseOrgID", "jsonData", conf = config)
                 print(f"📝 Redis Map Key: dashboard_top_5_content_by_completion_by_course_org")
                 print(f"   DataFrame (first 5 rows):")
                 top_5_content_df.show(5, truncate=False)
@@ -767,8 +826,8 @@ class DashboardSyncModel:
                 spark, "top_5_enrolments", QueryConstants.TOP_5_CONTENT_BY_ENROLLMENTS_BY_CBP
             )
             if top_5_enrolments_df and top_5_enrolments_df.count() > 0:
-                # Redis.dispatchDataFrame("dashboard_top_5_content_by_enrolments_by_course_org",
-                #                         top_5_enrolments_df, "courseOrgID", "jsonData", config)
+                Redis.dispatchDataFrame("dashboard_top_5_content_by_enrolments_by_course_org",
+                                        top_5_enrolments_df, "courseOrgID", "jsonData", conf = config)
                 print(f"📝 Redis Map Key: dashboard_top_5_content_by_enrolments_by_course_org")
                 print(f"   DataFrame (first 5 rows):")
                 top_5_enrolments_df.show(5, truncate=False)
@@ -779,7 +838,7 @@ class DashboardSyncModel:
             )
             if top_5_rating_df and top_5_rating_df.count() > 0:
                 json_data = top_5_rating_df.first()["jsonData"]
-                # Redis.update("dashboard_top_5_courses_by_rating", json_data, config)
+                Redis.update("dashboard_top_5_courses_by_rating", json_data, conf = config)
                 print(f"📝 Redis Key: dashboard_top_5_courses_by_rating, Value: {str(json_data)[:200]}...")
 
             # Top 5 content by rating by org (Scala lines 900-910)
@@ -787,8 +846,8 @@ class DashboardSyncModel:
                 spark, "top_5_rating_org", QueryConstants.TOP_5_CONTENT_BY_RATING_BY_ORG
             )
             if top_5_rating_org_df and top_5_rating_org_df.count() > 0:
-                # Redis.dispatchDataFrame("dashboard_top_5_content_by_rating_by_course_org",
-                #                         top_5_rating_org_df, "courseOrgID", "jsonData", config)
+                Redis.dispatchDataFrame("dashboard_top_5_content_by_rating_by_course_org",
+                                        top_5_rating_org_df, "courseOrgID", "jsonData", conf = config)
                 print(f"📝 Redis Map Key: dashboard_top_5_content_by_rating_by_course_org")
                 print(f"   DataFrame (first 5 rows):")
                 top_5_rating_org_df.show(5, truncate=False)
@@ -799,7 +858,7 @@ class DashboardSyncModel:
             )
             if top_5_mdo_df and top_5_mdo_df.count() > 0:
                 json_list = [row.asDict() for row in top_5_mdo_df.collect()]
-                # Redis.update("dashboard_top_5_mdo_by_completion", json.dumps(json_list), config)
+                Redis.update("dashboard_top_5_mdo_by_completion", json.dumps(json_list), conf = config)
                 print(f"📝 Redis Key: dashboard_top_5_mdo_by_completion, Value: {json.dumps(json_list)[:200]}...")
 
             # Top 5 MDO by live courses (Scala lines 951-962)
@@ -808,7 +867,7 @@ class DashboardSyncModel:
             )
             if top_5_mdo_courses_df and top_5_mdo_courses_df.count() > 0:
                 json_data = top_5_mdo_courses_df.first()["jsonData"]
-                # Redis.update("dashboard_top_5_mdo_by_live_courses", json_data, config)
+                Redis.update("dashboard_top_5_mdo_by_live_courses", json_data, conf = config)
                 print(f"📝 Redis Key: dashboard_top_5_mdo_by_live_courses, Value: {str(json_data)[:200]}...")
 
             print("✅ Top 5 queries processed")
@@ -826,8 +885,8 @@ class DashboardSyncModel:
                 spark, "total_ratings", QueryConstants.TOTAL_RATINGS_BY_ORG
             )
             if total_ratings_df and total_ratings_df.count() > 0:
-                # Redis.dispatchDataFrame("dashboard_content_total_ratings_by_course_org",
-                #                         total_ratings_df, "courseOrgID", "totalRatings", config)
+                Redis.dispatchDataFrame("dashboard_content_total_ratings_by_course_org",
+                                        total_ratings_df, "courseOrgID", "totalRatings", conf = config)
                 print(f"📝 Redis Map Key: dashboard_content_total_ratings_by_course_org")
                 print(f"   DataFrame (first 5 rows):")
                 total_ratings_df.show(5, truncate=False)
@@ -837,8 +896,8 @@ class DashboardSyncModel:
                 spark, "ratings_spread", QueryConstants.RATINGS_SPREAD_BY_ORG
             )
             if ratings_spread_df and ratings_spread_df.count() > 0:
-                # Redis.dispatchDataFrame("dashboard_content_ratings_spread_by_course_org",
-                #                         ratings_spread_df, "courseOrgID", "jsonData", config)
+                Redis.dispatchDataFrame("dashboard_content_ratings_spread_by_course_org",
+                                        ratings_spread_df, "courseOrgID", "jsonData", conf = config)
                 print(f"📝 Redis Map Key: dashboard_content_ratings_spread_by_course_org")
                 print(f"   DataFrame (first 5 rows):")
                 ratings_spread_df.show(5, truncate=False)
@@ -858,8 +917,8 @@ class DashboardSyncModel:
                 spark, "trending_events_mdo", QueryConstants.TRENDING_EVENTS_BY_MDO
             )
             if trending_events_mdo_df and trending_events_mdo_df.count() > 0:
-                # Redis.dispatchDataFrame("dashboard_trending_events_by_mdo",
-                #                         trending_events_mdo_df, "userOrgID", "events", config)
+                Redis.dispatchDataFrame("dashboard_trending_events_by_mdo",
+                                        trending_events_mdo_df, "userOrgID", "events", conf = config)
                 print(f"📝 Redis Map Key: dashboard_trending_events_by_mdo")
                 print(f"   DataFrame (first 5 rows):")
                 trending_events_mdo_df.show(5, truncate=False)
@@ -870,7 +929,7 @@ class DashboardSyncModel:
             )
             if featured_events_df and featured_events_df.count() > 0:
                 featured_events = featured_events_df.first()["events"]
-                # Redis.update("dashboard_overall_featured_events", featured_events, config)
+                Redis.update("dashboard_overall_featured_events", featured_events, conf = config)
                 print(f"📝 Redis Key: dashboard_overall_featured_events, Value: {str(featured_events)[:200]}...")
 
             print("✅ Events processed")
@@ -901,7 +960,7 @@ class DashboardSyncModel:
 
             # Total NLW enrollments (Scala lines 461-462)
             total_enrolment_nlw_count = event_enrolment_nlw_count + content_enrolment_nlw_count
-            # Redis.update("dashboard_content_enrolment_nlw_count", str(total_enrolment_nlw_count), config)
+            Redis.update("dashboard_content_enrolment_nlw_count", str(total_enrolment_nlw_count), conf = config)
             print(f"📝 Redis Key: dashboard_content_enrolment_nlw_count, Value: {total_enrolment_nlw_count}")
 
             # Total event enrollments (all time) (Scala lines 443-454, 463)
@@ -910,7 +969,7 @@ class DashboardSyncModel:
             )
             if total_event_enrolments_df and total_event_enrolments_df.count() > 0:
                 total_event_count = total_event_enrolments_df.first()["total_event_count"]
-                # Redis.update("dashboard_events_enrolment_count", str(total_event_count), config)
+                Redis.update("dashboard_events_enrolment_count", str(total_event_count), conf = config)
                 print(f"📝 Redis Key: dashboard_events_enrolment_count, Value: {total_event_count}")
                 print(f"dashboard_events_enrolment_count: {total_event_count}")
 
@@ -920,7 +979,7 @@ class DashboardSyncModel:
             )
             if events_published_df and events_published_df.count() > 0:
                 events_published_count = events_published_df.first()["events_published_count"]
-                # Redis.update("dashboard_events_published_count", str(events_published_count), config)
+                Redis.update("dashboard_events_published_count", str(events_published_count), conf = config)
                 print(f"📝 Redis Key: dashboard_events_published_count, Value: {events_published_count}")
                 print(f"dashboard_events_published_count: {events_published_count}")
 
@@ -942,15 +1001,15 @@ class DashboardSyncModel:
 
             # Total certificates yesterday (Scala lines 512-518)
             total_cert_yesterday_count = content_cert_yesterday_count + event_cert_yesterday_count
-            # Redis.update("dashboard_content_certificates_generated_yday_nlw_count", str(total_cert_yesterday_count), config)
+            Redis.update("dashboard_content_certificates_generated_yday_nlw_count", str(total_cert_yesterday_count), conf = config)
             print(
                 f"📝 Redis Key: dashboard_content_certificates_generated_yday_nlw_count, Value: {total_cert_yesterday_count}")
 
-            # Redis.update("dashboard_event_certificates_generated_yday_nlw_count", str(event_cert_yesterday_count), config)
+            Redis.update("dashboard_event_certificates_generated_yday_nlw_count", str(event_cert_yesterday_count), conf = config)
             print(
                 f"📝 Redis Key: dashboard_event_certificates_generated_yday_nlw_count, Value: {event_cert_yesterday_count}")
 
-            # Redis.update("dashboard_content_only_certificates_generated_yday_nlw_count", str(content_cert_yesterday_count), config)
+            Redis.update("dashboard_content_only_certificates_generated_yday_nlw_count", str(content_cert_yesterday_count), conf = config)
             print(
                 f"📝 Redis Key: dashboard_content_only_certificates_generated_yday_nlw_count, Value: {content_cert_yesterday_count}")
 
@@ -961,7 +1020,7 @@ class DashboardSyncModel:
             event_cert_nlw_count = 0
             if event_certs_nlw_df and event_certs_nlw_df.count() > 0:
                 event_cert_nlw_count = event_certs_nlw_df.first()["event_certificate_count"]
-                # Redis.update("dashboard_events_completed_count", str(event_cert_nlw_count), config)
+                Redis.update("dashboard_events_completed_count", str(event_cert_nlw_count), conf = config)
                 print(f"📝 Redis Key: dashboard_events_completed_count, Value: {event_cert_nlw_count}")
                 print(f"dashboard_events_completed_count: {event_cert_nlw_count}")
 
@@ -975,7 +1034,7 @@ class DashboardSyncModel:
 
             # Total certificates during NLW (Scala lines 546-547)
             total_cert_nlw_count = content_cert_nlw_count + event_cert_nlw_count
-            # Redis.update("dashboard_content_certificates_generated_nlw_count", str(total_cert_nlw_count), config)
+            Redis.update("dashboard_content_certificates_generated_nlw_count", str(total_cert_nlw_count), conf = config)
             print(f"📝 Redis Key: dashboard_content_certificates_generated_nlw_count, Value: {total_cert_nlw_count}")
             print(f"dashboard_content_certificates_generated_nlw_count: {total_cert_nlw_count}")
 
@@ -1018,7 +1077,7 @@ class DashboardSyncModel:
                 courses_under_30mins = cbps_under_30mins_df.select("courseID") \
                     .rdd.map(lambda r: r[0]).collect()
                 courses_under_30mins_str = ",".join(courses_under_30mins)
-                # Redis.updateMapField("lhp_trending", "across:under_30_mins", courses_under_30mins_str, config)
+                Redis.updateMapField("lhp_trending", "across:under_30_mins", courses_under_30mins_str, conf = config)
                 print(
                     f"📝 Redis.updateMapField('lhp_trending', 'across:under_30_mins', '{courses_under_30mins_str[:200]}...')")
 
@@ -1032,7 +1091,7 @@ class DashboardSyncModel:
             self.process_trending(spark, config)
 
             # Update last run date (Scala line 1071)
-            # Redis.update("lhp_lastRunDate", current_date_str, config)
+            Redis.update("lhp_lastRunDate", current_date_str, conf = config)
             print(f"📝 Redis Key: lhp_lastRunDate, Value: {current_date_str}")
             print("✅ Learner home page data processed")
 
@@ -1441,8 +1500,8 @@ class DashboardSyncModel:
                 spark, "top_10_reviews", QueryConstants.TOP_10_REVIEWS_BY_ORG
             )
             if top_10_reviews_df and top_10_reviews_df.count() > 0:
-                # Redis.dispatchDataFrame("cbp_top_10_users_reviews_by_org",
-                #                         top_10_reviews_df, "courseOrgID", "jsonData", config)
+                Redis.dispatchDataFrame("cbp_top_10_users_reviews_by_org",
+                                        top_10_reviews_df, "courseOrgID", "jsonData", conf = config)
                 print(f"📝 Redis Map Key: cbp_top_10_users_reviews_by_org")
                 print(f"   DataFrame (first 5 rows):")
                 top_10_reviews_df.show(5, truncate=False)
@@ -1456,45 +1515,40 @@ class DashboardSyncModel:
 # ============================================================================
 # MAIN EXECUTION
 # ============================================================================
-
 def main():
-    """Main entry point for dashboard sync"""
-    print("=" * 80)
-    print("🚀 COMPLETE DASHBOARD SYNC - WITH PRINT STATEMENTS")
-    print("=" * 80)
-
-    try:
-        # Initialize Spark
-        spark = SparkSession.builder \
-            .appName("DashboardSyncComplete") \
-            .config("spark.sql.adaptive.enabled", "true") \
-            .config("spark.sql.adaptive.coalescePartitions.enabled", "true") \
-            .getOrCreate()
-
-        # Load configuration
-        env = get_environment_config()
-        config = create_config(env)
-
-        # Create model and run
-        model = DashboardSyncModel()
-        timestamp = int(datetime.now().timestamp() * 1000)
-
-        model.processData(spark, config, timestamp)
-
-        print("=" * 80)
-        print("✅ COMPLETE DASHBOARD SYNC FINISHED SUCCESSFULLY")
-        print("=" * 80)
-
-    except Exception as e:
-        print("=" * 80)
-        print(f"❌ DASHBOARD SYNC FAILED: {str(e)}")
-        print("=" * 80)
-        import traceback
-        traceback.print_exc()
-        raise
-    finally:
-        spark.stop()
-
+    # Initialize Spark Session with optimized settings for caching
+    spark = SparkSession.builder \
+    .appName("DashboardSync") \
+    .config("spark.executor.memory", "25g") \
+    .config("spark.driver.memory", "20g") \
+    .config("spark.driver.maxResultSize", "4g") \
+    .config("spark.sql.shuffle.partitions", "64") \
+    .config("spark.driver.bindAddress", "127.0.0.1") \
+    .config("spark.sql.legacy.timeParserPolicy", "LEGACY") \
+    .config("spark.network.timeout", "600s") \
+    .config("spark.executor.heartbeatInterval", "60s") \
+    .config("spark.shuffle.io.connectionTimeout", "300s") \
+    .config("spark.shuffle.io.maxRetries", "20") \
+    .config("spark.shuffle.io.retryWait", "10s") \
+    .config("spark.executor.memoryOverhead", "5g")\
+    .config("spark.sql.adaptive.enabled", "true") \
+    .config("spark.sql.adaptive.coalescePartitions.enabled", "true") \
+    .config("spark.sql.adaptive.skewJoin.enabled", "true") \
+    .getOrCreate()
+    spark.sparkContext.setCheckpointDir("/home/analytics/spark-checkpoints")
+    # Create model instance
+    start_time = datetime.now()
+    print(f"[START] DashboardSync processing started at: {start_time.strftime('%Y-%m-%d %H:%M:%S')}")
+    config_dict = get_environment_config()
+    config = create_config(config_dict)
+    model = DashboardSyncModel()
+    timestamp = int(datetime.now().timestamp() * 1000)
+    model.process_data(spark,config, timestamp)
+    end_time = datetime.now()
+    duration = end_time - start_time
+    print(f"[END] DashboardSync processing completed at: {end_time.strftime('%Y-%m-%d %H:%M:%S')}")
+    print(f"[INFO] Total duration: {duration}")
+    spark.stop()
 
 if __name__ == "__main__":
     main()

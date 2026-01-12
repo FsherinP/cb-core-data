@@ -71,10 +71,10 @@ class ACBPModel:
             enrolmentDF = spark.read.parquet(ParquetFileConstants.ENROLMENT_COMPUTED_PARQUET_FILE)
 
             acbpAllEnrolDF = spark.read.parquet(ParquetFileConstants.ACBP_COMPUTED_FILE)
-            acbpAllEnrolDF.printSchema()
+            #acbpAllEnrolDF.printSchema()
 
             acbpAllEnrolmentDF = (acbpAllEnrolDF\
-                .withColumn("courseID", explode(split(col("acbpCourseIDList"), ",")))\
+                .withColumn("courseID", explode(col("acbpCourseIDList")))\
                 .withColumn("courseID", regexp_replace(col("courseID"), r"^\s*\[|\]\s*$|\s+", ""))\
                 .join(allCourseProgramDetailsDF, ["courseID"], "left")\
                 .join(enrolmentDF, ["courseID", "userID"], "left")\
@@ -252,6 +252,29 @@ class ACBPModel:
                 kcmMappingDF["competency_area_id"],
                 col("competency_area")
             ).distinct()
+
+            km = kcmMappingDF.alias("km")
+            kc = (
+                kcmDF
+                .alias("kc")
+                .withColumnRenamed("competency_area", "kc_competency_area")  # prevent ambiguity
+            )
+
+            resultDF = (
+                km.join(kc, kc.competency_area_id == km.competency_area_id, "left")
+                .select(
+                    km.course_id,
+                    km.competency_area_id,
+                    kc.kc_competency_area.alias("competency_area")
+                )
+                .distinct()
+                .groupBy("course_id")
+                .agg(
+                    F.concat_ws(", ", F.collect_set("competency_area")).alias("competency_areas")
+                )
+            )
+
+            resultDF.show(5, truncate=False)
             
             print("📝 Preparing Apar enrollment report data...")
             
@@ -260,7 +283,7 @@ class ACBPModel:
     
             # preparing apar enrollment data
             aparEnrolmentData = acbpEnrolmentDF.join(userAdditionalProperties, "userID", "left") \
-                .join(kcmMappingDF, acbpEnrolmentDF.courseID == kcmMappingDF.course_id, "left") \
+                .join(resultDF, acbpEnrolmentDF.courseID == resultDF.course_id, "left") \
                 .withColumn(
                     "content_duration",
                     F.when(F.col("courseDuration").isNull(), None)
@@ -291,11 +314,12 @@ class ACBPModel:
                     when(((col("courseProgress").isNotNull()) & (col("courseProgress") > 0)), col("courseProgress")).otherwise(0).alias("content_progress_percentage"),
                     col("externalSystem").alias("external_system"),
                     col("externalSystemId").alias("external_system_id"),
-                    col("competency_area").alias("competency_type"),
+                    col("competency_areas").alias("competency_type"),
                     lit(None).cast("string").alias("parichay_id"),
                     col("allocatedOn").cast("timestamp").alias("assigned_on")
                 )
-            
+
+            resultDF.unpersist()
             kcmMappingDF.unpersist()
             kcmDF.unpersist()
             print("✅ Apar enrollment report data prepared successfully!")

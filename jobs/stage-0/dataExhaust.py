@@ -8,9 +8,9 @@ from pyspark.sql import SparkSession
 from pyspark.sql.functions import (
     col, from_json, explode_outer, concat, substring, lit, when, size, 
     expr, date_format, to_utc_timestamp, current_timestamp, coalesce,
-    to_timestamp, isnan, isnull, format_string
+    to_timestamp, isnan, isnull, format_string, array_contains, array_join
 )
-from pyspark.sql.types import StructType, StructField, StringType, IntegerType,BooleanType,FloatType
+from pyspark.sql.types import StructType, StructField, StringType, IntegerType,BooleanType,FloatType,ArrayType
 from pyspark import StorageLevel
 import logging
 
@@ -281,8 +281,8 @@ class DataExhaustModel:
             should_clause = ",".join([f'{{"match":{{"primaryCategory.raw":"{pc}"}}}}' for pc in primary_categories])
             fields = ["identifier", "name", "primaryCategory", "status", "reviewStatus", "channel", 
                      "duration", "leafNodesCount", "lastPublishedOn", "lastStatusChangedOn", 
-                     "createdFor", "competencies_v6", "programDirectorName", "language", "courseCategory","organisation"]
-            array_fields = ["createdFor", "language","organisation"]
+                     "createdFor", "competencies_v6", "programDirectorName", "language", "courseCategory","organisation","childNodes","difficultyLevel"]
+            array_fields = ["createdFor", "language","organisation","childNodes"]
             fields_clause = ",".join([f'"{f}"' for f in fields])
             query = f'{{"_source":[{fields_clause}],"query":{{"bool":{{"should":[{should_clause}]}}}}}}'
             
@@ -295,7 +295,6 @@ class DataExhaustModel:
                 fields, 
                 array_fields
             )
-            
             self.write_parquet(es_content_df, f"{output_base_path}/esContent")
             es_content_df.unpersist()
             
@@ -424,29 +423,36 @@ class DataExhaustModel:
             self.logger.info("Processing event data...")
             object_types = ["Event"]
             should_clause_events = ",".join([f'{{"match":{{"objectType.raw":"{ot}"}}}}' for ot in object_types])
-            fields_events = ["identifier", "name", "objectType", "status", "startDate", "startTime", 
-                           "duration", "registrationLink", "createdFor", "recordedLinks", "resourceType"]
+            fields_events = ["identifier", "name", "objectType", "status", "startDate", "startTime",
+                           "duration", "registrationLink", "createdFor", "recordedLinks", "resourceType", "typeofEvent",
+                           "maxEnrolments", "meetingAgenda", "creatorDetails", "recordedMediaLink", "noOfAttendes", "eventDuration",
+                           "meetingSummary", "courseLinked", "speakerDetails" ]
             array_fields_events = ["createdFor", "recordedLinks"]
             fields_clause_events = ",".join([f'"{f}"' for f in fields_events])
             event_query = f'{{"_source":[{fields_clause_events}],"query":{{"bool":{{"should":[{should_clause_events}]}}}}}}'
-            
+            speaker_schema = ArrayType(
+                StructType([
+                    StructField("id", StringType(), True),
+                    StructField("name", StringType(), True),
+                    StructField("email", StringType(), True)  # nullable
+                ])
+            )
             event_data_df = utils.read_elasticsearch_data(
                 self.spark,
                 self.config.sparkElasticsearchConnectionHost,
                 self.config.sparkElasticsearchConnectionPort,
-                "compositesearch", 
-                event_query, 
-                fields_events, 
+                "compositesearch",
+                event_query,
+                fields_events,
                 array_fields_events
             )
-            
             # Transform event data
             event_details_df = event_data_df.withColumn(
                 "event_provider_mdo_id", explode_outer(col("createdFor"))
             ).withColumn(
                 "recording_link", explode_outer(col("recordedLinks"))
             ).withColumn(
-                "event_start_datetime", 
+                "event_start_datetime",
                 concat(substring(col("startDate"), 1, 10), lit(" "), substring(col("startTime"), 1, 8))
             ).withColumn(
                 "presenters", lit("No presenters available")
@@ -454,6 +460,16 @@ class DataExhaustModel:
                 "durationInSecs", col("duration") * 60
             ).withColumn(
                 "duration_formatted", self.duration_format_udf("durationInSecs")
+            ).withColumn(
+                "eventDurationInSecs", col("eventDuration") * 60
+            ).withColumn(
+                "event_duration_formatted", self.duration_format_udf("eventDurationInSecs")
+            ).withColumn(
+                "speakerArray", from_json(col("speakerDetails"), speaker_schema)
+            ).withColumn(
+                "speaker_id", array_join(expr("transform(speakerArray, x -> x.id)"), ", ")
+            ).withColumn(
+                "speaker_name", array_join(expr("transform(speakerArray, x -> x.name)"), ", ")
             ).select(
                 col("identifier").alias("event_id"),
                 col("name").alias("event_name"),
@@ -465,8 +481,19 @@ class DataExhaustModel:
                 col("presenters"),
                 col("recording_link"),
                 col("registrationLink").alias("video_link"),
-                col("resourceType").alias("event_tag")
-            ).dropDuplicates(["event_id"]).fillna(0.0, subset=["duration"])
+                col("resourceType").alias("event_tag").cast(StringType()),
+                col("typeofEvent").cast(StringType()),
+                col("maxEnrolments").cast(IntegerType()),
+                col("meetingAgenda").cast(StringType()),
+                col("speakerDetails").cast(StringType()),
+                col("speaker_id").cast(StringType()),
+                col("speaker_name").cast(StringType()),
+                col("recordedMediaLink").cast(StringType()),
+                col("noOfAttendes").cast(IntegerType()),
+                col("eventDuration").cast(IntegerType()),
+                col("meetingSummary").cast(StringType()),
+                col("courseLinked").cast(StringType())
+            ).dropDuplicates(["event_id"]).fillna(0.0, subset=["duration", "eventDuration"])
             
             self.write_parquet(event_details_df, f"{output_base_path}/eventDetails")
             
@@ -541,12 +568,12 @@ class DataExhaustModel:
             must_clause = ",".join([f'{{"match":{{"primaryCategory.raw":"{pc}"}}}}' for pc in primary_categories])
             context_categories = ["Final Program Assessment"]
             context_categories_clause = ",".join([f'{{"match":{{"contextCategory.raw":"{pc}"}}}}' for pc in context_categories])
-            statuses = ["Live"]
-            status_clause = ",".join([f'{{"match":{{"status.raw":"{s}"}}}}' for s in statuses])
-            fields = ["identifier","name","primaryCategory","contextCategory", "status"]
+            fields = ["identifier", "name", "primaryCategory", "status", "reviewStatus", "channel", 
+                     "expectedDuration", "lastPublishedOn", "lastStatusChangedOn", 
+                     "createdFor", "competencies_v6", "programDirectorName", "language", "courseCategory","contextCategory"]
+            array_fields = ["createdFor", "language","organisation"]
             fields_clause = ",".join([f'"{f}"' for f in fields])
-            array_fields = []
-            query = f'{{"_source":[{fields_clause}],"query":{{"bool":{{"must":[{must_clause},{context_categories_clause},{status_clause}]}}}}}}'
+            query = f'{{"_source":[{fields_clause}],"query":{{"bool":{{"must":[{must_clause},{context_categories_clause}]}}}}}}'
 
             es_final_assessment_df = utils.read_elasticsearch_data(
                 self.spark,
@@ -557,7 +584,6 @@ class DataExhaustModel:
                 fields,
                 array_fields
             )
-
             self.write_parquet(es_final_assessment_df, f"{output_base_path}/esFinalAssessment")
             es_final_assessment_df.unpersist()
 

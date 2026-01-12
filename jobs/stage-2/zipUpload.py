@@ -85,6 +85,7 @@ class ZipUploadModel:
             # ------------------ Part 1: Merge & Zip MDOID Reports ------------------ #
             base_dir = os.path.join(config.localReportDir, config.prefixDirectoryPath)
             directories_to_select = config.pysparkDirectoriesToSelect
+            cbp_directories_to_select = config.pysparkCBPDirectoriesToSelect
             today_date = datetime.today().strftime('%Y-%m-%d')
             merged_dir = os.path.join(config.localReportDir, config.destinationDirectoryPath)
             kcm_dir = os.path.join(base_dir, "kcm-report", today_date, "ContentCompetencyMapping")
@@ -102,6 +103,18 @@ class ZipUploadModel:
                 shutil.rmtree(merged_dir)
             os.makedirs(merged_dir)
 
+            print("\n📤 Syncing CBP report folders to cloud...")
+
+            for subfolder in cbp_directories_to_select:
+                cbp_dir = os.path.join(base_dir, subfolder, today_date)
+                if os.path.exists(cbp_dir):
+                    print(f"  → Syncing: {cbp_dir} → {config.prefixDirectoryPath}/{subfolder}/{today_date}")
+                    try:
+                        sync_reports(cbp_dir, os.path.join(config.prefixDirectoryPath, subfolder, today_date), config)
+                    except Exception as e:
+                        print(f"❌ Failed syncing CBP folder {subfolder}: {e}")
+                else:
+                    print(f"⚠️ CBP directory not found: {cbp_dir}")
             # Track all MDOID values for KCM distribution
             all_mdoids = set()
 
@@ -153,17 +166,14 @@ class ZipUploadModel:
             for mdoid_folder in os.listdir(merged_dir):
                 mdoid_path = os.path.join(merged_dir, mdoid_folder)
                 if os.path.isdir(mdoid_path):
+                    zip_path = os.path.join(mdoid_path, "reports.zip")
                     csv_files = [f for f in os.listdir(mdoid_path) if f.endswith(".csv")]
                     if csv_files:
-                        for csv_file in csv_files:
-                            csv_path = os.path.join(mdoid_path, csv_file)
-                            zip_name = csv_file.replace(".csv", ".zip")
-                            zip_path = os.path.join(mdoid_path, zip_name)
-                            command = ["zip", "-P", password, "-j", zip_path, csv_path]
-                            subprocess.run(command, check=True)
-                    # Delete the individual CSVs after zipping
-                    for f in csv_files:
-                        os.remove(os.path.join(mdoid_path, f))
+                        command = ["zip", "-P", password, "-j", zip_path] + [os.path.join(mdoid_path, f) for f in csv_files]
+                        subprocess.run(command, check=True)
+                        # Delete the individual CSVs after zipping
+                        for f in csv_files:
+                            os.remove(os.path.join(mdoid_path, f))
 
             print(f"All MDOID folders zipped with password at: {merged_dir}")
             sync_reports(merged_dir, config.mdoReportSyncPath, config)
