@@ -9,7 +9,7 @@ DEFAULT_CONFIG = {
     'validation': 'true',
 
     # Redis Configuration
-    'redisHost': '192.168.3.249',
+    'redisHost': '10.175.5.20',
     'redisPort': '6379',
     'redisDB': '12',
 
@@ -141,7 +141,8 @@ DEFAULT_CONFIG = {
     'mdoIDs': '',
     'anonymousAssessmentLoggedInUserContentIDs': 'do_1141533540853432321675,do_1141533857591132161321,do_1141525365329264641663,do_1141527106280980481664',
     'anonymousAssessmentNonLoggedInUserAssessmentIDs': 'do_11415336159226265611',
-
+    'hardcodeTrendingCourses': True,
+    'hardCodedCoursesIds': "do_1141142234379386881387,do_1143613347908812801129,do_1144314741016166401174,do_1143089865482649601691,do_114125479290847232144",
     # Report Paths
     'userReportPath': 'standalone-reports/user-report',
     'userEnrolmentReportPath': 'standalone-reports/user-enrollment-report',
@@ -208,6 +209,7 @@ DEFAULT_CONFIG = {
     'googleServiceAccountFilePath': '/home/analytics/pyspark/jobs/gcp_service_account.json',
     'gcpBucket': 'igotproddp',
     'password': '123456',
+    'createFullReport': False,
 
     # Job Configuration
     'parallelization': '16',

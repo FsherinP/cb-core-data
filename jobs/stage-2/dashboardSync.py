@@ -1081,14 +1081,15 @@ class DashboardSyncModel:
                 print(
                     f"📝 Redis.updateMapField('lhp_trending', 'across:under_30_mins', '{courses_under_30mins_str[:200]}...')")
 
+            # Process trending (Scala line 1310)
+            self.process_trending(spark, config)
+
             # Process learning hours (Scala line 1304)
             self.process_learning_hours(spark, config)
 
             # Process certifications (Scala line 1307)
             self.process_certifications(spark, config)
 
-            # Process trending (Scala line 1310)
-            self.process_trending(spark, config)
 
             # Update last run date (Scala line 1071)
             Redis.update("lhp_lastRunDate", current_date_str, conf = config)
@@ -1411,10 +1412,15 @@ class DashboardSyncModel:
 
             total_course_count = trending_courses.count()
             course_limit_count = int(total_course_count * 0.10)
-
-            trending_course_ids = trending_courses.limit(course_limit_count) \
-                                      .agg(concat_ws(",", collect_list("courseID"))).first()[0] or ""
-
+            hardcode_trending_courses = config.hardcodeTrendingCourses
+            hardcoded_course_ids = config.hardCodedCoursesIds
+            if hardcode_trending_courses:
+                trending_course_ids = hardcoded_course_ids
+            else:
+                trending_course_ids = trending_courses.limit(course_limit_count) \
+                                          .agg(concat_ws(",", collect_list("courseID"))).first()[0] or ""
+            print(hardcode_trending_courses)
+            print(hardcoded_course_ids)
             # Trending programs (Scala lines 1240-1249)
             trending_programs = enrolment_df.filter(
                 col("courseStatus") == "Live"
@@ -1452,9 +1458,14 @@ class DashboardSyncModel:
             most_enrolled_tag = trending_course_ids
 
             # Update Redis (Scala lines 1286-1291)
-            print(f"📝 Redis.updateMapField('lhp_trending', 'across:courses', '{trending_course_ids[:200]}...')")
-            print(f"📝 Redis.updateMapField('lhp_trending', 'across:programs', '{trending_program_ids[:200]}...')")
-            print(f"📝 Redis Key: lhp_mostEnrolledTag, Value: {most_enrolled_tag[:200]}...")
+            print("===================================")
+            print(trending_course_ids)
+            Redis.updateMapField('lhp_trending', 'across:courses', trending_course_ids, conf=config)
+            Redis.updateMapField('lhp_trending', 'across:programs', trending_program_ids, conf=config)
+            Redis.update("lhp_mostEnrolledTag", most_enrolled_tag, conf=config)
+            #print(f"📝 Redis.updateMapField('lhp_trending', 'across:courses', '{trending_course_ids[:200]}...')")
+            #print(f"📝 Redis.updateMapField('lhp_trending', 'across:programs', '{trending_program_ids[:200]}...')")
+            #print(f"📝 Redis Key: lhp_mostEnrolledTag, Value: {most_enrolled_tag[:200]}...")
 
             print("✅ Trending calculations completed")
 
