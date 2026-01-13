@@ -281,7 +281,8 @@ class DataExhaustModel:
             should_clause = ",".join([f'{{"match":{{"primaryCategory.raw":"{pc}"}}}}' for pc in primary_categories])
             fields = ["identifier", "name", "primaryCategory", "status", "reviewStatus", "channel", 
                      "duration", "leafNodesCount", "lastPublishedOn", "lastStatusChangedOn", 
-                     "createdFor", "competencies_v6", "programDirectorName", "language", "courseCategory","organisation","childNodes","difficultyLevel"]
+                     "createdFor", "competencies_v6", "programDirectorName", "language",
+                       "courseCategory","organisation","childNodes","difficultyLevel"]
             array_fields = ["createdFor", "language","organisation","childNodes"]
             fields_clause = ",".join([f'"{f}"' for f in fields])
             query = f'{{"_source":[{fields_clause}],"query":{{"bool":{{"should":[{should_clause}]}}}}}}'
@@ -569,7 +570,7 @@ class DataExhaustModel:
             context_categories = ["Final Program Assessment"]
             context_categories_clause = ",".join([f'{{"match":{{"contextCategory.raw":"{pc}"}}}}' for pc in context_categories])
             fields = ["identifier", "name", "primaryCategory", "status", "reviewStatus", "channel", 
-                     "expectedDuration", "lastPublishedOn", "lastStatusChangedOn", 
+                     "expectedDuration", "lastPublishedOn", "lastStatusChangedOn", "minimumPassPercentage", 
                      "createdFor", "competencies_v6", "programDirectorName", "language", "courseCategory","contextCategory"]
             array_fields = ["createdFor", "language","organisation"]
             fields_clause = ",".join([f'"{f}"' for f in fields])
@@ -587,7 +588,28 @@ class DataExhaustModel:
             self.write_parquet(es_final_assessment_df, f"{output_base_path}/esFinalAssessment")
             es_final_assessment_df.unpersist()
 
-            self.logger.info("ES final assessment data processing completed.")
+            # Process course assessment data
+            self.logger.info("Processing assessment ES content data...")
+            primary_categories = ["Course Assessment"]
+            must_clause = ",".join([f'{{"match":{{"primaryCategory.raw":"{pc}"}}}}' for pc in primary_categories])
+            fields = ["identifier", "status", "minimumPassPercentage", "contextCategory"]
+            fields_clause = ",".join([f'"{f}"' for f in fields])
+            array_fields = ["createdFor", "language","organisation"]
+            query = f'{{"_source":[{fields_clause}],"query":{{"bool":{{"must":[{must_clause}]}}}}}}'
+
+            es_course_assessment_df = utils.read_elasticsearch_data(
+                self.spark,
+                self.config.sparkElasticsearchConnectionHost,
+                self.config.sparkElasticsearchConnectionPort,
+                "compositesearch",
+                query,
+                fields,
+                array_fields
+            )
+            self.write_parquet(es_course_assessment_df, f"{output_base_path}/esCourseAssessment")
+            es_course_assessment_df.unpersist()
+
+            self.logger.info("ES course assessment data processing completed.")
             
             
             self.logger.info("Data processing completed successfully!")

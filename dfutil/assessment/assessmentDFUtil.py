@@ -281,8 +281,8 @@ def assessment_children_dataframe(assess_with_hierarchy_df: DataFrame) -> DataFr
         
         print("🔧 Selecting and casting child columns...")
         df = exploded_df.select(
-            col("assessID"),
-            col("ch.identifier").alias("assessChildID"),
+            col("assessID"),#courseID
+            col("ch.identifier").alias("assessChildID"),#assessmentID
             col("ch.name").alias("assessChildName"),
             col("ch.duration").cast(FloatType()).alias("assessChildDuration"),
             col("ch.primaryCategory").alias("assessChildPrimaryCategory"),

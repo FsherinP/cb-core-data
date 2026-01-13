@@ -53,8 +53,33 @@ class L2AssessmentReport:
             userDF = spark.read.parquet(f"{config.warehouseReportDir}/{config.dwUserTable}")
             userDF = userDF.join(dwOrgDF.select("mdo_id", "mdo_name"), "mdo_id", "left")
             dwcbPlanDF = spark.read.parquet(f"{config.warehouseReportDir}/{config.dwCBPlanTable}")
+            assessmentMinPassDF = spark.read.parquet(f"{config.baseCachePath}/esCourseAssessment")
             
-            
+            #assessment Minimum Pass DF
+            assessmentMinPassDF.printSchema()
+            assessMinPassDF = assessmentMinPassDF.filter(col('minimumPassPercentage').isNotNull())\
+                .select(
+                "identifier",
+                "minimumPassPercentage"
+            )
+
+            assessMinPassDF.show(5, truncate=False)
+
+            assessmentDetailDF = assessmentDetailDF.join(assessMinPassDF,
+                assessmentDetailDF.assessment_id == assessMinPassDF.identifier,
+                "left"
+            ).select(
+                assessmentDetailDF["*"],
+                assessMinPassDF["minimumPassPercentage"]
+            )
+            # If minimumPassPercentage is available for a matching assessment, prefer it
+            # over the existing cut_off_percentage value.
+            assessmentDetailDF = assessmentDetailDF.withColumn(
+                "cut_off_percentage",
+                when(col("minimumPassPercentage").isNotNull(), col("minimumPassPercentage").cast("float"))
+                .otherwise(col("cut_off_percentage"))
+            )
+
             kcmCourseDF = kcmDF.join(kcmMappingDF, kcmDF.competency_area_id == kcmMappingDF.competency_area_id, "inner") \
                 .select(
                     col("course_id").alias("course_id"),
@@ -367,9 +392,11 @@ class L2AssessmentReport:
                     col("assessment_type").alias("assess_assessment_type"),
                     col("score_achieved").alias("assess_score_achieved"),
                     col("cut_off_percentage").alias("assess_cut_off_percentage"),
-                    col("completion_date").alias("assess_assessment_date")
+                    col("completion_date").alias("assess_assessment_date"),
+                    col("pass").alias("assess_pass")
                 ) \
                 .dropDuplicates()
+
             print(f"CAP with assessment count: {cap_with_assessment.count()}")
             print("\nStage 4: Joining with user data...")
             validL2AssessmentConsumptionDF = cap_with_assessment \
@@ -408,7 +435,8 @@ class L2AssessmentReport:
                     col("cap_enrol_certificate_id"),
                     col("cap_enrol_content_last_accessed_on"),
                     col("cap_enrol_first_completed_on"),
-                    col("cap_enrol_user_consumption_status")
+                    col("cap_enrol_user_consumption_status"),
+                    col("assess_pass")
                 ) \
                 .dropDuplicates()
 
@@ -506,10 +534,10 @@ class L2AssessmentReport:
                 lit(None).alias("cbp_plan_id"),
                 lit(None).alias("allocated_on"),
                 when(
-                    col("assess_score_achieved") >= col("assess_cut_off_percentage"), 
+                    col("pass") == 'Yes', 
                     lit("Pass")
                 ).when(
-                    col("assess_score_achieved") <= col("assess_cut_off_percentage"), 
+                    col("pass") == 'No', 
                     lit("Fail")
                 ).otherwise(lit(None)).alias("comprehensive_level_assessment_status"),
                 lit(None).alias("cbp_plan_start_date"),
@@ -528,8 +556,8 @@ class L2AssessmentReport:
             masterFinalDF.printSchema()
             
             print("\nSample data (10 rows):")
-            masterFinalDF.show(10, truncate=False)
-            masterFinalDF.filter(col("user_id") == "b4bb7eea-9af7-4b55-bf0e-65d32146fe27").show(20, truncate=False)
+            #masterFinalDF.show(10, truncate=False)
+            #masterFinalDF.filter(col("user_id") == "b39b6202-1718-4a26-afa8-dcd141756efe").show(20, truncate=False)
             
             
             print("\nReport generation completed successfully!")

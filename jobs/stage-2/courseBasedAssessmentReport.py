@@ -41,7 +41,8 @@ class CourseBasedAssessmentModel:
             currentDateTime = date_format(current_timestamp(), ParquetFileConstants.DATE_TIME_WITH_AMPM_FORMAT)
 
             print("Stage 1: Loading assessment data...")
-            assessmentDF = spark.read.parquet(ParquetFileConstants.ALL_ASSESSMENT_COMPUTED_PARQUET_FILE).filter(col("assessCategory").isin("Course", "Standalone Assessment", "Blended Program"))
+            assessmentDF = spark.read.parquet(ParquetFileConstants.ALL_ASSESSMENT_COMPUTED_PARQUET_FILE)\
+            .filter(col("assessCategory").isin("Course", "Standalone Assessment", "Blended Program", "Curated Program"))
             hierarchyDF = spark.read.parquet(ParquetFileConstants.HIERARCHY_PARQUET_FILE)
             organizationDF = spark.read.parquet(ParquetFileConstants.ORG_COMPUTED_PARQUET_FILE)
 
@@ -66,26 +67,36 @@ class CourseBasedAssessmentModel:
             print("Stage 3: Complete")
 
             assessChildrenDF = assessmentDFUtil.assessment_children_dataframe(assessWithHierarchyDF)
+    
             print("Stage 4: Complete")
             print("Stage 5: Processing user assessment data...")
             userAssessmentDF = spark.read.parquet(ParquetFileConstants.USER_ASSESSMENT_PARQUET_FILE)\
             .filter(col("assessUserStatus") == "SUBMITTED")\
             .withColumn("assessStartTime", col("assessStartTimestamp").cast("long"))\
             .withColumn("assessEndTime", col("assessEndTimestamp").cast("long"))
+
+            print("Stage 5: Complete")
+            
             userAssessChildrenDF = assessmentDFUtil.user_assessment_children_dataframe(userAssessmentDF, assessChildrenDF)
+            
             categories = ["Course", "Program", "Blended Program", "Standalone Assessment", "Curated Program"]
+            
             allCourseProgramDetailsWithCompDF = assessmentDFUtil.all_course_program_details_with_competencies_json_dataframe(spark.read.parquet(ParquetFileConstants.CONTENT_COMPUTED_PARQUET_FILE)\
                 .filter(col("category").isin(categories)), hierarchyDF, organizationDF, spark)
             print("All Course Program Details with Competencies JSON DataFrame Schema:")
+            
             allCourseProgramDetailsDF = allCourseProgramDetailsWithCompDF.drop("competenciesJson")
             print("Stage 6: Complete")
 
             # Stage 7: Add Rating Information
             print("Stage 7: Adding rating information...")
+            
             allCourseProgramDetailsWithRatingDF = assessmentDFUtil.all_course_program_details_with_rating_df(allCourseProgramDetailsDF,
             spark.read.parquet(ParquetFileConstants.RATING_SUMMARY_COMPUTED_PARQUET_FILE))
+            
             userAssessChildrenDetailsDF = assessmentDFUtil.user_assessment_children_details_dataframe(userAssessChildrenDF, assessWithDetailsDF, allCourseProgramDetailsWithRatingDF, spark.read.parquet(ParquetFileConstants.USER_ORG_COMPUTED_FILE))
             print("User Assessment Children DataFrame Schema:")
+            
             retakesDF = userAssessChildrenDetailsDF.groupBy("assessChildID", "userID").agg(countDistinct("assessStartTime").alias("retakes"))
 
             # Step 2: Get latest entry per (assessChildID, userID) using row_number()
@@ -103,8 +114,10 @@ class CourseBasedAssessmentModel:
                 .withColumn("Total_Score_Calculated", when(col("assessMaxQuestions").isNotNull(), col("assessMaxQuestions") * 1)) \
                 .withColumn("course_id", when(col("assessCategory") == "Standalone Assessment", lit("")).otherwise(col("assessID"))) \
                 .withColumn("Tags", concat_ws(", ", col("tag")))
+            
             finalFormattedDF = self.duration_format(finalDF,"assessExpectedDuration")\
                 .withColumnRenamed("assessExpectedDuration", "totalAssessmentDuration")
+            
             fullReportNewDF = finalFormattedDF.withColumn("MDO_Name", col("userOrgName")) \
                 .withColumn("Ministry", when(col("ministry_name").isNull(), col("userOrgName")).otherwise(col("ministry_name"))) \
                 .withColumn("Department", when((col("Ministry").isNotNull()) & (col("Ministry") != col("userOrgName")) &
@@ -148,7 +161,9 @@ class CourseBasedAssessmentModel:
                 col("assessEndTime"),
                 col("userOrgID").alias("mdoid"),
                 col("Report_Last_Generated_On"))
+            
             oldAssessmentDetailsDF = spark.read.parquet(ParquetFileConstants.OLD_ASSESSMENT_COMPUTED_PARQUET_FILE)
+            
             fullReportOldDF =  oldAssessmentDetailsDF\
                 .withColumn("MDO_Name", col("userOrgName"))\
                 .withColumn("Ministry", when(col("ministry_name").isNull(), col("userOrgName")).otherwise(col("ministry_name"))) \
@@ -191,7 +206,9 @@ class CourseBasedAssessmentModel:
                     col("assessEndTime"),
                     col("userOrgID").alias("mdoid"),
                     col("Report_Last_Generated_On"))
+            
             fullReportDF = fullReportNewDF.union(fullReportOldDF).dropDuplicates(["userID", "assessment_id", "course_id"])
+            
             mdoReportDF = fullReportDF.filter(col("status") == 1).select(
                 col("userID").alias("User ID"),
                 col("fullName").alias("Full Name"),
@@ -222,6 +239,7 @@ class CourseBasedAssessmentModel:
                 col("mdoid"),
                 col("Report_Last_Generated_On")
             )
+
             finalAssessmentDF = spark.read.parquet(ParquetFileConstants.FINAL_ASSESSMENT_PARQUET_FILE)
             finalAssessmentDF = finalAssessmentDF.join(userAssessmentDF, finalAssessmentDF["Identifier"] == userAssessmentDF["assessChildID"], "inner") \
                 .withColumn("cut_off_percentage", col("assessPassPercentage").cast("float")) \
@@ -241,11 +259,11 @@ class CourseBasedAssessmentModel:
                         col("assessMaxQuestions").alias("total_question"),
                         col("assessIncorrect").alias("number_of_incorrect_responses"),
                         lit(0).alias("number_of_retakes"),
+                        col("assessPass").alias("pass"),
                         col("data_last_generated_on"))
             
             finalAssessmentDF = self.duration_format(finalAssessmentDF,"assessment_duration")
             finalAssessmentDF = self.duration_format(finalAssessmentDF,"time_spent_by_the_user")
-            
             
             warehouseDF = fullReportDF.withColumn("data_last_generated_on", currentDateTime)\
                 .withColumn("cut_off_percentage", col("assessPercentage").cast("float")) \
@@ -264,7 +282,9 @@ class CourseBasedAssessmentModel:
                     col("total_questions").alias("total_question"),
                     col("incorrect_count").alias("number_of_incorrect_responses"),
                     col("retakes").alias("number_of_retakes"),
+                    col("Pass").alias("pass"),
                     col("data_last_generated_on"))
+            
             warehouseDF = warehouseDF.unionByName(finalAssessmentDF)
             # mdo_orgids = mdoReportDF.select("mdoid").distinct().collect()
             # mdo_orgid_list = [row.mdoid for row in mdo_orgids]
@@ -290,6 +310,7 @@ class CourseBasedAssessmentModel:
         except Exception as e:
             print(f"❌ Error: {str(e)}")
             raise
+    
     def duration_format(self, df, in_col, out_col=None):
         out_col = out_col or in_col
         return df.withColumn(
