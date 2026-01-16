@@ -65,7 +65,7 @@ class CourseCompletionSurveyReport:
                     .pivot("question")
                     .agg(first("answer"))
                 )
-            reportDF = reportDF.withColumn("contextName", encode("conextName", "UTF-8"))
+            reportDF = reportDF.withColumn("contextName", encode("contextName", "UTF-8"))
 
             print("Stage 3: Complete")
             #writing warehouse file 
