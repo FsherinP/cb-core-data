@@ -70,7 +70,7 @@ class CourseCompletionSurveyReport:
             print("Stage 3: Complete")
             #writing warehouse file 
             print("Stage 4: Writing Warehouse file")
-            warehouseDF = reportDF.filter(col("formId").isin(config.completionSurveyFormIds)).withColumn("data_last_generated_on", currentDateTime)\
+            warehouseDF = reportDF.filter(col("formId").isin(config.contentEndSurveyFormid)).withColumn("data_last_generated_on", currentDateTime)\
                 .select(
                    col("submittedBy").alias("user_id"),
                    col("contextId").alias("course_id"),
