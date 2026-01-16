@@ -5,7 +5,7 @@ import time
 from pathlib import Path
 from pyspark.sql import SparkSession
 from pyspark.sql.window import Window
-from pyspark.sql.functions import (col, row_number, countDistinct, current_timestamp, date_format, broadcast, unix_timestamp, when, lit, first, concat_ws, from_unixtime, format_string, expr, explode)
+from pyspark.sql.functions import (col, current_timestamp, date_format,lit, first, encode, explode)
 from datetime import datetime
 from pyspark.sql import functions as F
 import sys
@@ -65,6 +65,7 @@ class CourseCompletionSurveyReport:
                     .pivot("question")
                     .agg(first("answer"))
                 )
+            reportDF = reportDF.withColumn("contextName", encode("conextName", "UTF-8"))
 
             print("Stage 3: Complete")
             #writing warehouse file 
