@@ -89,7 +89,7 @@ class CourseCompletionSurveyReport:
                      .alias("role_relevance_rating"),
                    col("`What would you like to improve about this course? (e.g., course duration, pace, clarity, engagement, assessments, or any other aspect)`")
                      .alias("improvement_suggestions"),
-                   lit(None).cast("boolean").alias("is_mandatory"),
+                   lit(True).cast("boolean").alias("is_mandatory"),
                    col("version").alias("survey_version"),
                    col("data_last_generated_on"))
 
