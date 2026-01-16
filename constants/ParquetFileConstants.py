@@ -36,7 +36,7 @@ class ParquetFileConstants:
     OLD_ASSESSMENT_PARQUET_FILE = str(INPUT_DIR / "oldAssessmentDetails/**.parquet")
     USER_EXTENDED_PROFILE = str(INPUT_DIR / "userExtendedProfile/**.parquet")
     FINAL_ASSESSMENT_PARQUET_FILE = str(INPUT_DIR / "esFinalAssessment/**.parquet")
-
+    COURSE_COMPLETION_SURVEY_PARQUET_FILE = str(INPUT_DIR / "courseCompletionSurvey/**.parquet")
     ###
     ###  Computed Parquet File
     ###

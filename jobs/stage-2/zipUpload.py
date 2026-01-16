@@ -7,9 +7,6 @@ from pyspark.sql import SparkSession
 from datetime import datetime
 from pathlib import Path
 from pyspark.sql.types import StructType, StructField, StringType, IntegerType, BooleanType, ArrayType
-from pyspark.sql.functions import (col, lower, when, lit, expr, concat_ws, explode_outer, from_json, to_date,
-                                   current_timestamp, date_format, round, coalesce, broadcast, size, map_keys,
-                                   map_values)
 from zipfile import ZipFile, ZIP_STORED, ZIP_DEFLATED
 from concurrent.futures import ThreadPoolExecutor, as_completed, ProcessPoolExecutor
 import shutil
