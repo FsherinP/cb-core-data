@@ -286,8 +286,29 @@ class CourseBasedAssessmentModel:
                     col("data_last_generated_on"))
             
             warehouseDF = warehouseDF.unionByName(finalAssessmentDF)
-            # mdo_orgids = mdoReportDF.select("mdoid").distinct().collect()
-            # mdo_orgid_list = [row.mdoid for row in mdo_orgids]
+
+            # request from anshu to replace assesment_type 'Course Assessment' with 'Comprehensive Assessment Progam' 
+            # when course sub type is 'Comprehensive Assessment Program' 
+            warehouseDF = warehouseDF.join(assessmentDF, warehouseDF["content_id"] == assessmentDF["assessID"], "left") \
+                .withColumn("assessment_sub_type", when(col("assessCourseCategory") == "Comprehensive Assessment Program", "Comprehensive Assessment Program").otherwise(col("assessment_type"))) \
+                .select(
+                    col("user_id"),
+                    col("content_id"),
+                    col("assessment_id"), #identifier
+                    col("assessment_name"),
+                    col("assessment_type"),
+                    col("assessment_sub_type"), 
+                    col("assessment_duration"),
+                    col("time_spent_by_the_user"),
+                    col("completion_date"),
+                    col("score_achieved"),#enrollment 
+                    col("overall_score"),
+                    col("cut_off_percentage"),
+                    col("total_question"),
+                    col("number_of_incorrect_responses"),
+                    col("number_of_retakes"),
+                    col("pass"),
+                    col("data_last_generated_on"))
 
             # print(f"📊 Writing MDO reports for {len(mdo_orgid_list)} organizations...")
             dfexportutil.write_csv_per_mdo_id_duckdb(

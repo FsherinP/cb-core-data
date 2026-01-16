@@ -60,6 +60,7 @@ def precomputeAssessmentEsDataframe(spark: SparkSession) -> DataFrame:
         assessmentdf = exploded_df.select(
             col("identifier").alias("assessID"),
             col("primaryCategory").alias("assessCategory"),
+            col('courseCategory').alias("assessCourseCategory"),
             col("name").alias("assessName"),
             col("status").alias("assessStatus"),
             col("reviewStatus").alias("assessReviewStatus"),
