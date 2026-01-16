@@ -133,6 +133,10 @@ class DataWarehouseModel:
             self.write_postgres_table(eventsEnrolmentDataDFWithKarmaPoints, postgres_url, config.dwEventsEnrolmentTable,
                                       config.dwPostgresUsername, config.dwPostgresCredential)
             
+            course_completion_survey_details_df = spark.read.parquet(f"{warehouse_path}/{config.dwCourseCompletionSurveryTable}")
+            self.write_postgres_table(course_completion_survey_details_df, postgres_url, config.dwCourseCompletionSurveryTable,      
+                                      config.dwPostgresUsername, config.dwPostgresCredential)
+            
             print("✅ Processing completed successfully!")
 
 

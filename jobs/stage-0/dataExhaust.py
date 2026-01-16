@@ -611,6 +611,26 @@ class DataExhaustModel:
 
             self.logger.info("ES course assessment data processing completed.")
             
+            # Process Elasticsearch course completion data
+            self.logger.info("Processing course completion survey data...")
+            fields = ["formId","contextId","contextName","version", "status", "submittedBy", "submittedDate", "responses"]
+            fields_clause = ",".join([f'"{f}"' for f in fields])
+            array_fields = ["responses.answer","response.question"]
+            query = f'{{"_source":[{fields_clause}],"query":{{"match_all":{{}}}}}}'
+            course_completion_survey_df = utils.read_elasticsearch_data(
+                self.spark,
+                self.config.sparkIGotElasticsearchConnectionHost,
+                self.config.sparkElasticsearchConnectionPort,
+                "fs-forms-data-v3",
+                query,
+                fields,
+                array_fields
+            )
+
+            self.write_parquet(course_completion_survey_df, f"{output_base_path}/courseCompletionSurvey")
+            course_completion_survey_df.unpersist()
+
+            self.logger.info("course completion survey data processing completed.")
             
             self.logger.info("Data processing completed successfully!")
             
