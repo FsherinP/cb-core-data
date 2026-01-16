@@ -24,6 +24,7 @@ DEFAULT_CONFIG = {
     'sparkElasticsearchAuditConnectionHost': '10.175.5.10',
     'sparkElasticsearchConnectionPort': '9200',
     'sparkMongoConnectionHost': '192.168.3.178',
+    'sparkIGotElasticsearchConnectionHost':'10.175.3.36',
 
     # External Service Configuration
     'fracBackendHost': 'frac-dictionary.karmayogi.nic.in',
@@ -78,6 +79,7 @@ DEFAULT_CONFIG = {
     'dwSLWMdoTopLearnerTable': 'slw_mdo_top_learners',
     'dwNLWUserLeaderboardTable': 'nlw_user_leaderboard',
     'dwAparCBPEnrollmentTable': 'apar_cbp_enrollment',
+    'dwCourseCompletionSurveryTable': 'course_completion_survey_details',
 
     # Cassandra Keyspaces
     'cassandraUserKeyspace': 'sunbird',
@@ -158,6 +160,7 @@ DEFAULT_CONFIG = {
     'kcmReportPath': 'standalone-reports/kcm-report',
     'commsConsoleReportPath': 'standalone-reports/comms-console',
     'validationReportPath': 'standalone-reports/validation-report',
+    'courseCompletionSurveyPath': 'standalone-reports/course-completion-survey-report',
 
     'blendedProgramReport' : 'BlendedProgramReport.csv',
     'cbaReport' : 'UserAssessmentReport.csv',
@@ -168,6 +171,8 @@ DEFAULT_CONFIG = {
     'userAssessmentReport' : 'StandaloneAssessmentReport.csv',
     'userEnrollmentReport' : 'ConsumptionReport.csv',
     'userReport' : 'UserReport.csv',
+    'completionSurveyReport':'completionSurvey.csv',
+
 
     # Communications Console Configuration
     'commsConsolePrarambhEmailSuffix': '.kb@karmayogi.in',
@@ -180,6 +185,8 @@ DEFAULT_CONFIG = {
     # Elasticsearch Configuration
     'esFormDataIds': '1718964921012,1720793361489',
     'esFormDataIndex': 'form_data',
+    'completionSurveyFormIds':["1765870394436"],
+    'contentEndSurveyFormid' : ['1766408457687'],
 
     # Learning Week Configuration
     'nationalLearningWeekStart': '2024-10-19 00:00:00',
@@ -205,7 +212,7 @@ DEFAULT_CONFIG = {
     'unifiedParquetLocalPath': '/home/analytics/pyspark/warehouse/unified/',
     'directoriesToSelect': ["blended-program-report-mdo","cbp-report-mdo-summary","course-report","cba-report","cbp-report-mdo-enrolment","user-report","user-enrollment-report"],
     'pysparkDirectoriesToSelect': ["blended-program-report-mdo","cbp-report-mdo-summary","course-report","cba-report","cbp-report-mdo-enrolment","user-report","user-enrollment-report"],
-    'pysparkCBPDirectoriesToSelect': ["blended-program-report-cbp","user-assessment-report-cbp"],
+    'pysparkCBPDirectoriesToSelect': ["blended-program-report-cbp","user-assessment-report-cbp", "course-completion-survey-report"],
     'googleServiceAccountFilePath': '/home/analytics/pyspark/jobs/gcp_service_account.json',
     'gcpBucket': 'igotproddp',
     'password': '123456',
