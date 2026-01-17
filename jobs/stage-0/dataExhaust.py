@@ -6,9 +6,9 @@ from pathlib import Path
 import os
 from pyspark.sql import SparkSession
 from pyspark.sql.functions import (
-    col, from_json, explode_outer, concat, substring, lit, when, size, 
+    col, from_json, explode_outer, concat, substring, lit, when, size,
     expr, date_format, to_utc_timestamp, current_timestamp, coalesce,
-    to_timestamp, isnan, isnull, format_string, array_contains, array_join
+    to_timestamp, isnan, isnull, format_string, array_join
 )
 from pyspark.sql.types import StructType, StructField, StringType, IntegerType,BooleanType,FloatType,ArrayType
 from pyspark import StorageLevel
@@ -420,14 +420,19 @@ class DataExhaustModel:
                 self.write_parquet(df, f"{output_base_path}/{table_name}")
                 df.unpersist()
             
-            # Process event data (NLW)
+            # # Process event data (NLW)
             self.logger.info("Processing event data...")
             object_types = ["Event"]
             should_clause_events = ",".join([f'{{"match":{{"objectType.raw":"{ot}"}}}}' for ot in object_types])
-            fields_events = ["identifier", "name", "objectType", "status", "startDate", "startTime",
-                           "duration", "registrationLink", "createdFor", "recordedLinks", "resourceType", "typeofEvent",
-                           "maxEnrolments", "meetingAgenda", "creatorDetails", "recordedMediaLink", "noOfAttendes", "eventDuration",
-                           "meetingSummary", "courseLinked", "speakerDetails" ]
+            # Required fields
+            required_fields = ["identifier", "name", "objectType", "status", "startDate", "startTime",
+                   "duration", "registrationLink", "createdFor", "recordedLinks", "resourceType",
+                   "typeofEvent", "maxEnrolments", "meetingAgenda", "creatorDetails",
+                   "noOfAttendes", "eventDuration", "courseLinked", "speakerDetails"]
+
+            # Optional fields - don't include in initial query
+            optional_fields = ["recordedMediaLink", "meetingSummary"]
+            fields_events = required_fields + optional_fields
             array_fields_events = ["createdFor", "recordedLinks"]
             fields_clause_events = ",".join([f'"{f}"' for f in fields_events])
             event_query = f'{{"_source":[{fields_clause_events}],"query":{{"bool":{{"should":[{should_clause_events}]}}}}}}'
@@ -444,9 +449,13 @@ class DataExhaustModel:
                 self.config.sparkElasticsearchConnectionPort,
                 "compositesearch",
                 event_query,
-                fields_events,
-                array_fields_events
-            )
+                fields_events,  # Pass all fields including optional ones
+                array_fields_events)
+
+            # Only add columns if they're missing from the ES response
+            for field in optional_fields:
+                if field not in event_data_df.columns:
+                    event_data_df = event_data_df.withColumn(field, lit(None).cast(StringType()))
             # Transform event data
             event_details_df = event_data_df.withColumn(
                 "event_provider_mdo_id", explode_outer(col("createdFor"))
@@ -495,6 +504,10 @@ class DataExhaustModel:
                 col("meetingSummary").cast(StringType()),
                 col("courseLinked").cast(StringType())
             ).dropDuplicates(["event_id"]).fillna(0.0, subset=["duration", "eventDuration"])
+            #event_details_df.select("recordedMediaLink").filter(col("recordedMediaLink").isNotNull()).show(50, truncate=False)
+            #event_details_df.select("meetingSummary").filter(col("meetingSummary").isNotNull()).show(50, truncate=False)
+
+            #event_details_df.show(15, truncate=False)
             
             self.write_parquet(event_details_df, f"{output_base_path}/eventDetails")
             
