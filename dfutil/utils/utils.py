@@ -270,33 +270,36 @@ def read_elasticsearch_data(spark: SparkSession, host: str, port: str, index: st
     # Add query and load data
     df = dfr.option("query", query).load(index)
 
-    # Select only the specified fields
+    # Select only the specified fields that actually exist
     if fields:
-        # Create column expressions for field selection
-        field_cols = [col(f) for f in fields]
-        df = df.select(*field_cols)
+        # Filter to only existing fields
+        existing_fields = [f for f in fields if f in df.columns]
+        missing_fields = [f for f in fields if f not in df.columns]
+
+        # Select existing fields
+        df = df.select(*[col(f) for f in existing_fields])
+
+        # Add missing fields as null
+        for field in missing_fields:
+            df = df.withColumn(field, lit(None).cast(StringType()))
 
     if 'responses' in df.columns:
         df = df.withColumnRenamed("responses", "responses_raw")
-        
-        df = (
-            df.withColumn(
-                "responses",
-                transform(
-                    col("responses_raw"),
-                    lambda x: struct(
-                        x.question.alias("question"),
-                        when(
-                            x.answer.isNull() | (size(x.answer) == 0),
-                            lit("NA")
-                        ).otherwise(concat_ws(",", x.answer)).alias("answer"),
-                        x.questionId.alias("questionId"),
-                        x.answerType.alias("answerType")
-                    )
+        df = df.withColumn(
+            "responses",
+            transform(
+                col("responses_raw"),
+                lambda x: struct(
+                    x.question.alias("question"),
+                    when(
+                        x.answer.isNull() | (size(x.answer) == 0),
+                        lit("NA")
+                    ).otherwise(concat_ws(",", x.answer)).alias("answer"),
+                    x.questionId.alias("questionId"),
+                    x.answerType.alias("answerType")
                 )
             )
         )
-       
     # Persist with MEMORY_ONLY storage level for performance
     df = df.persist(StorageLevel.MEMORY_ONLY)
 
