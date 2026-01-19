@@ -13,7 +13,6 @@ from pyspark.sql.functions import (
 from pyspark.sql.types import StructType, StructField, StringType, IntegerType,BooleanType,FloatType,ArrayType
 from pyspark import StorageLevel
 import logging
-
 sys.path.append(str(Path(__file__).resolve().parents[2]))
 
 from constants.ParquetFileConstants import ParquetFileConstants

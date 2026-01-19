@@ -266,7 +266,8 @@ def preComputeUserEnrolmentWarehouseData(spark):
                 col("userCourseCompletionStatus").alias("user_consumption_status"),
                 col("certificateID"),
                 col("enrolledOn").alias("enrolled_on"),
-                col("batchID")
+                col("batchID"),
+                col("completionPercentage").alias("content_progress_percentage")
             )
             .dropDuplicates(["userID", "content_id", "batchID"])
         )
@@ -299,7 +300,8 @@ def preComputeUserEnrolmentWarehouseData(spark):
                 col("user_consumption_status"),
                 col("certificateID"),
                 col("courseEnrolledTimestamp").alias("enrolled_on"),
-                lit("Not Available").alias("batchID")
+                lit("Not Available").alias("batchID"),
+                col("completionPercentage").alias("content_progress_percentage")
             )
             .dropDuplicates(["userID", "content_id", "batchID"])
         )
