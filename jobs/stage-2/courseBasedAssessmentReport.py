@@ -264,6 +264,7 @@ class CourseBasedAssessmentModel:
             
             finalAssessmentDF = self.duration_format(finalAssessmentDF,"assessment_duration")
             finalAssessmentDF = self.duration_format(finalAssessmentDF,"time_spent_by_the_user")
+
             
             warehouseDF = fullReportDF.withColumn("data_last_generated_on", currentDateTime)\
                 .withColumn("cut_off_percentage", col("assessPercentage").cast("float")) \
@@ -289,19 +290,45 @@ class CourseBasedAssessmentModel:
 
             # request from anshu to replace assesment_type 'Course Assessment' with 'Comprehensive Assessment Progam' 
             # when course sub type is 'Comprehensive Assessment Program' 
+            assessmentMinPassDF = spark.read.parquet(f"{config.baseCachePath}/esCourseAssessment")
+
+            #assessment Minimum Pass DF
+            assessmentMinPassDF.printSchema()
+            assessMinPassDF = assessmentMinPassDF.filter(col('minimumPassPercentage').isNotNull())\
+                .select(
+                "identifier",
+                "minimumPassPercentage"
+            )
+
+            assessMinPassDF.show(5, truncate=False)
+
+            warehouseDF = warehouseDF.join(assessMinPassDF,
+                warehouseDF.assessment_id == assessMinPassDF.identifier,
+                "left"
+            ).select(
+                warehouseDF["*"],
+                assessMinPassDF["minimumPassPercentage"]
+            )
+            # If minimumPassPercentage is available for a matching assessment, prefer it
+            # over the existing cut_off_percentage value.
+            # new column assessment_sub_type for anshu's CAP reference
             warehouseDF = warehouseDF.join(assessmentDF, warehouseDF["content_id"] == assessmentDF["assessID"], "left") \
                 .withColumn("assessment_sub_type", when(col("assessCourseCategory") == "Comprehensive Assessment Program", "Comprehensive Assessment Program").otherwise(col("assessment_type"))) \
+                .withColumn(
+                "cut_off_percentage",
+                when(col("minimumPassPercentage").isNotNull(), col("minimumPassPercentage").cast("float"))
+                .otherwise(col("cut_off_percentage"))) \
                 .select(
                     col("user_id"),
                     col("content_id"),
                     col("assessment_id"), #identifier
                     col("assessment_name"),
                     col("assessment_type"),
-                    col("assessment_sub_type"), 
+                    col("assessment_sub_type"),
                     col("assessment_duration"),
                     col("time_spent_by_the_user"),
                     col("completion_date"),
-                    col("score_achieved"),#enrollment 
+                    col("score_achieved"),#enrollment
                     col("overall_score"),
                     col("cut_off_percentage"),
                     col("total_question"),
@@ -309,8 +336,6 @@ class CourseBasedAssessmentModel:
                     col("number_of_retakes"),
                     col("pass"),
                     col("data_last_generated_on"))
-
-            # print(f"📊 Writing MDO reports for {len(mdo_orgid_list)} organizations...")
             dfexportutil.write_csv_per_mdo_id_duckdb(
                 mdoReportDF,
                 f"{config.localReportDir}/{config.cbaReportPath}/{today}",
