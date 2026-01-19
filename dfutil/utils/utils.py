@@ -1,6 +1,7 @@
 from pathlib import Path
 from pyspark.sql import SparkSession, DataFrame
 from pyspark import StorageLevel
+from pyspark.sql.types import StringType
 from pyspark.sql.functions import (
     col,when, lit, transform, struct, concat_ws, size)
 import requests
