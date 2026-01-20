@@ -534,10 +534,10 @@ class L2AssessmentReport:
                 lit(None).alias("cbp_plan_id"),
                 lit(None).alias("allocated_on"),
                 when(
-                    col("pass") == 'Yes', 
+                    col("assess_pass") == 'Yes', 
                     lit("Pass")
                 ).when(
-                    col("pass") == 'No', 
+                    col("assess_pass") == 'No', 
                     lit("Fail")
                 ).otherwise(lit(None)).alias("comprehensive_level_assessment_status"),
                 lit(None).alias("cbp_plan_start_date"),
