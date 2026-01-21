@@ -415,6 +415,10 @@ class QueryConstants:
         COUNT(DISTINCT userID) FILTER (WHERE live_retired_content_eligible = 'live_retired_content' AND certificate_category = 'certificate_generated') as certificates_generated_unique_user_count,
         COUNT(*) FILTER (WHERE live_retired_course_moderated_eligible = 'live_retired_course_moderated' AND certificate_category = 'certificate_generated') as course_moderated_course_certificates_generated_count,
         COUNT(DISTINCT userID) FILTER (WHERE live_retired_course_moderated_eligible = 'live_retired_course_moderated' AND certificate_category = 'certificate_generated') as course_moderated_course_certificates_generated_unique_user_count
+        -- NEW: Count of live course-moderated courses
+        COUNT(DISTINCT courseID) FILTER (WHERE live_retired_course_moderated_eligible = 'live_retired_course_moderated') as live_course_moderated_course_count,
+        -- NEW: Average rating for course-moderated courses
+        AVG(courseRating) FILTER (WHERE live_retired_course_moderated_eligible = 'live_retired_course_moderated' AND courseRating IS NOT NULL) as course_moderated_course_average_rating
     FROM base_data
     WHERE courseOrgID IS NOT NULL
     GROUP BY courseOrgID
