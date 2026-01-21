@@ -505,9 +505,8 @@ class DashboardSyncModel:
                 print(f"📝 Redis Map Key: dashboard_course_moderated_course_enrolment_count_by_course_org")
                 print(f"   DataFrame (first 5 rows):")
                 cbp_metrics_df.select("courseOrgID",
-                                      col("course_moderated_course_enrolment_count").alias("count")).show(5,
-                                                                                                          truncate=False)
-
+                                      col("course_moderated_course_enrolment_count").alias("count")).show(
+                    5, truncate=False)
                 Redis.dispatchDataFrame("dashboard_course_moderated_course_certificates_generated_count_by_course_org",
                                         cbp_metrics_df.select("courseOrgID", col("course_moderated_course_certificates_generated_count").alias("count")),
                                         "courseOrgID", "count", conf = config)
@@ -516,7 +515,25 @@ class DashboardSyncModel:
                 cbp_metrics_df.select("courseOrgID",
                                       col("course_moderated_course_certificates_generated_count").alias("count")).show(
                     5, truncate=False)
-
+                Redis.dispatchDataFrame("dashboard_live_course_moderated_course_count_by_course_org",
+                                        cbp_metrics_df.select("courseOrgID",
+                                                              col("live_course_moderated_course_count").alias("count")),
+                                        "courseOrgID", "count", conf=config)
+                print(f"📝 Redis Map Key: dashboard_live_course_moderated_course_count_by_course_org")
+                print(f"   DataFrame (first 5 rows):")
+                cbp_metrics_df.select("courseOrgID",
+                                      col("live_course_moderated_course_count").alias("count")).show(
+                        5, truncate=False)
+                Redis.dispatchDataFrame("dashboard_course_moderated_course_average_rating_by_course_org",
+                                        cbp_metrics_df.select("courseOrgID",
+                                                              col("course_moderated_course_average_rating").alias(
+                                                                  "rating")),
+                                        "courseOrgID", "rating", conf=config)
+                print(f"📝 Redis Map Key: dashboard_course_moderated_course_average_rating_by_course_org")
+                print(f"   DataFrame (first 5 rows):")
+                cbp_metrics_df.select("courseOrgID",
+                                      col("course_moderated_course_average_rating").alias("rating")).show(
+                        5, truncate=False)
             # ===== TOP COURSES BY ORG (Scala lines 407-411) =====
             top_courses_by_org_df = self.duckdb_executor.execute_query(
                 spark, "top_courses_by_org", QueryConstants.TOP_COURSES_BY_ORG
