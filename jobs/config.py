@@ -76,6 +76,10 @@ DATABASE_CONFIG = {
     'dwSLWMdoTopLearnerTable': 'slw_mdo_top_learners',
     'dwNLWUserLeaderboardTable': 'nlw_user_leaderboard',
     'dwAparCBPEnrollmentTable': 'apar_cbp_enrollment',
+    'dwLearnerPathwayMetadataTable': 'learner_pathway',
+    'dwLearnerPathwayMilestoneTable': 'learner_pathway_milestone',
+    'dwLearnerPathwayAssessmentTable': 'learner_pathway_assessment',
+    'dwLearnerPathwayEnrolmentsTable': 'learner_pathway_enrolments',
     
     # Elasticsearch Configuration
     'sparkElasticsearchConnectionHost': '{{ single_node_es_host }}',

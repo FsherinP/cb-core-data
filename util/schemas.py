@@ -72,6 +72,34 @@ hierarchySchema = StructType([
     ]), True), True)
 ])
 
+#learner pathway schema
+lp_hierarchy_schema = StructType([
+    StructField("name", StringType(), True),
+    StructField("description", StringType(), True),
+    StructField("appIcon", StringType(), True),
+    StructField("createdOn", StringType(), True),
+    StructField("lastPublishedOn", StringType(), True),
+    StructField("createdBy", StringType(), True),
+    StructField("createdFor", ArrayType(StringType()), True),
+    StructField("preliminaryAssessment", StringType(), True),
+    StructField("milestones_v1", ArrayType(
+        StructType([
+            StructField("id", StringType(), True),
+            StructField("name", StringType(), True),
+            StructField("assessmentDetail", StructType([
+                StructField("identifier", StringType(), True)]), True),
+            StructField("courses", ArrayType(
+                StructType([
+                    StructField("identifier", StringType(), True),
+                    StructField("name", StringType(), True),
+                    StructField("isMandatory", StringType(), True)
+                ])
+            ), True)
+        ])
+    ), True),
+    StructField("courseCategory", StringType(), True)
+])
+
 # Method to build the profileDetails schema
 def makeProfileDetailsSchema(
     competencies=False,

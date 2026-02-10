@@ -136,7 +136,23 @@ class DataWarehouseModel:
             course_completion_survey_details_df = spark.read.parquet(f"{warehouse_path}/{config.dwCourseCompletionSurveryTable}")
             self.write_postgres_table(course_completion_survey_details_df, postgres_url, config.dwCourseCompletionSurveryTable,      
                                       config.dwPostgresUsername, config.dwPostgresCredential)
-            
+
+            learner_pathway_metadata = spark.read.parquet(f"{config.warehouseReportDir}/{config.dwLearnerPathwayMetadataTable}")
+            self.write_postgres_table(learner_pathway_metadata, postgres_url, config.dwLearnerPathwayMetadataTable,
+                                      config.dwPostgresUsername, config.dwPostgresCredential)
+
+            learner_pathway_milestone_data = spark.read.parquet(f"{config.warehouseReportDir}/{config.dwLearnerPathwayMilestoneTable}")
+            self.write_postgres_table(learner_pathway_milestone_data, postgres_url, config.dwLearnerPathwayMilestoneTable,
+                                      config.dwPostgresUsername, config.dwPostgresCredential)
+
+            learner_pathway_assessment_data = spark.read.parquet(f"{config.warehouseReportDir}/{config.dwLearnerPathwayAssessmentTable}")
+            self.write_postgres_table(learner_pathway_assessment_data, postgres_url, config.dwLearnerPathwayAssessmentTable,
+                                      config.dwPostgresUsername, config.dwPostgresCredential)
+
+            learner_pathway_enrolment_data = spark.read.parquet(f"{config.warehouseReportDir}/{config.dwLearnerPathwayEnrolmentsTable}")
+            self.write_postgres_table(learner_pathway_enrolment_data, postgres_url, config.dwLearnerPathwayEnrolmentsTable,
+                                      config.dwPostgresUsername, config.dwPostgresCredential)
+
             print("✅ Processing completed successfully!")
 
 

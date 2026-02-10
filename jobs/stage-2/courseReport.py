@@ -5,10 +5,11 @@ from pathlib import Path
 import pandas as pd
 from pyspark.sql import SparkSession
 from pyspark.sql import functions as F
-from pyspark.sql.functions import (col, lit, coalesce, when, expr, format_string, date_format, current_timestamp, to_date, from_json, explode_outer, greatest, size,min as F_min, max as F_max, count as F_count, sum as F_sum,broadcast, trim)
+from pyspark.sql.functions import (col, lit, coalesce, when, expr, format_string, date_format, current_timestamp, to_date, from_json, explode_outer, greatest, size,min as F_min, max as F_max, count as F_count, sum as F_sum,broadcast, trim,  get_json_object, explode)
 from pyspark.sql.types import ( LongType, DoubleType, DateType)
 from datetime import datetime
 import sys
+from pyspark.sql.window import Window
 
 sys.path.append(str(Path(__file__).resolve().parents[2]))
 from dfutil.content import contentDFUtil
@@ -60,6 +61,72 @@ class CourseReportModel:
             allCourseProgramDetailsDF = spark.read.parquet(ParquetFileConstants.CONTENT_COMPUTED_PARQUET_FILE).filter(col("category").isin(primary_categories))
             contentHierarchyDF = spark.read.parquet(ParquetFileConstants.CONTENT_HIERARCHY_SELECT_PARQUET_FILE).withColumnRenamed("identifier", "courseID")
             enrolmentDF = spark.read.parquet(ParquetFileConstants.ENROLMENT_COMPUTED_PARQUET_FILE) 
+
+            #-------------Learner pathway data processing starts-----------
+            pathway_window = Window.partitionBy("learning_pathway_id")
+            lpData = (contentHierarchyDF
+                .filter(get_json_object(col("hierarchy"), "$.courseCategory") == "Learning Pathway")
+                .withColumn("hierarchy_struct", from_json(col("hierarchy"), schemas.lp_hierarchy_schema)))
+            learnerPathwayMetadata = (lpData
+            .select(
+                col("courseID").alias("learning_pathway_id"),
+                col("hierarchy_struct.name").alias("lp_name"),
+                col("hierarchy_struct.description").alias("lp_description"),
+                col("hierarchy_struct.appIcon").alias("lp_app_icon"),
+                col("hierarchy_struct.createdOn").alias("lp_created_on"),
+                col("hierarchy_struct.preliminaryAssessment").alias("preliminary_assessment_id"),
+                col("hierarchy_struct.milestones_v1").alias("lp_children")
+            )
+            .withColumn("number_of_milestones", size("lp_children"))
+            .withColumn("lp_children",
+                expr(
+                    """transform(lp_children, m ->struct(m.id as id,m.name as name, 
+                    m.assessmentDetail.identifier as assessment_detail,
+                    m.courses as courses,
+                    size(filter(m.courses, c -> c.isMandatory = true))as mandatory_course_count,
+                    size(m.courses) as total_course_count))"""
+                )
+            )
+            .withColumn("milestone", explode("lp_children"))
+            .withColumn("milestone_id", col("milestone.id"))
+            .withColumn("milestone_name", col("milestone.name"))
+            .withColumn("assessment_id", col("milestone.assessment_detail"))
+            .withColumn("number_of_mandatory_courses_per_milestone", col("milestone.mandatory_course_count"))
+            .withColumn("number_of_courses_per_milestone", col("milestone.total_course_count"))
+            .withColumn("total_mandatory_courses", F_sum("number_of_mandatory_courses_per_milestone").over(pathway_window))
+            .withColumn("course", explode(col("milestone.courses")))
+            .withColumn("course_id", col("course.identifier"))
+            .withColumn("course_is_mandatory", col("course.isMandatory"))
+            .drop("lp_children", "milestone", "course"))
+            learnerPathwayWarehouseData = (learnerPathwayMetadata
+                .select(
+                    col("learning_pathway_id"),
+                    col("lp_description"),
+                    col("lp_app_icon"),
+                    col("lp_created_on"),
+                    col("total_mandatory_courses"),
+                    col("number_of_milestones"),
+                    col("preliminary_assessment_id")
+                ).withColumn("data_last_generated_on", currentDateTime).distinct()
+            )
+            lpMilestoneWarehouseData = (learnerPathwayMetadata
+                .select(
+                    col("learning_pathway_id"),
+                    col("milestone_id"),
+                    col("number_of_courses_per_milestone"),
+                    col("assessment_id"),
+                    col("course_id"),
+                    col("course_is_mandatory"),
+                    col("number_of_mandatory_courses_per_milestone"),
+                    col("preliminary_assessment_id")
+                ).withColumn("data_last_generated_on", currentDateTime)
+            )
+            (learnerPathwayWarehouseData.distinct().coalesce(1).write.mode("overwrite").option("compression", "snappy").parquet(f"{config.warehouseReportDir}/{config.dwLearnerPathwayMetadataTable}"))
+            (lpMilestoneWarehouseData.coalesce(1).write.mode("overwrite").option("compression", "snappy").parquet(f"{config.warehouseReportDir}/{config.dwLearnerPathwayMilestoneTable}"))
+            # (learnerPathwayMetadata
+            #     .select("learning_pathway_id","preliminary_assessment_id","number_of_milestones","milestone_id","assessment_id","course_id","course_is_mandatory")
+            #     .coalesce(1).write.mode("overwrite").option("compression", "snappy").parquet(ParquetFileConstants.LEARNER_PATHWAY_COMPUTED_PARQUET_FILE))
+            #-------------Learner pathway data processing ends-----------
 
             getContentResourceWithCategoryDF = contentHierarchyDF \
                 .join(allCourseProgramDetailsDF, ["courseID"], "inner") \

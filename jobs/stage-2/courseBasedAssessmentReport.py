@@ -6,7 +6,7 @@ from pathlib import Path
 from pyspark.sql import SparkSession
 from pyspark.sql.types import StructType, StructField, StringType, IntegerType, BooleanType, ArrayType
 from pyspark.sql.window import Window
-from pyspark.sql.functions import (col, row_number, countDistinct, current_timestamp, date_format, broadcast, unix_timestamp, when, lit, concat_ws, from_unixtime, format_string, expr)
+from pyspark.sql.functions import (col, row_number, countDistinct, current_timestamp, date_format, broadcast, unix_timestamp, when, lit, concat_ws, from_unixtime, format_string, expr, desc, first)
 from datetime import datetime
 from pyspark.sql import functions as F
 import sys
@@ -96,7 +96,55 @@ class CourseBasedAssessmentModel:
             
             userAssessChildrenDetailsDF = assessmentDFUtil.user_assessment_children_details_dataframe(userAssessChildrenDF, assessWithDetailsDF, allCourseProgramDetailsWithRatingDF, spark.read.parquet(ParquetFileConstants.USER_ORG_COMPUTED_FILE))
             print("User Assessment Children DataFrame Schema:")
-            
+
+            #-------------Learner pathway data processing starts-----------
+            learnerPathwayData = spark.read.parquet(f"{config.warehouseReportDir}/{config.dwLearnerPathwayMilestoneTable}")
+            lpPreliminaryAssessment = (learnerPathwayData.select(col("learning_pathway_id"),col("preliminary_assessment_id").alias("assessment_id"))
+                .distinct()
+                .withColumn("milestone_id", lit(""))
+                .withColumn("assessment_scope", lit("preliminary-assessment"))
+            )
+            lpMilestoneAssessment = (learnerPathwayData.select(col("learning_pathway_id"),col("assessment_id"), col("milestone_id")).distinct()
+                .withColumn("assessment_scope", lit("milestone-assessment")))
+            lp_assessment = lpPreliminaryAssessment.unionByName(lpMilestoneAssessment).distinct()
+            lp_assessment.coalesce(1).write.mode("overwrite").option("compression", "snappy").parquet(ParquetFileConstants.LEARNER_PATHWAY_ASSESSMENT_COMPUTED_PARQUET_FILE)
+
+            allAssessmentData = (userAssessChildrenDetailsDF
+                .withColumnRenamed("assessChildID", "assessment_id")
+                .withColumnRenamed("courseID", "learning_pathway_id"))
+
+            lpAssessment = allAssessmentData.join(broadcast(lp_assessment), on= ["assessment_id", "learning_pathway_id"], how="inner")
+            window = Window.partitionBy("userID", "assessment_id").orderBy(desc("assessEndTimestamp"), desc("assessOverallResult"))
+            aggregated_assessment_data =(lpAssessment
+            .withColumn("rn", row_number().over(window))
+            .groupBy("userID", "assessment_id")
+            .agg(
+                F.max("assessOverallResult").alias("highest_percentage_achieved"),
+                first(when(col("rn") == 1, col("assessOverallResult")), ignorenulls=True).alias("latest_percentage_achieved"),
+                first(when(col("rn") == 1, col("assessEndTimestamp")), ignorenulls=True).alias("last_attempted_date"),
+                first(when(col("assessPass") == 1, "Pass").when(col("assessPass") == 0, "Fail")).alias("assess_pass/fail")
+            )
+            )
+            final_assessment = lpAssessment.join(aggregated_assessment_data, on=["userID", "assessment_id"], how="inner")
+            lp_assessment_final = (final_assessment
+                .select(
+                    col("userID").alias("user_id"),
+                    col("learning_pathway_id"),
+                    col("milestone_id"),
+                    col("assessment_id"),
+                    col("assessment_scope"),
+                    col("assess_pass/fail"),
+                    col("highest_percentage_achieved"),
+                    col("latest_percentage_achieved"),
+                    col("last_attempted_date")
+                ).withColumn("data_last_generated_on", currentDateTime)
+            )
+            (lp_assessment_final.coalesce(1).write.mode("overwrite").option("compression", "snappy").parquet(f"{config.warehouseReportDir}/{config.dwLearnerPathwayAssessmentTable}"))
+            lp_assessment_warehouse = (lp_assessment_final
+                .select(col("assessment_id"), col("learning_pathway_id")).distinct()
+                .withColumn("lp_assessment_sub_type", lit("learner-pathway-assessment")))
+            #-------------Learner pathway data processing ends-----------
+
             retakesDF = userAssessChildrenDetailsDF.groupBy("assessChildID", "userID").agg(countDistinct("assessStartTime").alias("retakes"))
 
             # Step 2: Get latest entry per (assessChildID, userID) using row_number()
@@ -285,7 +333,7 @@ class CourseBasedAssessmentModel:
                     col("retakes").alias("number_of_retakes"),
                     col("Pass").alias("pass"),
                     col("data_last_generated_on"))
-            
+
             warehouseDF = warehouseDF.unionByName(finalAssessmentDF)
 
             # request from anshu to replace assesment_type 'Course Assessment' with 'Comprehensive Assessment Progam' 
@@ -336,6 +384,12 @@ class CourseBasedAssessmentModel:
                     col("number_of_retakes"),
                     col("pass"),
                     col("data_last_generated_on"))
+            # Join the warehouse data with lp data for getting assessment_sub_type value
+            warehouseDF = (warehouseDF.join(lp_assessment_warehouse, on="assessment_id", how="left")
+                .withColumn("assessment_sub_type", when(col("lp_assessment_sub_type").isNotNull(),col("lp_assessment_sub_type")).otherwise(col("assessment_sub_type")))
+                .withColumn("content_id", when(col("content_id").isNull(), col("learning_pathway_id")).otherwise(col("content_id")))
+                .drop("learning_pathway_id","lp_assessment_sub_type"))
+
             dfexportutil.write_csv_per_mdo_id_duckdb(
                 mdoReportDF,
                 f"{config.localReportDir}/{config.cbaReportPath}/{today}",

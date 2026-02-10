@@ -80,6 +80,10 @@ DEFAULT_CONFIG = {
     'dwNLWUserLeaderboardTable': 'nlw_user_leaderboard',
     'dwAparCBPEnrollmentTable': 'apar_cbp_enrollment',
     'dwCourseCompletionSurveryTable': 'course_completion_survey_details',
+    'dwLearnerPathwayMetadataTable': 'learner_pathway',
+    'dwLearnerPathwayMilestoneTable': 'learner_pathway_milestone',
+    'dwLearnerPathwayAssessmentTable': 'learner_pathway_assessment',
+    'dwLearnerPathwayEnrolmentsTable': 'learner_pathway_enrolments',
 
     # Cassandra Keyspaces
     'cassandraUserKeyspace': 'sunbird',

@@ -11,7 +11,7 @@ from pyspark.sql.functions import col, from_json, explode_outer, coalesce, lit, 
 from pyspark.sql.types import StructType, ArrayType, StringType, BooleanType, StructField
 from pyspark.sql.types import MapType, StringType, StructType, StructField, FloatType, LongType, DateType, IntegerType
 from pyspark.sql.functions import col, when, size, lit, expr, unix_timestamp, date_format, from_json, current_timestamp, \
-    to_date, round, explode, to_utc_timestamp, from_utc_timestamp, to_timestamp, sum as spark_sum
+    to_date, round, explode, to_utc_timestamp, from_utc_timestamp, to_timestamp, sum as spark_sum, count, map_values
 
 from datetime import datetime
 import sys
@@ -72,6 +72,95 @@ class UserEnrolmentModel:
                 col("category").isin(primary_categories))
 
             print("🔄 Processing platform enrolments...")
+
+            #-------------Learner pathway data processing starts-----------
+            pathwayEnrolments = (enrolmentDF
+                .select("courseID","userID","dbCompletionStatus","langCourseContentStatus","certificateID"))
+            learnerPathwayData = spark.read.parquet(f"{config.warehouseReportDir}/{config.dwLearnerPathwayMilestoneTable}")
+            lp_course_data = (learnerPathwayData
+            .select(
+                col("learning_pathway_id"),
+                col("milestone_id"),
+                col("course_id"),
+                col("course_is_mandatory")
+            )
+            )
+            lp_pathway_data = learnerPathwayData.select("learning_pathway_id").distinct()
+            pathway_enrolment = (pathwayEnrolments.alias("e")
+                                 .join(
+                broadcast(lp_pathway_data).alias("p"),
+                col("e.courseID") == col("p.learning_pathway_id"),
+                "inner"
+            )
+                .withColumn("enrolment_type", lit("PATHWAY")))
+            course_enrolment = (pathwayEnrolments.alias("e")
+            .join(
+                broadcast(lp_course_data).alias("c"),
+                col("e.courseID") == col("c.course_id"),
+                "inner"
+            )
+            .withColumn("enrolment_type", lit("COURSE"))
+            .select(
+                col("c.learning_pathway_id"),
+                col("c.milestone_id"),
+                col("c.course_is_mandatory"),
+                *[col(f"e.{c}") for c in pathwayEnrolments.columns]
+            )
+            )
+
+            lp_user_assessment_data = (spark.read.parquet(f"{config.warehouseReportDir}/{config.dwLearnerPathwayAssessmentTable}")
+                .select("learning_pathway_id","milestone_id","assessment_id","assessment_scope").distinct()
+            )
+            lp_assessment = spark.read.parquet(ParquetFileConstants.LEARNER_PATHWAY_ASSESSMENT_COMPUTED_PARQUET_FILE)
+            lp_mandatory_assessment = (lp_assessment.select("learning_pathway_id","assessment_id")
+                .distinct()
+                .groupBy("learning_pathway_id")
+                .agg(count("*").alias("mandatory_assessment_count"))
+            )
+            lp_assessment_completion_status = (pathway_enrolment
+                .withColumn("assess_status_map",explode(map_values(col("langCourseContentStatus"))))
+                .select("userID","learning_pathway_id",explode(col("assess_status_map")).alias("assessment_id","completion_status"))
+            )
+            lp_assessment_joined = lp_assessment_completion_status.join(lp_user_assessment_data, on=["learning_pathway_id","assessment_id"], how="inner")
+            lp_assessment_metrics = ((lp_assessment_joined
+                .groupBy("userID","learning_pathway_id")
+                .agg(
+                    spark_sum(when(col("completion_status") == 2, 1).otherwise(0)).alias("mandatory_assessments_completed")
+                )
+            ).join(lp_mandatory_assessment, on="learning_pathway_id", how="inner")
+                 .withColumn("mandatory_assessments_pending", (col("mandatory_assessment_count") - col("mandatory_assessments_completed"))))
+            lp_mandatory_course_data = (lp_course_data.filter(col("course_is_mandatory") == "true")
+                .groupBy("learning_pathway_id")
+                .agg(count("*").alias("mandatory_course_count")))
+            lp_mandatory_course_enrolments = ((course_enrolment
+                .filter((col("enrolment_type") == "COURSE") & (col("course_is_mandatory") == "true"))
+                .groupBy("userID","learning_pathway_id")
+                .agg(
+                    spark_sum(when(col("dbCompletionStatus") == 2, 1).otherwise(0)).alias("mandatory_courses_completed")
+                )
+            ).join(lp_mandatory_course_data, on="learning_pathway_id", how="inner")
+                .withColumn("mandatory_courses_pending", col("mandatory_course_count") - col("mandatory_courses_completed")))
+
+            lp_mandatory_items = (lp_assessment_metrics
+                .join(lp_mandatory_course_enrolments, on=["userID","learning_pathway_id"], how="left").fillna(0)
+                .withColumn("total_mandatory_items", col("mandatory_assessment_count") + col("mandatory_course_count"))
+                .withColumn("total_mandatory_items_completed", col("mandatory_assessments_completed") + col("mandatory_courses_completed"))
+                .withColumn("total_mandatory_items_pending", col("mandatory_assessments_pending") + col("mandatory_courses_pending"))
+                .withColumn("pathway_progress_percentage", when(col("total_mandatory_items") > 0, (col("total_mandatory_items_completed") / col("total_mandatory_items")) * 100).otherwise(0))
+            )
+            enrolment_final = (lp_mandatory_items
+                .select(
+                    col("userID"),
+                    col("learning_pathway_id"),
+                    col("total_mandatory_items"),
+                    col("total_mandatory_items_completed"),
+                    col("total_mandatory_items_pending"),
+                    col("pathway_progress_percentage")
+                ).withColumn("data_last_generated_on", currentDateTime)
+            )
+
+            enrolment_final.coalesce(1).write.mode("overwrite").option("compression", "snappy").parquet(f"{config.warehouseReportDir}/{config.dwLearnerPathwayEnrolmentsTable}")
+            #-------------Learner pathway data processing ends-----------
 
             # Compute and cache the main platform join result
             allCourseProgramCompletionWithDetailsDFWithRating = enrolmentDFUtil.preComputeUserOrgEnrolment(enrolmentDF,
