@@ -97,7 +97,7 @@ class CourseBasedAssessmentModel:
             userAssessChildrenDetailsDF = assessmentDFUtil.user_assessment_children_details_dataframe(userAssessChildrenDF, assessWithDetailsDF, allCourseProgramDetailsWithRatingDF, spark.read.parquet(ParquetFileConstants.USER_ORG_COMPUTED_FILE))
             print("User Assessment Children DataFrame Schema:")
 
-            #-------------Learner pathway data processing starts-----------
+            #-------------Learner pathway data processing starts---------------
             learnerPathwayData = spark.read.parquet(f"{config.warehouseReportDir}/{config.dwLearnerPathwayMilestoneTable}")
             lpPreliminaryAssessment = (learnerPathwayData.select(col("learning_pathway_id"),col("preliminary_assessment_id").alias("assessment_id"))
                 .distinct()
