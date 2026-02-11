@@ -248,7 +248,10 @@ submit_assessment_response_schema = StructType([
     StructField("incorrect", IntegerType(), False),
     StructField("pass", BooleanType(), False),
     StructField("overallResult", FloatType(), False),
-    StructField("passPercentage", FloatType(), False)
+    StructField("passPercentage", FloatType(), False),
+    StructField("totalSectionMarks", FloatType(), False),
+    StructField("totalPercentage", FloatType(), False),
+    StructField("totalMarks", IntegerType(), False)
 ])
 
 # Batch attribute schemas
