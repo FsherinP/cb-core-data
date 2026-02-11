@@ -213,8 +213,11 @@ class DataExhaustModel:
                 col("submitResponse.correct").alias("assessCorrect"),
                 col("submitResponse.incorrect").alias("assessIncorrect"),
                 col("submitResponse.pass").cast(IntegerType()).alias("assessPass"),
-                col("submitResponse.overallResult").alias("assessOverallResult"),
+                #col("submitResponse.overallResult").alias("assessOverallResult"),
                 col("submitResponse.passPercentage").alias("assessPassPercentage"),
+                col("submitResponse.totalSectionMarks").alias("assessTotalSectionMarks"),
+                col("submitResponse.totalPercentage").alias("assessOverallResult"),
+                col("submitResponse.totalMarks").alias("assessTotalMarks"),
                 col("assessStartTimestamp"),
                 col("assessEndTimestamp")
             )

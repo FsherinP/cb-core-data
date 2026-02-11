@@ -336,6 +336,11 @@ class CourseBasedAssessmentModel:
                     col("number_of_retakes"),
                     col("pass"),
                     col("data_last_generated_on"))
+            
+            #adding duplication check and getting latest passed assessment with highest score
+            w = Window.partitionBy("user_id", "content_id", "assessment_id").orderBy(col("score_achieved").desc())
+            warehouseDF = (warehouseDF.withColumn("rn", row_number().over(w)).filter(col("rn") == 1).drop("rn"))
+            
             dfexportutil.write_csv_per_mdo_id_duckdb(
                 mdoReportDF,
                 f"{config.localReportDir}/{config.cbaReportPath}/{today}",

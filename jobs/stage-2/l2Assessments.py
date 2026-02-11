@@ -31,6 +31,17 @@ class L2AssessmentReport:
     def get_date():
         return datetime.now().strftime("%Y-%m-%d")
 
+    def write_postgres_table(self, df, url: str, table: str, username: str, password: str, mode: str = "overwrite"):
+        df.write \
+            .format("jdbc") \
+            .option("url", url) \
+            .option("dbtable", table) \
+            .option("user", username) \
+            .option("password", password) \
+            .option("driver", "org.postgresql.Driver") \
+            .mode(mode) \
+            .save()
+    
     def process_report(self,spark,config):
         """
         Assessment Report Generation with minimal logging for performance
@@ -78,7 +89,7 @@ class L2AssessmentReport:
                 "cut_off_percentage",
                 when(col("minimumPassPercentage").isNotNull(), col("minimumPassPercentage").cast("float"))
                 .otherwise(col("cut_off_percentage"))
-            )
+            ).dropDuplicates("user_id", "content_id", "assessment_id")
 
             kcmCourseDF = kcmDF.join(kcmMappingDF, kcmDF.competency_area_id == kcmMappingDF.competency_area_id, "inner") \
                 .select(
@@ -390,7 +401,7 @@ class L2AssessmentReport:
                     col("assessment_id").alias("assess_assessment_id"),
                     col("assessment_name").alias("assess_assessment_name"),
                     col("assessment_type").alias("assess_assessment_type"),
-                    col("score_achieved").alias("assess_score_achieved"),
+                    col("score_achieved").alias("assess_score_achieved"),                    
                     col("cut_off_percentage").alias("assess_cut_off_percentage"),
                     col("completion_date").alias("assess_assessment_date"),
                     col("pass").alias("assess_pass")
@@ -554,6 +565,11 @@ class L2AssessmentReport:
             # Print schema and sample data
             print("\nFinal Schema:")
             masterFinalDF.printSchema()
+            
+            postgres_url = f"jdbc:postgresql://{config.dwPostgresHost}/{config.dwPostgresSchema}"
+            print("write final data to warehouse path - user_content_assessment")
+            self.write_postgres_table(masterFinalDF, postgres_url, "user_content_assessment", config.dwPostgresUsername,
+                                      config.dwPostgresCredential)
             
             print("\nSample data (10 rows):")
             #masterFinalDF.show(10, truncate=False)
