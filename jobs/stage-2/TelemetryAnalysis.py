@@ -6,6 +6,7 @@ from pathlib import Path
 from pyspark.sql import SparkSession
 from pyspark.sql.functions import col, from_unixtime, to_timestamp, \
     to_date, hour, minute, month, weekofyear, year, dayofmonth, dayofweek
+from pyspark.sql.window import Window
 
 from pyspark.sql.functions import (
     col, when, coalesce, lit,
@@ -53,7 +54,8 @@ def processTelemetryAnalytics(config):
                                      .option("mode", "PERMISSIVE")
                                      .option("columnNameOfCorruptRecord", "_corrupt_record")
                                      .json(f'gs://igotqadp/secor-dev/unique/raw/{yesterday}-*'.format(env = "qa", env1 = "dev", yesterday = yesterday))
-                                     .filter(col("eid").isin("START", "END", "INTERACT", "IMPRESSION", "SEARCH")).filter(col("eid").isNotNull())
+                                     .filter(col("eid").isin("START", "END", "INTERACT", "IMPRESSION", "SEARCH"))
+                                     .filter(col("eid").isNotNull())
                                      )
 
         search_backend_events = yesterday_telemetry_data.filter(col("eid") == "SEARCH")
@@ -162,6 +164,83 @@ def processTelemetryAnalytics(config):
                                    )
                        .withColumn("Category", lit("Search Query"))
                        )
+        #--------------------------------------Enrolment from search results----------------------------------------
+        search_fe_selected_columns = (search_fe_data
+            .select(
+                col("actor_id").alias("user_id"),
+                col("query"),
+                col("event_time").alias("search_time"),
+                col("ets").alias("search_ets")
+            )
+        )
+
+        content_select_from_search_results = (search_fe_data
+            .filter((col("eid") == "INTERACT") & (col("edata_id") == "course-card"))
+            .select(
+                col("actor_id").alias("user_id"),
+                col("object_id").alias("content_id"),
+                col("object_type").alias("content_type"),
+                col("event_time").alias("content_selection_time"),
+                col("ets").alias("content_selection_ets")
+            )
+        )
+
+        content_enrol_telemetry_data = (search_fe_data
+            .filter((col("eid") == "INTERACT") & (col("edata_type") == "click") & (col("edata_subtype") == "enroll"))
+            .select(
+                col("actor_id").alias("user_id"),
+                col("object_id").alias("content_id"),
+                col("event_time").alias("enrol_time"),
+                col("ets").alias("content_enrol_ets"),
+                col("object_type").alias("content_type")
+            )
+        )
+
+        time_window_in_millis = 1*60*1000
+
+        search_to_content = (search_fe_selected_columns
+            .join(content_select_from_search_results, on="user_id", how="full")
+            .where((col("search_time") < col("content_selection_time")) &
+                   (col("content_selection_ets") - col("search_ets") <= time_window_in_millis))
+        )
+
+        search_to_content_selection_to_enrolment = (search_to_content
+            .join(content_enrol_telemetry_data, on=["user_id", "content_id"], how="full")
+            .where((col("content_selection_time") < col("enrol_time")) &
+                   (col("content_enrol_ets") - col("content_selection_ets") <= time_window_in_millis)
+                   )
+        )
+        #---------------------------------------------------------------------------------------------------------------
+
+        #--------------------------------------Enrolment from home page sections----------------------------------------
+        home_page_clicks_on_sections = (yesterday_telemetry_data
+            .filter((col("eid") == "INTERACT") & (col("edata_id") == "card-content") & (col("edata_pageid") == "/page/home"))
+            .withColumn("home_page_click_time", col("ets")/ 1000).cast("long")
+            .select(
+                col("home_page_click_time"),
+                col("actor_id").alias("user_id"),
+                col("edata_subtype").alias("home_page_section"),
+                col("ets").alias("home_page_click_ets"),
+                col("object_id").alias("content_id")
+            )
+        )
+        home_enrolments = (content_enrol_telemetry_data
+            .select(
+                col("enrol_time").alias("home_enrol_time"),
+                col("content_enrol_ets").alias("home_enrol_ets"),
+                col("user_id"),
+                col("content_id"),
+                col("content_type")
+            )
+        )
+        enrolment_from_home_page_sections = (home_page_clicks_on_sections
+            .join(home_enrolments, on=["user_id","content_id"], how="left")
+            .filter((col("home_page_click_time") < col("home_enrol_time")) & (col("home_enrol_ets") - col("home_page_click_ets") <= time_window_in_millis))
+            .select(col("user_id"), col("home_page_section"),col("content_id"),col("content_type"),col("home_page_click_time"),col("home_enrol_time"))
+        )
+        #---------------------------------------------------------------------------------------------------------------
+
+
 
 
     except Exception as e:
