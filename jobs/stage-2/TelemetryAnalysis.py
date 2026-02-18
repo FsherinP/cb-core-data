@@ -70,6 +70,11 @@ def processTelemetryAnalytics(config):
                                   .withColumn("event_week", weekofyear(col("event_time")))
                                   .withColumn("event_year", year(col("event_time")))
                                   )
+        dau = data_with_time_columns.groupBy(col("event_date")).agg(countDistinct(col("actor_id")))
+        #Below can be calculated with extended data
+        #wau = data_with_time_columns.groupBy(col("event_week")).agg(countDistinct(col("actor_id")))
+        #mau = data_with_time_columns.groupBy(col("event_month")).agg(countDistinct(col("actor_id")))
+        #user_first_seen = data_with_time_columns.groupBy(col("actor_id")).agg(min(col("event_date")))
 
         most_common_query = (data_with_time_columns
                              .groupBy(col("edata_query"))
