@@ -203,8 +203,8 @@ class DataExhaustModel:
             # Process questionset hierarchy
             self.logger.info("Processing questionset hierarchy...")
             questionset_hierarchy_df = self.read_cassandra_table(
-                "prod_hierarchy_store",
-                "questionset_hierarchy"
+                self.config.cassandraHierarchyStoreKeyspace,
+                self.config.cassandraQuestionSetHierarchyTable
             )
 
             questionset_hierarchy_df = questionset_hierarchy_df.withColumn(
