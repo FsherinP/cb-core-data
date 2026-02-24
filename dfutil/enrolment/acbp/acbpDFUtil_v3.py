@@ -207,7 +207,7 @@ def explodeAcbpData(spark, acbp_df: DataFrame) -> DataFrame:
     db_path = f"{temp_dir}/acbp_processing.duckdb"
     con = duckdb.connect(database=db_path)
     con.execute(f"SET temp_directory='{temp_dir}'")
-    con.execute("SET memory_limit='8GB'")
+    con.execute("SET memory_limit='10GB'")
     con.execute("SET threads=4")
     con.execute("SET preserve_insertion_order=false")
 
@@ -243,7 +243,8 @@ def explodeAcbpData(spark, acbp_df: DataFrame) -> DataFrame:
             LOWER(TRIM(COALESCE("group", ''))) as group_lower,
             LOWER(TRIM(COALESCE(cadreName, ''))) as cadre_lower,
             LOWER(TRIM(COALESCE(civilServiceName, ''))) as service_lower,
-            LOWER(TRIM(COALESCE(cadreBatch, ''))) as batch_lower
+            LOWER(TRIM(COALESCE(cadreBatch, ''))) as batch_lower,
+            LOWER(TRIM(CAST(isOnCentralDeputation AS VARCHAR))) as is_on_central_deputation_lower
         FROM read_parquet('{user_data_path}/*.parquet')
     """)
 
@@ -407,6 +408,20 @@ def explodeAcbpData(spark, acbp_df: DataFrame) -> DataFrame:
             ON ce.criteria_type = 'service'
             AND u.service_lower = ce.criteria_value
         INNER JOIN plan_info pi ON ce.acbpID = pi.acbpID AND u.userOrgID = pi.orgID
+
+       UNION ALL
+
+       -- isoncentraldeputation
+       SELECT DISTINCT 
+           u.userID, 
+           ce.acbpID,
+           ce.criteria_group_id,
+          'isoncentraldeputation' as matched_type
+       FROM users u
+       INNER JOIN criteria_exploded ce 
+           ON ce.criteria_type = 'isoncentraldeputation'
+           AND u.is_on_central_deputation_lower = ce.criteria_value
+       INNER JOIN plan_info pi ON ce.acbpID = pi.acbpID AND u.userOrgID = pi.orgID
     """)
 
     # Aggregate by criteria_group_id
@@ -574,6 +589,19 @@ def explodeAcbpData(spark, acbp_df: DataFrame) -> DataFrame:
             INNER JOIN global_criteria_exploded ce 
                 ON ce.criteria_type = 'service'
                 AND u.service_lower = ce.criteria_value
+
+            UNION ALL
+
+            -- isoncentraldeputation
+            SELECT DISTINCT 
+                u.userID, 
+                ce.acbpID, 
+                ce.criteria_group_id,
+               'isoncentraldeputation' as matched_type
+            FROM users u
+            INNER JOIN global_criteria_exploded ce 
+                ON ce.criteria_type = 'isoncentraldeputation'
+                AND u.is_on_central_deputation_lower = ce.criteria_value
         """)
 
         # Aggregate global matches
