@@ -53,6 +53,7 @@ class WeeklyClapsModel:
                    AND uid IS NOT NULL GROUP BY 1"""
         print(query)
         df = utils.druidDFOption(query, config.sparkDruidRouterHost, limit=1000000, spark=spark)
+        #df.filter(col("userid") == '765232d9-bccf-41c6-b8e9-8ac837e35af8').show()
         if df is None:
             print("Druid returned empty data, returning empty DataFrame with expected schema.")
             return spark.createDataFrame([], self.get_users_platform_engagement_schema())
@@ -74,7 +75,7 @@ class WeeklyClapsModel:
         if isinstance(field, (StructType, MapType)):
             return F.to_json(F.col(col_name))
         else:
-            return F.col(col_name).cast("string") 
+            return F.col(col_name).cast("string")
 
     def process_data(self, spark, config):
         try:
@@ -146,13 +147,10 @@ class WeeklyClapsModel:
             final_df.coalesce(1).write.mode("overwrite").csv(f"/tmp/weeklyClaps{today}", header=True)
 
             # Uncomment for Postgres writes
-            # self.write_postgres_table(final_df, app_postgres_url,
-            #                           config.dwLearnerStatsTable,
-            #                           config.appPostgresUsername,
-            #                           config.appPostgresCredential)
-
-            self.write_postgres_table(final_df, app_postgres_url, "learner_stats_pyspark_test",
-                                      config.appPostgresUsername, config.appPostgresCredential)
+            self.write_postgres_table(final_df, app_postgres_url,
+                                       config.dwLearnerStatsTable,
+                                       config.appPostgresUsername,
+                                       config.appPostgresCredential)
 
             total_time = time.time() - start_time
             print(f"\n✅ Weekly Claps Job completed in {total_time:.2f} seconds ({total_time / 60:.1f} minutes)")

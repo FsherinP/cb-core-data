@@ -1,4 +1,5 @@
 import findspark
+
 findspark.init()
 import sys
 from pathlib import Path
@@ -25,7 +26,7 @@ def initialize_spark():
     Initializes and returns a SparkSession with optimized configuration
     """
     print("Initializing Spark Session...")
-    
+
     spark = SparkSession.builder \
         .appName("DataProcessing_Pipeline") \
         .config("spark.executor.memory", "42g") \
@@ -33,57 +34,59 @@ def initialize_spark():
         .config("spark.sql.shuffle.partitions", "64") \
         .config("spark.sql.legacy.timeParserPolicy", "LEGACY") \
         .getOrCreate()
-    
+
     print("Spark Session initialized successfully")
     return spark
+
 
 def run_stage(name: str, func, spark, config=None):
     """
     Executes a processing stage with minimal logging for performance
-    
+
     Parameters:
     - name: Name of the processing stage
     - func: The processing function to execute
     - spark: The SparkSession instance
     - config: Optional config parameter for stages that need it
     """
-    
+
     print(f"Stage: {name} - Starting...")
     start_time = time.time()
-    
+
     try:
         # Call function with or without config based on whether it's provided
         if config is not None:
             result = func(spark, config)
         else:
             result = func(spark)
-            
+
         duration = time.time() - start_time
-        
+
         print(f"Stage: {name} - Complete ({duration:.2f}s)")
         return result
-            
+
     except Exception as e:
         duration = time.time() - start_time
         print(f"Stage: {name} - Failed after {duration:.2f}s - Error: {str(e)}")
         raise e
 
+
 def main():
     """
     Main data processing pipeline execution
     """
-    
+
     print("Starting Data Processing Pipeline...")
-    
+
     # Initialize Spark session
     spark = initialize_spark()
     config_dict = get_environment_config()
     config = create_config(config_dict)
-    
+
     # Track overall progress
     total_start_time = time.time()
     completed_stages = 0
-    
+
     # Define processing stages - tuple format: (name, function, needs_config)
     processing_stages = [
         ("Org Hierarchy Computation", userDFUtil.preComputeOrgWithHierarchy, False),
@@ -104,46 +107,47 @@ def main():
         ("Old Assessment Data", assessmentDFUtil.precomputeOldAssessmentDataframe, False),
         ("ACBP Enrolment Computation", acbpDFUtil_v3.preComputeACBPData, False),
     ]
-    
+
     total_stages = len(processing_stages)
-    
+
     try:
         for stage_name, stage_function, needs_config in processing_stages:
             if needs_config:
                 run_stage(stage_name, stage_function, spark, config)
             else:
                 run_stage(stage_name, stage_function, spark)
-            
+
             completed_stages += 1
-            
+
             # Progress update
             progress = (completed_stages / total_stages) * 100
             print(f"Progress: {completed_stages}/{total_stages} stages completed ({progress:.0f}%)")
-        
+
         # Pipeline completion summary
         total_duration = time.time() - total_start_time
-        
+
         print(f"""
 Pipeline Execution Summary:
 ✅ Stages Completed: {completed_stages}/{total_stages}
-⏱️  Total Duration: {total_duration/60:.1f} minutes
+⏱️  Total Duration: {total_duration / 60:.1f} minutes
 🎯 Success Rate: 100%
 📊 Status: All stages completed successfully
         """)
-        
+
     except Exception as e:
         total_duration = time.time() - total_start_time
         print(f"""
 Pipeline Execution Failed:
 ❌ Failed at stage: {completed_stages + 1}/{total_stages}
-⏱️  Duration before failure: {total_duration/60:.1f} minutes
+⏱️  Duration before failure: {total_duration / 60:.1f} minutes
 🚨 Error: {str(e)}
         """)
         raise
-    
+
     finally:
         print("Data Processing Pipeline finished")
         spark.stop()
+
 
 if __name__ == "__main__":
     main()

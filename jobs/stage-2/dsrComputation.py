@@ -157,8 +157,7 @@ class DSRComputationModel:
                 FROM "summary-events"
                 WHERE dimensions_type = 'app'
                 AND __time >= TIME_FLOOR(CURRENT_TIMESTAMP, 'P1D') - INTERVAL '30' DAY 
-                AND __time < TIME_FLOOR(CURRENT_TIMESTAMP, 'P1D')
-            """
+                AND __time < TIME_FLOOR(CURRENT_TIMESTAMP, 'P1D')"""
             mau_df = druidDFOption(mau_query, config.sparkDruidRouterHost, limit=10000000, spark=spark)
             if mau_df is None:
                 mau_df = self._empty_df(spark, "activeCount")
@@ -167,19 +166,16 @@ class DSRComputationModel:
             Redis.update("lp_monthly_active_users", str(total_mau), conf= config)
 
             # --- Users logged in yesterday via Druid ---
-            login_yday_query = (
-                """
+            login_yday_query = (   """
                 SELECT DISTINCT(actor_id) AS user_id
                 FROM "telemetry-events-syncts"
                 WHERE eid = 'IMPRESSION'
                   AND actor_type = 'User'
                   AND __time >= TIME_FLOOR(CURRENT_TIMESTAMP + INTERVAL '5:30' HOUR TO MINUTE - INTERVAL '24' HOUR, 'P1D')
-                  AND __time <  TIME_FLOOR(CURRENT_TIMESTAMP + INTERVAL '5:30' HOUR TO MINUTE, 'P1D')
-                """
-            )
+                  AND __time <  TIME_FLOOR(CURRENT_TIMESTAMP + INTERVAL '5:30' HOUR TO MINUTE, 'P1D')""")
             logged_in_df = utils.druidDFOption(login_yday_query, config.sparkDruidRouterHost, limit=10000000, spark=spark)
             if logged_in_df is None:
-                logged_in_df = self._empty_df(spark, "user_id")
+               logged_in_df = self._empty_df(spark, "user_id")
             logged_in_with_mdo_df = logged_in_df.join(activeUsersDF, ["user_id"], "inner")
             total_logged_in_yday = logged_in_with_mdo_df.select("user_id").distinct().count()
             Redis.update("dashboard_users_logged_in_yday", str(total_logged_in_yday), conf=config)

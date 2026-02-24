@@ -6,7 +6,7 @@ import time
 from pathlib import Path
 from pyspark.sql import SparkSession
 from pyspark.sql.window import Window
-from pyspark.sql.functions import (col, row_number, lit, count,current_date, date_format, desc,max, lit, dense_rank,add_months, last_day, date_trunc, last_day, date_add, date_format, lit, concat)
+from pyspark.sql.functions import (col, row_number, lit, count,current_date, date_format, desc, sum, max, lit, dense_rank,add_months, last_day, date_trunc, last_day, date_add, date_format, lit, concat)
 from datetime import datetime
 import sys
 import os
@@ -33,9 +33,8 @@ class LearnerLeaderBoardModel:
             month_start = date_format(date_trunc("MONTH", add_months(current_date(), -1)), "yyyy-MM-dd HH:mm:ss")
             month_end = concat(date_format(last_day(add_months(current_date(), -1)), "yyyy-MM-dd"), lit(" 23:59:59"))
 
-            month = date_format(date_add(last_day(add_months(current_date(), -1)), 1), "M")
+            month = date_format(add_months(current_date(), -1), "M")
             year  = date_format(add_months(current_date(), -1), "yyyy")
-
             # Karma points
             karma_points_df = spark.read.parquet(ParquetFileConstants.USER_KARMA_POINTS_PARQUET_FILE) \
                 .filter((col("credit_date") >= month_start) & (col("credit_date") <= month_end)) \
@@ -137,9 +136,6 @@ def main():
     print(f"[INFO] Total duration: {duration}")
     spark.stop()
 
-
-if __name__ == "__main__":
-    main()
 
 if __name__ == "__main__":
     main()

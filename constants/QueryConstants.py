@@ -6,7 +6,7 @@ import pytz
 class QueryConstants:
     """
     Complete Query Constants for Dashboard Sync
-    CORRECTED VERSION - Uses proper JOINs between warehouse tables
+    CORRECTED VERSION - Uses proper JOINs between warehouse joins
 
     Schema:
     - user_warehouse_computed: user_id, mdo_id, status, full_name, designation, etc.
@@ -272,9 +272,9 @@ class QueryConstants:
             END AS live_retired_course_program_excluding_moderated_eligible,
 
             CASE 
-                WHEN c.content_type IN ('Course', 'Moderated Course') 
+                WHEN c.content_type IN ('Course') 
                     AND c.content_status IN ('Live', 'Retired') 
-                    AND u.status = 1 THEN 'live_retired_course_moderated'
+                    THEN 'live_retired_course_moderated'
                 ELSE 'other'
             END AS live_retired_course_moderated_eligible,
 
@@ -328,7 +328,20 @@ class QueryConstants:
     )
     """
 
-    # ==================== QUERIES USING BASE_DATA (NO CHANGES NEEDED - JUST USE UPDATED BASE) ====================
+    # ==================== NEW: SEPARATE QUERY FOR LIVE COURSE COUNT (NOT FROM ENROLLMENTS) ====================
+
+    LIVE_COURSE_MODERATED_COUNT_BY_ORG = f"""
+    SELECT 
+        content_provider_id as courseOrgID,
+        COUNT(DISTINCT content_id) as live_course_moderated_course_count,
+        AVG(TRY_CAST(content_rating AS DOUBLE)) as course_moderated_course_average_rating
+    FROM read_parquet('{ParquetFileConstants.CONTENT_WAREHOUSE_COMPUTED_PARQUET_FILE}/**.parquet')
+    WHERE content_status = 'Live'
+    AND content_type = 'Course'
+    GROUP BY content_provider_id
+    """
+
+    # ==================== QUERIES USING BASE_DATA ====================
 
     OVERALL_METRICS = BASE_DATA_COMPLETE + f"""
     SELECT 
@@ -393,6 +406,7 @@ class QueryConstants:
     GROUP BY userOrgID
     """
 
+    # MODIFIED: CBP_WISE_COMPREHENSIVE - removed live course count and rating (will be merged separately)
     CBP_WISE_COMPREHENSIVE = BASE_DATA_COMPLETE + """
     SELECT 
         courseOrgID,
@@ -415,10 +429,6 @@ class QueryConstants:
         COUNT(DISTINCT userID) FILTER (WHERE live_retired_content_eligible = 'live_retired_content' AND certificate_category = 'certificate_generated') as certificates_generated_unique_user_count,
         COUNT(*) FILTER (WHERE live_retired_course_moderated_eligible = 'live_retired_course_moderated' AND certificate_category = 'certificate_generated') as course_moderated_course_certificates_generated_count,
         COUNT(DISTINCT userID) FILTER (WHERE live_retired_course_moderated_eligible = 'live_retired_course_moderated' AND certificate_category = 'certificate_generated') as course_moderated_course_certificates_generated_unique_user_count
-        -- NEW: Count of live course-moderated courses
-        COUNT(DISTINCT courseID) FILTER (WHERE live_retired_course_moderated_eligible = 'live_retired_course_moderated') as live_course_moderated_course_count,
-        -- NEW: Average rating for course-moderated courses
-        AVG(courseRating) FILTER (WHERE live_retired_course_moderated_eligible = 'live_retired_course_moderated' AND courseRating IS NOT NULL) as course_moderated_course_average_rating
     FROM base_data
     WHERE courseOrgID IS NOT NULL
     GROUP BY courseOrgID
@@ -1295,7 +1305,8 @@ class QueryConstants:
     # ===== QUERY LISTS FOR ORGANIZED EXECUTION =====
     ORG_BASED_LIST = [ORG_BASED_DESIGNATION_LIST, ORG_USER_COUNT_DATAFRAME_QUERY, ORG_BASED_MDO_ADMIN_COUNT]
     COURSE_BASED_LIST = [COURSE_COUNT_BY_STATUS_GROUP_BY_ORG]
-    ENROLMENT_BASED_LIST = [OVERALL_METRICS, MDO_WISE_COMPREHENSIVE, CBP_WISE_COMPREHENSIVE]
+    ENROLMENT_BASED_LIST = [OVERALL_METRICS, MDO_WISE_COMPREHENSIVE, CBP_WISE_COMPREHENSIVE,
+                            LIVE_COURSE_MODERATED_COUNT_BY_ORG]  # Added new query here
     TOP_5_LIST = [TOP_5_USERS_BY_COMPLETION_BY_MDO, TOP_5_COURSES_BY_COMPLETION_BY_MDO,
                   TOP_5_CONTENT_BY_COMPLETION_BY_ORG, TOP_5_CONTENT_BY_ENROLLMENTS_BY_CBP,
                   TOP_5_COURSES_BY_RATING, TOP_5_MDO_BY_COMPLETION]
