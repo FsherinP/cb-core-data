@@ -880,6 +880,13 @@ class DataExhaustModel:
             self.write_parquet(es_final_assessment_df, f"{output_base_path}/esFinalAssessment")
             es_final_assessment_df.unpersist()
 
+            # Process access control settings for CAP
+            self.logger.info("Processing access control settings for CAP...")
+            access_control_settings_df = self.read_cassandra_table(self.config.cassandraCourseKeyspace, self.config.cassandraAccessSettingRulesTable)
+
+            self.write_parquet(access_control_settings_df, f"{output_base_path}/accessControlSettings")
+            access_control_settings_df.unpersist()
+
             # Process course assessment data
             self.logger.info("Processing assessment ES content data...")
             primary_categories = ["Course Assessment"]
