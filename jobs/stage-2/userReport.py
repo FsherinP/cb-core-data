@@ -195,6 +195,8 @@ def processUserReport(config):
             col("userProfileStatus").alias("profile_status"),
             date_format(from_unixtime(col("userCreatedTimestamp") / 1000), ParquetFileConstants.DATE_TIME_FORMAT).alias(
                 "user_registration_date"),
+            date_format(from_unixtime(col("userUpdatedTimestamp") / 1000), ParquetFileConstants.DATE_TIME_FORMAT).alias(
+                "profile_last_updated_date"),
             col("role").alias("roles"),
             col("personalDetails.gender").alias("gender"),
             col("personalDetails.category").alias("category"),
