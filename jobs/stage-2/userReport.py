@@ -171,8 +171,8 @@ def processUserReport(config):
             col("userOrgID").alias("mdoid")
         )
 
-        dfexportutil.write_csv_per_mdo_id(mdoWiseReportDF, f"{config.localReportDir}/{config.userReportPath}/{today}",
-                                          'mdoid', csv_filename=config.userReport)
+        #dfexportutil.write_csv_per_mdo_id(mdoWiseReportDF, f"{config.localReportDir}/{config.userReportPath}/{today}",
+        #                                  'mdoid', csv_filename=config.userReport)
 
         warehouseDF = user_complete_data \
             .withColumn("marked_as_not_my_user",
@@ -359,7 +359,7 @@ def processUserReport(config):
             )
         ).repartition(col("mdoid")).cache()  # Repartition by org and cache
 
-        base_out = f"standalone-reports/user-custom-report/{today}"
+        base_out = f"standalone-reports/{config.userReportPath}/{today}"
 
         print("📊 Pre-collecting organization metadata...")
         org_metadata = (
@@ -466,7 +466,7 @@ def processUserReport(config):
                 ordered = joined.selectExpr(*select_expressions)
                 
                 out_path = f"{config.localReportDir}/{base_out}/mdoid={org_id}"
-                csv_file_path = f"{out_path}/UserCustomReport.csv"
+                csv_file_path = f"{out_path}/{config.userReport}"
                 
                 os.makedirs(out_path, exist_ok=True)
                 
