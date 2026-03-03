@@ -472,20 +472,8 @@ class DataExhaustModel:
                      ).otherwise(col("fa_main.assessPassOriginal")).alias("assessPass")
             )
 
-            # Validation logging
-            original_count = final_assessment_df.count()
-            final_count = final_assessment_df_merged.count()
-            self.logger.info(f"Original record count: {original_count}")
-            self.logger.info(f"Final record count: {final_count}")
-            self.logger.info(f"Record count difference: {original_count - final_count}")
-
-            if original_count != final_count:
-                self.logger.warning(f"WARNING: Record count mismatch! Lost {original_count - final_count} records")
-            else:
-                self.logger.info("SUCCESS: All records preserved!")
-
             # Write final output
-            self.write_parquet(final_assessment_df, f"{output_base_path}/userAssessment")
+            self.write_parquet(final_assessment_df_merged, f"{output_base_path}/userAssessment")
             # Cleanup
             user_assessment_df.unpersist()
             final_assessment_df.unpersist()
