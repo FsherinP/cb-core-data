@@ -917,6 +917,29 @@ class DataExhaustModel:
             self.write_parquet(course_completion_survey_df, f"{output_base_path}/courseCompletionSurvey")
             course_completion_survey_df.unpersist()
             self.logger.info("course completion survey data processing completed.")
+
+            self.logger.info("Processing peer validation survey data...")
+            context_type = ["peerValidationSurvey"]
+            must_clause = ",".join([f'{{"match":{{"contextType":"{pc}"}}}}' for pc in context_type])
+            fields = ["formId","contextType","title","version", "status", "createdBy", "additionalProperties","createdFor","endDate","createdDate"]
+            fields_clause = ",".join([f'"{f}"' for f in fields])
+            array_fields = []
+            query = f'{{"_source":[{fields_clause}],"query":{{"bool":{{"must":[{must_clause}]}}}}}}'
+            peer_validation_survey_df = utils.read_elasticsearch_data(
+                self.spark,
+                self.config.sparkIGotElasticsearchConnectionHost,
+                self.config.sparkElasticsearchConnectionPort,
+                "fs-forms",
+                query,
+                fields,
+                array_fields
+            )
+
+            self.write_parquet(peer_validation_survey_df, f"{output_base_path}/peerValidationSurveys")
+            peer_validation_survey_df.unpersist()
+
+            self.logger.info("peer validation survey data processing completed.")
+            
             self.logger.info("Data processing completed successfully!")
 
         except Exception as e:

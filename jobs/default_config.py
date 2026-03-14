@@ -80,6 +80,8 @@ DEFAULT_CONFIG = {
     'dwNLWUserLeaderboardTable': 'nlw_user_leaderboard',
     'dwAparCBPEnrollmentTable': 'apar_cbp_enrollment',
     'dwCourseCompletionSurveryTable': 'course_completion_survey_details',
+    'dwnotifiedUsersTable': 'peer_validation_notifications_success',
+    'dwfailednotifiedUsersTable': 'peer_validation_notification_failure',
 
     # Cassandra Keyspaces
     'cassandraUserKeyspace': 'sunbird',
@@ -161,6 +163,7 @@ DEFAULT_CONFIG = {
     'commsConsoleReportPath': 'standalone-reports/comms-console',
     'validationReportPath': 'standalone-reports/validation-report',
     'courseCompletionSurveyPath': 'standalone-reports/course-completion-survey-report',
+    "peerValidationAPIPath" : 'standalone-reports/peer-validation-notifications',
 
     'blendedProgramReport' : 'BlendedProgramReport.csv',
     'cbaReport' : 'UserAssessmentReport.csv',
@@ -173,6 +176,11 @@ DEFAULT_CONFIG = {
     'userReport' : 'UserReport.csv',
     'completionSurveyReport':'completionSurvey.csv',
 
+    #Peer Validation Configuration
+    'notificationBatchSize': '100',
+    'apiBasedNotificationEnabled': False,
+    'notificationAPIURL':"",
+    'peerValidationKafkaTopic': 'dev-peer-survey-notification-sent',
 
     # Communications Console Configuration
     'commsConsolePrarambhEmailSuffix': '.kb@karmayogi.in',
