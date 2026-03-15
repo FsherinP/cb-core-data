@@ -917,6 +917,7 @@ class DataExhaustModel:
             self.write_parquet(course_completion_survey_df, f"{output_base_path}/courseCompletionSurvey")
             course_completion_survey_df.unpersist()
             self.logger.info("course completion survey data processing completed.")
+            
             self.logger.info("Data processing completed successfully!")
 
         except Exception as e:
