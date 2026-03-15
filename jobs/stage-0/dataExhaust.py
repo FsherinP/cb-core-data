@@ -542,7 +542,7 @@ class DataExhaustModel:
             fields = ["identifier", "name", "primaryCategory", "status", "reviewStatus", "channel",
                       "duration", "leafNodesCount", "lastPublishedOn", "lastStatusChangedOn",
                       "createdFor", "competencies_v6", "programDirectorName", "language",
-                      "courseCategory", "organisation", "childNodes", "difficultyLevel"]
+                      "courseCategory", "organisation", "childNodes", "difficultyLevel", "badgeDetails_v1"]
             array_fields = ["createdFor", "language", "organisation", "childNodes"]
             fields_clause = ",".join([f'"{f}"' for f in fields])
             query = f'{{"_source":[{fields_clause}],"query":{{"bool":{{"should":[{should_clause}]}}}}}}'
