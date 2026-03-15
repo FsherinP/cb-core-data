@@ -7,14 +7,13 @@ from pyspark.sql import SparkSession
 from pyspark.sql.window import Window
 from pyspark.sql.functions import (col, current_timestamp, to_date,lit,explode, current_date, date_sub, size, from_unixtime)
 from datetime import datetime
-from pyspark.sql import functions as F
 import sys
 import os
 sys.path.append(str(Path(__file__).resolve().parents[2]))
 
 # Reusable imports from userReport structure
 from constants.ParquetFileConstants import ParquetFileConstants
-from dfutil.dfexport import dfexportutil
+from dfutil.utils import utils
 from jobs.default_config import create_config
 from jobs.config import get_environment_config
 
@@ -62,9 +61,23 @@ class PeerValidationEligibleUsers:
             yesterday = date_sub(current_date(), 1)
 
             notifiedUsersDF = self.read_postgres_table(self.config.dwnotifiedUsersTable)
-            formsDF = formsDF = self.spark.read.parquet(
-                ParquetFileConstants.PEER_VALIDATION_FORMS_PARQUET_FILE
-            ).filter(
+            context_type = ["peerValidationSurvey"]
+            must_clause = ",".join([f'{{"match":{{"contextType":"{pc}"}}}}' for pc in context_type])
+            fields = ["formId","contextType","title","version", "status", "createdBy", "additionalProperties","createdFor","endDate","createdDate"]
+            fields_clause = ",".join([f'"{f}"' for f in fields])
+            query = {"bool": {"must": [{"match": {"contextType": pc}} for pc in context_type]}}
+
+            formsDF = utils.read_elasticsearch_data_scroll(
+                self.spark, 
+                self.config.sparkElasticsearchConnectionHost,
+                self.config.sparkElasticsearchConnectionPort,
+                "fs-forms",
+                fields = fields,
+                query = query
+            )
+            formsDF = formsDF.withColumn("endDate",from_unixtime(col("endDate")/1000).cast("timestamp")) \
+                .withColumn("createdDate",from_unixtime(col("createdDate")/1000).cast("timestamp")) \
+                    .filter(
                 (col("status") == "Active") &
                 (col("endDate") >= current_timestamp())
             ).select(
@@ -73,6 +86,7 @@ class PeerValidationEligibleUsers:
                 "createdBy",
                 "createdFor",
                 "endDate",
+                "createdDate",
                 col("additionalProperties.identifier").alias("course_id"),
                 col("additionalProperties.triggerAfter").cast("int").alias("minTriggerDays"),
                 col("additionalProperties.completionLookBack").cast("int").alias("maxTriggerDays")

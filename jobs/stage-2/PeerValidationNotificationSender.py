@@ -112,8 +112,6 @@ class PeerValidationNotificationSender:
                             }
                         })
                     payload = {"request": clean_request}
-                    print("Sending payload:")
-                    print(json.dumps(payload, indent=2))
 
                     try:
                         
