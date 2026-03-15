@@ -48,7 +48,7 @@ class PeerValidationNotificationSender:
     def send_notification(self):
         try:
             today = self.get_date()
-            eligibleUsersDF = self.spark.read.parquet(ParquetFileConstants.PEER_VALIDATION_ELIGIBLE_USERS_PARQUET_FILE).filter(col('user_id') == 'fffcbace-19e8-4982-899a-c5566aa98621')
+            eligibleUsersDF = self.spark.read.parquet(ParquetFileConstants.PEER_VALIDATION_ELIGIBLE_USERS_PARQUET_FILE)
             usersWindow = Window.orderBy("user_id")
 
             eligibleUsersDF = eligibleUsersDF.withColumn("row_num", row_number().over(usersWindow)) \
@@ -77,18 +77,15 @@ class PeerValidationNotificationSender:
                             )
                         ).alias("data"),
                         concat(
-                            lit("You have been assigned to evaluate "),
-                            col("full_name"),
-                            lit("'s work in '"),
+                            lit("Peer validation survey is now available for"),
                             col("courseName"),
-                            lit("'. Please complete the survey by "),
-                            date_format(col("surveyEndDate"), "yyyy-MM-dd'T'HH:mm:ss'Z'"),
                             lit(".")
                         ).alias("body")
                     ).alias("message")
                 )
             )
             if self.config.apiBasedNotificationEnabled:
+                notification_api_url = self.config.notificationAPIURL
                 batchDF = notificationDF.groupBy("batch_id").agg(
                     collect_list("notification").alias("request")
                 )
@@ -115,7 +112,7 @@ class PeerValidationNotificationSender:
 
                     try:
                         
-                        response = requests.post(notification_api_url, json=payload, headers=headers, timeout=300)
+                        response = requests.post(notification_api_url, json=payload, timeout=300)
                         status_code = response.status_code
                         resp_text = response.text
                     except Exception as e:
@@ -133,7 +130,7 @@ class PeerValidationNotificationSender:
                             status_code,
                             resp_text
                         ))
-                notification_api_url = self.config.notificationAPIURL
+                
                 apiResponseDF = self.spark.createDataFrame(
                     results,
                     ["user_id", "form_id", "course_id", "first_completed_on", "http_status", "response_body"]
