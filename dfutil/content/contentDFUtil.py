@@ -48,6 +48,7 @@ def preComputeAllCourseProgramESDataFrame(spark: SparkSession) -> DataFrame:
             col("lastStatusChangedOn").alias("lastStatusChangedOn"),
             col("programDirectorName"),
             col("courseOrgID"),
+            col("badgeDetails_v1"),
             F.col("competencyAreaRefId"),
             F.col("competencyThemeRefId"),
             F.col("competencySubThemeRefId"),
