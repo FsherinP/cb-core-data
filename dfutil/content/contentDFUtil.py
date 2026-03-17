@@ -135,6 +135,7 @@ def preComputeExternalContentDataFrame(spark) -> DataFrame:
                 col("parsed_data.content.lastUpdatedOn").alias("courseLastPublishedOn"),
                 col("parsed_data.content.contentPartner.id").alias("courseOrgID"),
                 col("parsed_data.content.contentPartner.contentPartnerName").alias("courseOrgName"),
+                col("parsed_data.content.badgeDetails_v1").alias("badge"),
                 lit("External Content").alias("category"),
                 lit("LIVE").alias("courseStatus")
             )

@@ -6,7 +6,7 @@ from pathlib import Path
 from pyspark.sql import SparkSession
 from pyspark.sql.functions import (
     col, when, coalesce, lit,
-    current_timestamp, date_format, from_unixtime, concat_ws,from_json,explode,trim,length,first
+    current_timestamp, date_format, from_unixtime, concat_ws, from_json, explode, trim, length, first, expr
 )
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from pyspark.sql.functions import collect_set
@@ -57,6 +57,10 @@ def processUserReport(config):
         # Step 2: Load Enrolment Data
         print("📚 Step 2: Loading Enrolment Data...")
         user_enrolment_df = spark.read.parquet(ParquetFileConstants.ENROLMENT_WAREHOUSE_COMPUTED_PARQUET_FILE)
+
+        user_badges = (spark.read.parquet(ParquetFileConstants.GAMIFICATION_BADGE_USER_ENROLMENT_PARQUET_FILE)
+                       .select(col("userID").alias("user_id"), "badge_id")
+                       .groupBy("user_id").agg(expr("count(distinct badge_id)").alias("total_badges_earned")))
         print("✅ Step 2 Complete")
 
         # Step 3: Load Content Duration
@@ -217,7 +221,7 @@ def processUserReport(config):
             col("isOnCentralDeputation").alias("is_on_central_deputation"),
             col("organised_service").alias("is_from_organised_service_of_govt"),
             col("data_last_generated_on")
-        )
+        ).join(user_badges, on="user_id", how="left").fillna(0, subset=["total_badges_earned"])
         print("✅ Step 8 Complete")
 
         # Step 9: Export Data

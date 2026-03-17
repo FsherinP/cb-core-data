@@ -1,12 +1,13 @@
 import findspark
 from duckdb.experimental.spark.sql.functions import current_date
+from pyspark.sql.types import *
 
 findspark.init()
 import sys
 from pathlib import Path
 from pyspark.sql import SparkSession, Window
 from pyspark.sql.functions import (
-    col, when, coalesce, lit,current_date, expr, to_date,
+    col, when, lit,current_date, expr, to_date, explode_outer, size,
     current_timestamp, date_format, from_unixtime, concat_ws, from_json, explode, trim, length, first, countDistinct,
     rank, to_timestamp, date_sub, dense_rank
 )
@@ -51,59 +52,90 @@ def processGamificationJob(config):
         enrolment_df = spark.read.parquet(ParquetFileConstants.ENROLMENT_COMPUTED_PARQUET_FILE)
 
         user_enrolment_df = (enrolment_df
-                             .withColumn("badge_details", explode("issued_badges"))
+                             .withColumn("badge_details", explode_outer("issued_badges"))
                              .select("userID","courseID", "dbCompletionStatus", "certificateID",
                                      col("badge_details")["badgeid"].alias("badge_id"),
-                                     col("badge_details")["criteria"].alias("badge_criteria"),col("badge_details")["issuedOn"].alias("badge_issued_on"))
+                                     col("badge_details")["criteria"].alias("badge_criteria_enrolment"),col("badge_details")["issuedOn"].alias("badge_issued_on"))
                              .withColumn("badge_issued_ts", to_timestamp(col("badge_issued_on"), "yyyy-MM-dd'T'HH:mm:ss.SSSZ"))
                              )
         print("✅ Step 2 Complete")
 
-        # Step 3: Load Content Data from ES
-        print("📖 Step 3: Loading Content Data...")
-        es_content_data = spark.read.parquet(ParquetFileConstants.ALL_COURSE_PROGRAM_COMPUTED_PARQUET_FILE)
+        # Step 3: Load External Content Data
+        print("📚 Step 3: Loading External Content Data...")
+        external_enrolment_df = (spark.read.parquet(ParquetFileConstants.EXTERNAL_ENROLMENT_COMPUTED_PARQUET_FILE)
+                               .withColumn("badge_details", explode_outer("issued_badges"))
+                               .withColumn("certificateID",
+                                           when(col("issued_certificates").isNull(), "")
+                                           .otherwise(col("issued_certificates")[size(col("issued_certificates")) - 1]["identifier"]))
+                               .withColumnRenamed("content_id", "courseID")
+                               .withColumnRenamed("userid", "userID")
+                               .withColumnRenamed("status", "dbCompletionStatus")
+                               .select("userID","courseID", "dbCompletionStatus", "certificateID",
+                                       col("badge_details.badgeid").alias("badge_id"),
+                                       col("badge_details.criteria").alias("badge_criteria_enrolment"),
+                                       col("badge_details.issuedOn").alias("badge_issued_on"))
+                               .withColumn("badge_issued_ts", to_timestamp(col("badge_issued_on"), "yyyy-MM-dd'T'HH:mm:ss.SSSZ")))
+        enrolment_complete_data = user_enrolment_df.unionByName(external_enrolment_df)
+
+        external_content_data = (spark.read.parquet(ParquetFileConstants.EXTERNAL_CONTENT_COMPUTED_PARQUET_FILE)
+                                 #.withColumn("parsed", from_json(col("cios_data"), schema))
+                                 .withColumn("badge", explode_outer(col("badge")))
+                                 .withColumn("badge_earning_date_time", when(col("badge.badgeEarningDateEnabled") == True,
+                                                                             from_unixtime(col("badge.badgeEarningDateTime")/1000)).otherwise(lit(None)))
+                                 .withColumn("is_badge_active", when(col("badge.badgeEarningDateEnabled") == False, True)
+                                             .when((col("badge.badgeEarningDateEnabled") == True) & (col("badge_earning_date_time").isNotNull()) &
+                                                   (col("badge_earning_date_time") >= current_timestamp()), True).otherwise(False))
+                                 .select("content_id","is_badge_active", col("badge.badgeId").alias("badge_id"),
+                                         col("badge.criteria").alias("badge_criteria_content"),
+                                         col("badge.badgeTitle").alias("badge_title"),
+                                         col("badge.badgeSubTitle").alias("badge_sub_title"))
+                                 ).filter(col("badge_id").isNotNull())
         print("✅ Step 3 Complete")
 
-        # Step 4: Load Badges data
-        print("🏷️ Step 4: Loading Badges data...")
-        primary_categories= ["Course", "Program", "Blended Program", "CuratedCollections", "Curated Program"]
+        # Step 4: Load Content Badges data
+        print("🏷️ Step 4: Loading Content Badges data...")
+        es_content_data = spark.read.parquet(ParquetFileConstants.ALL_COURSE_PROGRAM_COMPUTED_PARQUET_FILE)
         badge_data = (es_content_data
-                      .filter(col("category").isin(primary_categories))
-                      .withColumn("badge_details", explode("badgeDetails_v1"))
+                      .withColumn("badge_details", explode_outer("badgeDetails_v1"))
+                      .withColumn("badge_earning_date_time", from_unixtime(col("badge_details.badgeEarningDateTime")/1000))
+                      .withColumn("is_badge_active", when(col("badge_details.badgeEarningDateEnabled") == False, True)
+                                  .when((col("badge_details.badgeEarningDateEnabled") == True) & (col("badge_earning_date_time").isNotNull()) &
+                                        (col("badge_earning_date_time") >= current_timestamp()), True).otherwise(False))
                       .select(
-            col("courseID").alias("content_id"),
-            col("category"),
-            col("badge_details.badgeEarningDateTime").alias("badge_earning_date_time"),
-            col("badge_details.badgeId").alias("badge_id"),
-            col("badge_details.criteria").alias("badge_criteria"),
-            col("badge_details.badgeTitle").alias("badge_title"),
-            col("badge_details.badgeSubTitle").alias("badge_sub_title")
-        ).withColumn("badge_earning_date_time", from_unixtime(col("badge_earning_date_time")/1000))
-                      .filter(col("badge_id").isNotNull())
-                      )
+                            col("courseID").alias("content_id"),
+                            col("is_badge_active"),
+                            col("badge_details.badgeId").alias("badge_id"),
+                            col("badge_details.criteria").alias("badge_criteria_content"),
+                            col("badge_details.badgeTitle").alias("badge_title"),
+                            col("badge_details.badgeSubTitle").alias("badge_sub_title")
+            ).filter(col("badge_id").isNotNull())
+        )
+        content_badge_complete_data = badge_data.unionByName(external_content_data)
         print("✅ Step 4 Complete")
 
         # Step 5: Join User Enrolment and Badge Data
         print("🔗 Step 5: Joining User Enrolment and Badge Data...")
-        enrolment_content_with_badge_data = (user_enrolment_df.withColumnRenamed("courseID", "content_id").withColumnRenamed("badge_id", "enrolment_badge_id")
-                                             .join(badge_data, on="content_id", how="left"))
+        enrolment_content_with_badge_data = (enrolment_complete_data.withColumnRenamed("courseID", "content_id").withColumnRenamed("badge_id", "enrolment_badge_id")
+                                             .join(content_badge_complete_data, on="content_id", how="left"))
+        enrolment_content_with_badge_data.write.mode("overwrite").option("compression", "snappy").parquet(ParquetFileConstants.GAMIFICATION_BADGE_USER_ENROLMENT_PARQUET_FILE)
+        enrolment_content_with_badge_data.unpersist(blocking=True)
         print("✅ Step 5 Complete")
 
         # Step 6: Add Total Badges Metric
         print("📊 Step 6: Adding Total Badges Metric...")
-        total_badges = badge_data.select("badge_id").distinct().count()
+        total_badges = content_badge_complete_data.select("badge_id").distinct().count()
         Redis.update("dashboard_all_course_badge_count", str(total_badges), conf = config)
         print("✅ Step 6 Complete")
 
         # Step 7: Add Total Live Badges Metric
         print("✨ Step 7: Adding Total Live Badges Metric...")
-        total_live_badges = badge_data.filter(col("badge_earning_date_time") >= current_timestamp()).select("badge_id").distinct().count()
+        total_live_badges = content_badge_complete_data.filter(col("is_badge_active") == True).select("badge_id").distinct().count()
         Redis.update("dashboard_live_course_badge_count", str(total_live_badges), conf = config)
         print("✅ Step 7 Complete")
 
         # Step 8: Add Total Badges Awarded Metric
         print("🎯 Step 8: Adding Total Badges Awarded Metric...")
-        total_badges_awarded = user_enrolment_df.select("badge_id").count()
+        total_badges_awarded = enrolment_complete_data.select("badge_id").count()
         Redis.update("dashboard_total_badge_awarded_count", str(total_badges_awarded), conf = config)
         print("✅ Step 8 Complete")
 
@@ -140,9 +172,14 @@ def processGamificationJob(config):
                         .groupBy("content_id")
                         .agg(
             expr("count(distinct userID)").alias("total_enrolments"),
-            expr("""countDistinct(when(count(distinct case (col("dbCompletionStatus")) == 2 & when dbCompletionStatus = 2 (col("certificateID").isNotNull()) & and certificateID is not null 
-                (col("badge_id").isNotNull()), col("userID")).alias("total_completions_with_badge"))
-                and badge_id is not null then userID end)""").alias("total_completions_with_badge")
+            expr("""
+                count(DISTINCT CASE 
+                    WHEN dbCompletionStatus = 2 
+                         AND certificateID IS NOT NULL 
+                         AND badge_id IS NOT NULL 
+                    THEN userID 
+                END)
+            """).alias("total_completions_with_badge")
         ).join(es_content_data.select(col("courseID").alias("content_id"), col("courseName").alias("content_name")), on="content_id", how="inner")
                         .select("content_name","total_enrolments","total_completions_with_badge")
                         )
@@ -158,11 +195,11 @@ def main():
     config_dict = get_environment_config()
     config = create_config(config_dict)
     start_time = datetime.now()
-    print(f"[START] UserReport processing started at: {start_time.strftime('%Y-%m-%d %H:%M:%S')}")
+    print(f"[START] Gamification processing started at: {start_time.strftime('%Y-%m-%d %H:%M:%S')}")
     processGamificationJob(config)
     end_time = datetime.now()
     duration = end_time - start_time
-    print(f"[END] UserReport completed at: {end_time.strftime('%Y-%m-%d %H:%M:%S')}")
+    print(f"[END] Gamification completed at: {end_time.strftime('%Y-%m-%d %H:%M:%S')}")
     print(f"[INFO] Total duration: {duration}")
     spark.stop()
 
