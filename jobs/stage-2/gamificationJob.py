@@ -7,9 +7,9 @@ import sys
 from pathlib import Path
 from pyspark.sql import SparkSession, Window
 from pyspark.sql.functions import (
-    col, when, lit,current_date, expr, to_date, explode_outer, size,
+    col, when, lit, current_date, expr, to_date, explode_outer, size,
     current_timestamp, date_format, from_unixtime, concat_ws, from_json, explode, trim, length, first, countDistinct,
-    rank, to_timestamp, date_sub, dense_rank
+    rank, to_timestamp, date_sub, dense_rank, trunc, add_months
 )
 import time
 from datetime import datetime
@@ -55,8 +55,9 @@ def processGamificationJob(config):
                              .withColumn("badge_details", explode_outer("issued_badges"))
                              .select("userID","courseID", "dbCompletionStatus", "certificateID",
                                      col("badge_details")["badgeid"].alias("badge_id"),
-                                     col("badge_details")["criteria"].alias("badge_criteria_enrolment"),col("badge_details")["issuedOn"].alias("badge_issued_on"))
-                             .withColumn("badge_issued_ts", to_timestamp(col("badge_issued_on"), "yyyy-MM-dd'T'HH:mm:ss.SSSZ"))
+                                     col("badge_details")["criteria"].alias("badge_criteria_enrolment"),
+                                     col("badge_details")["issuedOn"].alias("badge_issued_on"))
+                             .withColumn("badge_issued_ts", to_date(to_timestamp(col("badge_issued_on"), "yyyy-MM-dd'T'HH:mm:ss.SSSZ")))
                              )
         print("✅ Step 2 Complete")
 
@@ -74,7 +75,7 @@ def processGamificationJob(config):
                                        col("badge_details.badgeid").alias("badge_id"),
                                        col("badge_details.criteria").alias("badge_criteria_enrolment"),
                                        col("badge_details.issuedOn").alias("badge_issued_on"))
-                               .withColumn("badge_issued_ts", to_timestamp(col("badge_issued_on"), "yyyy-MM-dd'T'HH:mm:ss.SSSZ")))
+                               .withColumn("badge_issued_ts", to_date(to_timestamp(col("badge_issued_on"), "yyyy-MM-dd'T'HH:mm:ss.SSSZ"))))
         enrolment_complete_data = user_enrolment_df.unionByName(external_enrolment_df)
 
         external_content_data = (spark.read.parquet(ParquetFileConstants.EXTERNAL_CONTENT_COMPUTED_PARQUET_FILE)
@@ -121,6 +122,9 @@ def processGamificationJob(config):
         enrolment_content_with_badge_data.unpersist(blocking=True)
         print("✅ Step 5 Complete")
 
+        current_month_start = trunc(current_date(), "month")
+        previous_month_start = trunc(add_months(current_date(), -1), "month")
+
         # Step 6: Add Total Badges Metric
         print("📊 Step 6: Adding Total Badges Metric...")
         total_badges = content_badge_complete_data.select("badge_id").distinct().count()
@@ -137,6 +141,19 @@ def processGamificationJob(config):
         print("🎯 Step 8: Adding Total Badges Awarded Metric...")
         total_badges_awarded = enrolment_complete_data.select("badge_id").count()
         Redis.update("dashboard_total_badge_awarded_count", str(total_badges_awarded), conf = config)
+
+        total_badges_awarded_previous_month = (enrolment_complete_data
+                                               .filter((col("badge_issued_ts") >= previous_month_start) & (col("badge_issued_ts") < current_month_start))
+                                               .select("badge_id").count()
+                                               )
+        total_badges_awarded_current_month = (enrolment_complete_data
+                                              .filter(col("badge_issued_ts") >= current_month_start)
+                                              .select("badge_id").count()
+                                              )
+        if total_badges_awarded_previous_month == 0:
+            total_badges_awarded_diff = None
+        else: total_badges_awarded_diff = ((total_badges_awarded_current_month - total_badges_awarded_previous_month) / total_badges_awarded_previous_month)* 100
+        Redis.update("dashboard_total_badge_awarded_count_last_month_diff", str(total_badges_awarded_diff), conf = config)
         print("✅ Step 8 Complete")
 
         # Step 9: Add Active Learners Metric
@@ -145,6 +162,18 @@ def processGamificationJob(config):
                            .select("userID").distinct().count()
                            )
         Redis.update("dashboard_active_learners_for_badge_courses_count", str(active_learners), conf = config)
+        active_learners_previous_month = (enrolment_content_with_badge_data
+                                          .filter((col("badge_issued_ts") >= previous_month_start) & (col("badge_issued_ts") < current_month_start))
+                                          .select("userID").distinct().count()
+                                          )
+        active_learners_current_month = (enrolment_content_with_badge_data
+                                         .filter(col("badge_issued_ts") >= current_month_start)
+                                         .select("userID").distinct().count()
+                                         )
+        if active_learners_previous_month == 0:
+            active_learners_diff = None
+        else: active_learners_diff = ((active_learners_current_month - active_learners_previous_month) / active_learners_previous_month)* 100
+        Redis.update("dashboard_active_learners_for_badge_courses_count_last_month_diff", str(active_learners_diff), conf = config)
         print("✅ Step 9 Complete")
 
 
@@ -153,6 +182,16 @@ def processGamificationJob(config):
         badge_earned_learners = enrolment_content_with_badge_data.filter(col("dbCompletionStatus") == 2).select("userID").distinct().count()
         badge_earning_rate = (badge_earned_learners / active_learners * 100) if active_learners > 0 else 0
         Redis.update("dashboard_badge_award_rate", str(badge_earning_rate), conf = config)
+
+        badge_earned_learners_previous_month = (enrolment_content_with_badge_data
+                                                .filter((col("dbCompletionStatus") == 2) &
+                                                        (col("badge_issued_ts") >= previous_month_start) &
+                                                        (col("badge_issued_ts") < current_month_start))
+                                                .select("userID").distinct().count())
+        if badge_earned_learners_previous_month == 0:
+            badge_earning_rate_diff = None
+        else: badge_earning_rate_diff = ((active_learners_current_month - badge_earned_learners_previous_month) / badge_earned_learners_previous_month)* 100
+        Redis.update("dashboard_badge_award_rate_last_month_diff", str(badge_earning_rate_diff), conf = config)
         print("✅ Step 10 Complete")
 
         # Step 11: Add Badge Performance Rate Metric
@@ -163,7 +202,7 @@ def processGamificationJob(config):
                              .agg(countDistinct("userID").alias("user_count"))
                              .withColumn("rank", dense_rank().over(window_spec))
                              .select("badge_title","user_count", "rank"))
-        Redis.dispatchDataFrame("dashboard_badge_performance_rate", badge_performance, "badge_title", "rank", conf = config)
+        Redis.dispatchDataFrameList("dashboard_badge_performance_rate", badge_performance, "badge_title", ["rank","user_count"], conf = config)
         print("✅ Step 11 Complete")
 
         # Step 12: Add Content Completion Rate Metric
@@ -182,8 +221,8 @@ def processGamificationJob(config):
             """).alias("total_completions_with_badge")
         ).join(es_content_data.select(col("courseID").alias("content_id"), col("courseName").alias("content_name")), on="content_id", how="inner")
                         .select("content_name","total_enrolments","total_completions_with_badge")
-                        )
-        Redis.dispatchDataFrame("dashboard_content_completion_rate", content_data, "content_name", "total_enrolments",conf = config)
+                        ).orderBy(col("total_completions_with_badge").desc(), col("total_enrolments").desc()).limit(10)
+        Redis.dispatchDataFrameList("dashboard_content_completion_rate",content_data,"content_name", ["total_enrolments", "total_completions_with_badge"],conf = config)
         print("✅ Step 12 Complete")
 
     except Exception as e:
