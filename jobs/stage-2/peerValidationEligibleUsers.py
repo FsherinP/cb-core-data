@@ -5,7 +5,7 @@ import time
 from pathlib import Path
 from pyspark.sql import SparkSession
 from pyspark.sql.window import Window
-from pyspark.sql.functions import (col, current_timestamp, to_date,lit,explode, current_date, date_sub, size, from_unixtime)
+from pyspark.sql.functions import (col, date_format, date_add, to_date,lit,explode, date_sub, size, from_unixtime,when)
 from datetime import datetime
 import sys
 import os
@@ -58,13 +58,13 @@ class PeerValidationEligibleUsers:
     
     def process_data(self,output_path):
         try:
-            yesterday = date_sub(current_date(), 1)
-
-            notifiedUsersDF = self.read_postgres_table(self.config.dwnotifiedUsersTable)
+            print("Step 1: Loading Forms State Data...")
+            notifiedUsersDF = self.read_postgres_table(self.config.dwnotifiedUsersTable).withColumnRenamed("user_id", "userID").withColumnRenamed("form_id", "formId")
+            formHistoryDF = self.read_postgres_table(self.config.dwpeerValidationFormStateTable).withColumnRenamed("form_id", "formId")
+            print("✅ Step 1 Complete")
+            print("Step 2: Loading Forms Data from Elasticsearch...")
             context_type = ["peerValidationSurvey"]
-            must_clause = ",".join([f'{{"match":{{"contextType":"{pc}"}}}}' for pc in context_type])
             fields = ["formId","contextType","title","version", "status", "createdBy", "additionalProperties","createdFor","endDate","createdDate"]
-            fields_clause = ",".join([f'"{f}"' for f in fields])
             query = {"bool": {"must": [{"match": {"contextType": pc}} for pc in context_type]}}
 
             formsDF = utils.read_elasticsearch_data_scroll(
@@ -77,10 +77,8 @@ class PeerValidationEligibleUsers:
             )
             formsDF = formsDF.withColumn("endDate",from_unixtime(col("endDate")/1000).cast("timestamp")) \
                 .withColumn("createdDate",from_unixtime(col("createdDate")/1000).cast("timestamp")) \
-                    .filter(
-                (col("status") == "Active") &
-                (col("endDate") >= current_timestamp())
-            ).select(
+                    .filter(col("status") == "Active") \
+            .select(
                 "formId",
                 "title",
                 "createdBy",
@@ -89,36 +87,49 @@ class PeerValidationEligibleUsers:
                 "createdDate",
                 col("additionalProperties.identifier").alias("course_id"),
                 col("additionalProperties.triggerAfter").cast("int").alias("minTriggerDays"),
-                col("additionalProperties.completionLookBack").cast("int").alias("maxTriggerDays")
+                col("additionalProperties.completionLookBack").cast("int").alias("maxTriggerDays"),
+                col("additionalProperties.thumbnail").alias("thumbnail"),
+                col("additionalProperties.isSpvCreated").alias("isSpvCreated")
             )
-
-            spvForms = formsDF.filter(size(col("createdFor")) == 0).withColumn("formOrgId", lit(None))
-            mdoForms = formsDF.filter(size(col("createdFor")) > 0).withColumn("org", explode(col("createdFor"))) \
+            print("✅ Step 2 Complete")
+            print("Step 3: Joining Forms with History and Filtering Eligible Forms...")
+            formsDF = formsDF.join(formHistoryDF, formsDF.formId == formHistoryDF.form_id, how="left")
+            formsDF = formsDF.withColumn("publishedDate",col("createdDate").cast("date"))
+            formsDF = formsDF.filter(
+                (col("last_processed_date").isNull()) | 
+                (date_sub(col("endDate"), col("minTriggerDays")) > col("last_processed_date"))
+            )
+            print("✅ Step 3 Complete")
+            print("Step 4: Splitting Forms into SPV and MDO and Unifying...")
+            spvForms = formsDF.filter(col("isSpvCreated") == True).withColumn("formOrgId", lit(None))
+            mdoForms = formsDF.filter((col("isSpvCreated") == False) & (size(col("createdFor")) > 0)).withColumn("org", explode(col("createdFor"))) \
                 .withColumn("formOrgId", col("org.orgId")).drop("org")
             peervalidationForms = spvForms.unionByName(mdoForms)
-
-            peervalidationForms = peervalidationForms.withColumn("last_trigger_date", date_sub(col("endDate").cast("date"), col("minTriggerDays").cast("int"))) \
-                .filter(col("last_trigger_date") >= yesterday)
-
-            peervalidationForms = peervalidationForms.withColumn("publishedDate",col("createdDate")).cast("date")
-            
+            print("✅ Step 4 Complete")
+            print("Step 5: Calculating Trigger Windows for Eligible Forms...")
+            peervalidationForms = peervalidationForms.withColumn('first_trigger_start', when(col('last_processed_date').isNull(), date_sub(col("publishedDate"), col("maxTriggerDays"))) \
+                                                                 .otherwise(date_add(col("last_processed_date"), 1))) \
+                                                                 .withColumn('first_trigger_end', when(col('last_processed_date').isNull(), date_sub(col("publishedDate"), col("minTriggerDays"))) \
+                                                                             .otherwise(date_add(col("last_processed_date"), 1)))
+            print("✅ Step 5 Complete")
+            print("Step 6: Loading User, Course and Enrolment Data...")
             courseDetailsDF = self.spark.read.parquet(ParquetFileConstants.CONTENT_COMPUTED_PARQUET_FILE)
-            enrolmentDF = self.spark.read.parquet(ParquetFileConstants.ENROLMENT_COMPUTED_PARQUET_FILE).withColumn("firstCompletedOn",
-                            to_date(col("firstCompletedOn"), ParquetFileConstants.DATE_TIME_FORMAT)).filter(col("certificateID").isNotNull())
+            enrolmentDF = self.spark.read.parquet(ParquetFileConstants.ENROLMENT_COMPUTED_PARQUET_FILE) \
+                .withColumn("firstCompletedOn_date",to_date(date_format(col("firstCompletedOn"), ParquetFileConstants.DATE_TIME_FORMAT))).filter((col("certificateID").isNotNull()) & (col('dbCompletionStatus') == '2'))
             userOrgDF = self.spark.read.parquet(ParquetFileConstants.USER_ORG_COMPUTED_FILE)
+            print("✅ Step 6 Complete")
+            print("Step 7: Joining User Enrolments with Forms and Filtering Eligible Users...")
             userEnrolmentOrgDF = enrolmentDF.alias("left").join(userOrgDF.alias("right"), on= "userID", how = "left").select("left.*","right.userOrgID","right.fullName")
 
             eligibleUsersDF = userEnrolmentOrgDF.join(peervalidationForms, userEnrolmentOrgDF.content_id == peervalidationForms.course_id) \
                 .filter(
                 (col("formOrgId").isNull()) | ((col("formOrgId").isNotNull()) & (col("userOrgID") == col("formOrgId"))))
             
-            eligibleUsersDF = eligibleUsersDF.withColumn("first_trigger_start", date_sub(col("publishedDate"), col("maxTriggerDays").cast("int"))) \
-                                     .withColumn("first_trigger_end", date_sub(col("publishedDate"), 1))
-            
             eligibleUsersDF = eligibleUsersDF.filter(
-                (col("firstCompletedOn").between(col("first_trigger_start"), col("first_trigger_end"))) |  
-                ((col("firstCompletedOn") == yesterday) & (yesterday <= col("last_trigger_date"))))
-
+                (col("firstCompletedOn_date").between(col("first_trigger_start"), col("first_trigger_end")))
+            )
+            print("✅ Step 7 Complete")
+            print("Step 8: Removing Already Notified Users and Joining with Course Details...")
             eligibleUsersDF = eligibleUsersDF.join(
                 notifiedUsersDF.select("userID", "formId"),
                 on=["userID", "formId"],
@@ -129,19 +140,24 @@ class PeerValidationEligibleUsers:
                 on="courseID",
                 how="left"
             )
+            print("✅ Step 8 Complete")
+            print("Step 9: Selecting and Renaming Final Columns to Save...")
             eligibleUsersDF =  eligibleUsersDF.select(
-                                col("userID").alias("user_id"),
-                                col("formId").alias("formId"),
-                                col("courseID").alias("course_id"),
-                                col("title").alias("title"),
-                                col("createdBy").alias("createdBy"),
+                                col("userID"),
+                                col("formId"),
+                                col("courseID"),
+                                col("title"),
+                                col("createdBy"),
                                 col("endDate").alias("surveyEndDate"),
-                                col("firstCompletedOn").alias("first_completed_on"),
-                                col("fullName").alias("full_name"),
-                                "courseName"
+                                col("firstCompletedOn"),
+                                col("fullName"),
+                                col("courseName"),
+                                col("formOrgId"),
+                                col("thumbnail"),
+                                col("first_trigger_end")
                             )
             self.write_parquet(eligibleUsersDF, f"{output_path}/peerValidationEligibleUsers")
-
+            print("✅ Step 9 Complete - Eligible users data saved to Parquet.")
         except Exception as e:
             print(f"❌ Error: {str(e)}")
             raise
