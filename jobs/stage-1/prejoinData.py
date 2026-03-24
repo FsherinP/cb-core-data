@@ -89,6 +89,7 @@ def main():
 
     # Define processing stages - tuple format: (name, function, needs_config)
     processing_stages = [
+        ("Assessment Master Data", assessmentDFUtil.parse_raw_assessment_data, True),  # This stage needs config
         ("Org Hierarchy Computation", userDFUtil.preComputeOrgWithHierarchy, False),
         ("Content Ratings & Summary", contentDFUtil.preComputeRatingAndSummaryDataFrame, False),
         ("All Course/Program (ES)", contentDFUtil.preComputeAllCourseProgramESDataFrame, False),
