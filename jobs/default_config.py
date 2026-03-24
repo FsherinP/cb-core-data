@@ -80,6 +80,11 @@ DEFAULT_CONFIG = {
     'dwNLWUserLeaderboardTable': 'nlw_user_leaderboard',
     'dwAparCBPEnrollmentTable': 'apar_cbp_enrollment',
     'dwCourseCompletionSurveryTable': 'course_completion_survey_details',
+    'dwnotifiedUsersTable': 'peer_validation_notifications_success',
+    'dwfailednotifiedUsersTable': 'peer_validation_notification_failure',
+    'dwpeerValidationFormStateTable': 'peer_validation_form_state',
+    'dwcourseReminderStateTable' : 'gamification_course_state',
+    'dwnotificationQueue' : 'notification_queue',
 
     # Cassandra Keyspaces
     'cassandraUserKeyspace': 'sunbird',
@@ -161,6 +166,7 @@ DEFAULT_CONFIG = {
     'commsConsoleReportPath': 'standalone-reports/comms-console',
     'validationReportPath': 'standalone-reports/validation-report',
     'courseCompletionSurveyPath': 'standalone-reports/course-completion-survey-report',
+    "peerValidationAPIPath" : 'standalone-reports/peer-validation-notifications',
 
     'blendedProgramReport' : 'BlendedProgramReport.csv',
     'cbaReport' : 'UserAssessmentReport.csv',
@@ -173,6 +179,16 @@ DEFAULT_CONFIG = {
     'userReport' : 'UserReport.csv',
     'completionSurveyReport':'completionSurvey.csv',
 
+    #Peer Validation Configuration
+    'notificationBatchSize': 100,
+    'apiBasedNotificationEnabled': False,
+    'notificationAPIURL': "http://10.175.2.100/cb-notification/v1/notifications/bulk/create/peervalidation",
+    'peerValidationKafkaTopic': 'dev-peer-survey-notification-sent',
+
+    # Gamification  Configuration
+    'gamificationNotificationEligibilityDays': 7,
+    'gamificationNotificationBatchSize': 100,
+    'gamificationNotificationEndpoint' : "http://10.175.2.100/cb-notification/v1/notifications/bulk/create/peervalidation",
 
     # Communications Console Configuration
     'commsConsolePrarambhEmailSuffix': '.kb@karmayogi.in',

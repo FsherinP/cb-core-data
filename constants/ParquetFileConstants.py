@@ -37,6 +37,8 @@ class ParquetFileConstants:
     USER_EXTENDED_PROFILE = str(INPUT_DIR / "userExtendedProfile/**.parquet")
     FINAL_ASSESSMENT_PARQUET_FILE = str(INPUT_DIR / "esFinalAssessment/**.parquet")
     COURSE_COMPLETION_SURVEY_PARQUET_FILE = str(INPUT_DIR / "courseCompletionSurvey/**.parquet")
+    PEER_VALIDATION_FORMS_PARQUET_FILE = str(INPUT_DIR / "peerValidationSurveys/**.parquet")
+    PEER_VALIDATION_ELIGIBLE_USERS_PARQUET_FILE = str(INPUT_DIR / "peerValidationEligibleUsers/**.parquet")
     QUESTIONSET_HIERARCHY_PARQUET_FILE = str(INPUT_DIR / "questionSetHierarchy/**.parquet")
     ASSESSMENT_DATA_RAW_PARQUET_FILE = str(INPUT_DIR / "userAssessmentRaw/**.parquet")
     ###
