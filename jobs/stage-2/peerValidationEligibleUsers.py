@@ -59,8 +59,8 @@ class PeerValidationEligibleUsers:
     def process_data(self,output_path):
         try:
             print("Step 1: Loading Forms State Data...")
-            notifiedUsersDF = self.read_postgres_table(self.config.dwnotifiedUsersTable).withColumnRenamed("user_id", "userID").withColumnRenamed("form_id", "formId")
-            formHistoryDF = self.read_postgres_table(self.config.dwpeerValidationFormStateTable).withColumnRenamed("form_id", "formId")
+            notifiedUsersDF = self.read_postgres_table(self.config.dwnotifiedUsersTable)
+            formHistoryDF = self.read_postgres_table(self.config.dwpeerValidationFormStateTable)
             print("✅ Step 1 Complete")
             print("Step 2: Loading Forms Data from Elasticsearch...")
             context_type = ["peerValidationSurvey"]
@@ -69,7 +69,7 @@ class PeerValidationEligibleUsers:
 
             formsDF = utils.read_elasticsearch_data_scroll(
                 self.spark, 
-                self.config.sparkElasticsearchConnectionHost,
+                self.config.sparkIGotElasticsearchConnectionHost,
                 self.config.sparkElasticsearchConnectionPort,
                 "fs-forms",
                 fields = fields,
@@ -79,80 +79,87 @@ class PeerValidationEligibleUsers:
                 .withColumn("createdDate",from_unixtime(col("createdDate")/1000).cast("timestamp")) \
                     .filter(col("status") == "Active") \
             .select(
-                "formId",
+                col("formId").alias("form_id"),
                 "title",
                 "createdBy",
                 "createdFor",
                 "endDate",
                 "createdDate",
                 col("additionalProperties.identifier").alias("course_id"),
-                col("additionalProperties.triggerAfter").cast("int").alias("minTriggerDays"),
-                col("additionalProperties.completionLookBack").cast("int").alias("maxTriggerDays"),
+                col("additionalProperties.triggerAfter").cast("int").alias("min_trigger_days"),
+                col("additionalProperties.completionLookBack").cast("int").alias("max_trigger_days"),
                 col("additionalProperties.thumbnail").alias("thumbnail"),
-                col("additionalProperties.isSpvCreated").alias("isSpvCreated")
+                col("additionalProperties.isSpvCreated").alias("is_spv_created")
             )
             print("✅ Step 2 Complete")
             print("Step 3: Joining Forms with History and Filtering Eligible Forms...")
-            formsDF = formsDF.join(formHistoryDF, formsDF.formId == formHistoryDF.form_id, how="left")
-            formsDF = formsDF.withColumn("publishedDate",col("createdDate").cast("date"))
-            formsDF = formsDF.filter(
+            formsDF = formsDF.join(formHistoryDF, on="form_id", how="left") \
+                .withColumn("published_date",col("createdDate").cast("date")) \
+                    .filter(
                 (col("last_processed_date").isNull()) | 
-                (date_sub(col("endDate"), col("minTriggerDays")) > col("last_processed_date"))
-            )
+                (date_sub(col("endDate"), col("min_trigger_days")) > col("last_processed_date"))
+            ).drop(formHistoryDF.form_id)
             print("✅ Step 3 Complete")
             print("Step 4: Splitting Forms into SPV and MDO and Unifying...")
-            spvForms = formsDF.filter(col("isSpvCreated") == True).withColumn("formOrgId", lit(None))
-            mdoForms = formsDF.filter((col("isSpvCreated") == False) & (size(col("createdFor")) > 0)).withColumn("org", explode(col("createdFor"))) \
-                .withColumn("formOrgId", col("org.orgId")).drop("org")
-            peervalidationForms = spvForms.unionByName(mdoForms)
+            spvForms = formsDF.filter(col("is_spv_created") == True).withColumn("form_org_id", lit(None)).drop("createdFor")
+            mdoForms = formsDF.filter((col("is_spv_created") == False) & (size(col("createdFor")) > 0)).withColumn("org", explode(col("createdFor"))) \
+                .withColumn("form_org_id", col("org.orgId")).drop("org","createdFor")
+            peervalidationForms = spvForms.union(mdoForms)
             print("✅ Step 4 Complete")
             print("Step 5: Calculating Trigger Windows for Eligible Forms...")
-            peervalidationForms = peervalidationForms.withColumn('first_trigger_start', when(col('last_processed_date').isNull(), date_sub(col("publishedDate"), col("maxTriggerDays"))) \
+            peervalidationForms = peervalidationForms.withColumn('first_trigger_start', when(col('last_processed_date').isNull(), date_sub(col("published_date"), col("max_trigger_days"))) \
                                                                  .otherwise(date_add(col("last_processed_date"), 1))) \
-                                                                 .withColumn('first_trigger_end', when(col('last_processed_date').isNull(), date_sub(col("publishedDate"), col("minTriggerDays"))) \
+                                                                 .withColumn('first_trigger_end', when(col('last_processed_date').isNull(), date_sub(col("published_date"), col("min_trigger_days"))) \
                                                                              .otherwise(date_add(col("last_processed_date"), 1)))
             print("✅ Step 5 Complete")
             print("Step 6: Loading User, Course and Enrolment Data...")
-            courseDetailsDF = self.spark.read.parquet(ParquetFileConstants.CONTENT_COMPUTED_PARQUET_FILE)
-            enrolmentDF = self.spark.read.parquet(ParquetFileConstants.ENROLMENT_COMPUTED_PARQUET_FILE) \
-                .withColumn("firstCompletedOn_date",to_date(date_format(col("firstCompletedOn"), ParquetFileConstants.DATE_TIME_FORMAT))).filter((col("certificateID").isNotNull()) & (col('dbCompletionStatus') == '2'))
-            userOrgDF = self.spark.read.parquet(ParquetFileConstants.USER_ORG_COMPUTED_FILE)
+            courseDetailsDF = self.spark.read.parquet(ParquetFileConstants.CONTENT_COMPUTED_PARQUET_FILE).select(col("courseID").alias("course_id"),col("courseName").alias("course_name"))
+            enrolmentDF = self.spark.read.parquet(ParquetFileConstants.ENROLMENT_COMPUTED_PARQUET_FILE).select(
+                    col("userID").alias("user_id"), 
+                    col("courseID").alias("course_id"),
+                    col("firstCompletedOn"),
+                    col("certificateID"),
+                    col("dbCompletionStatus")
+                ) \
+                .withColumn("firstCompletedOn_date",to_date(date_format(col("firstCompletedOn"), ParquetFileConstants.DATE_TIME_FORMAT))) \
+                    .filter((col("certificateID").isNotNull()) & (col("certificateID") != "") & (col('dbCompletionStatus') == '2'))
+            userOrgDF = self.spark.read.parquet(ParquetFileConstants.USER_ORG_COMPUTED_FILE).select(col("userID").alias("user_id"), col("userOrgID"), col("fullName"))
             print("✅ Step 6 Complete")
             print("Step 7: Joining User Enrolments with Forms and Filtering Eligible Users...")
-            userEnrolmentOrgDF = enrolmentDF.alias("left").join(userOrgDF.alias("right"), on= "userID", how = "left").select("left.*","right.userOrgID","right.fullName")
+            userEnrolmentOrgDF = enrolmentDF.alias("left").join(userOrgDF.alias("right"), on= "user_id", how = "left").select("left.*","right.userOrgID","right.fullName")
 
-            eligibleUsersDF = userEnrolmentOrgDF.join(peervalidationForms, userEnrolmentOrgDF.content_id == peervalidationForms.course_id) \
+            eligibleUsersDF = userEnrolmentOrgDF.join(peervalidationForms, on="course_id", how="inner") \
                 .filter(
-                (col("formOrgId").isNull()) | ((col("formOrgId").isNotNull()) & (col("userOrgID") == col("formOrgId"))))
+                (col("form_org_id").isNull()) | ((col("form_org_id").isNotNull()) & (col("userOrgID") == col("form_org_id"))))
             
             eligibleUsersDF = eligibleUsersDF.filter(
                 (col("firstCompletedOn_date").between(col("first_trigger_start"), col("first_trigger_end")))
             )
             print("✅ Step 7 Complete")
             print("Step 8: Removing Already Notified Users and Joining with Course Details...")
-            eligibleUsersDF = eligibleUsersDF.join(
-                notifiedUsersDF.select("userID", "formId"),
-                on=["userID", "formId"],
+            eligibleUsersDF = eligibleUsersDF.alias("eu").join(
+                notifiedUsersDF.alias("nu").select("user_id", "form_id"),
+                on=["user_id", "form_id"],
                 how="left_anti"
-            )
-            eligibleUsersDF = eligibleUsersDF.join(
-                courseDetailsDF.select(col("courseID"),col("courseName")),
-                on="courseID",
+            ).select("eu.*")
+            eligibleUsersDF = eligibleUsersDF.alias("eu").join(
+                courseDetailsDF.alias("cd").select(col("course_id"),col("course_name")),
+                on="course_id",
                 how="left"
-            )
+            ).select("eu.*","cd.course_name")
             print("✅ Step 8 Complete")
             print("Step 9: Selecting and Renaming Final Columns to Save...")
             eligibleUsersDF =  eligibleUsersDF.select(
-                                col("userID"),
-                                col("formId"),
-                                col("courseID"),
+                                col("user_id"),
+                                col("form_id"),
+                                col("course_id"),
                                 col("title"),
-                                col("createdBy"),
-                                col("endDate").alias("surveyEndDate"),
-                                col("firstCompletedOn"),
-                                col("fullName"),
-                                col("courseName"),
-                                col("formOrgId"),
+                                col("createdBy").alias("created_by"),
+                                col("endDate").alias("survey_end_date"),
+                                col("firstCompletedOn_date"),
+                                col("fullName").alias("user_full_name"),
+                                col("course_name"),
+                                col("form_org_id"),
                                 col("thumbnail"),
                                 col("first_trigger_end")
                             )

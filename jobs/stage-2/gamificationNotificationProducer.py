@@ -16,14 +16,14 @@ from jobs.default_config import create_config
 from jobs.config import KAFKA_CONFIG, get_environment_config
 from dfutil.utils.utils import dispatch_df_to_kafka
 
-class GamificationNotificationSender:
+class GamificationNotificationProducer:
     def __init__(self,spark: SparkSession, config):
         self.spark = spark
         self.config = config
-        self.class_name = "org.ekstep.analytics.dashboard.report.GamificationNotificationSender"
+        self.class_name = "org.ekstep.analytics.dashboard.report.GamificationNotificationProducer"
 
     def name(self):
-        return "GamificationNotificationSender"
+        return "GamificationNotificationProducer"
 
     @staticmethod
     def get_date():
@@ -87,7 +87,7 @@ class GamificationNotificationSender:
 
             notificationDF = newUsersDF.select(
                 col("userID").alias("user_id"),
-                lit("Gamification").alias("event_type"),
+                lit("gamification").alias("event_type"),
                 col("content_id").alias("reference_id"),
                 # The Payload
                 to_json(struct(array(struct(
@@ -144,7 +144,7 @@ def main():
         'PYSPARK_SUBMIT_ARGS'] = '--packages com.datastax.spark:spark-cassandra-connector_2.12:3.4.1,org.elasticsearch:elasticsearch-spark-30_2.12:8.11.0,org.postgresql:postgresql:42.6.0 pyspark-shell'
     # Initialize Spark Session with optimized settings for caching
     spark = SparkSession.builder \
-        .appName("Gamification Notification Sender Model") \
+        .appName("Gamification Notification Producer Model") \
         .config("spark.sql.shuffle.partitions", "200") \
         .config("spark.executor.memory", "18g") \
         .config("spark.driver.memory", "18g") \
@@ -159,14 +159,14 @@ def main():
         .getOrCreate()
     # Create model instance
     start_time = datetime.now()
-    print(f"[START] Gamification Notification Sender processing started at: {start_time.strftime('%Y-%m-%d %H:%M:%S')}")
+    print(f"[START] Gamification Notification Producer processing started at: {start_time.strftime('%Y-%m-%d %H:%M:%S')}")
     config_dict = get_environment_config()
     config = create_config(config_dict)
-    model = GamificationNotificationSender(spark, config)
+    model = GamificationNotificationProducer(spark, config)
     model.send_notification()
     end_time = datetime.now()
     duration = end_time - start_time
-    print(f"[END] Gamification Notification Sender completed at: {end_time.strftime('%Y-%m-%d %H:%M:%S')}")
+    print(f"[END] Gamification Notification Producer completed at: {end_time.strftime('%Y-%m-%d %H:%M:%S')}")
     print(f"[INFO] Total duration: {duration}")
     spark.stop()
 
