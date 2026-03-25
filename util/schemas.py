@@ -452,6 +452,39 @@ cios_data_schema = StructType([
         ]), True)
     ])
 
+questionset_hierarchy_schema = StructType([
+    StructField("identifier", StringType(), True),
+    StructField("name", StringType(), True),
+    StructField("status", StringType(), True),
+    StructField("scoreCutoffType", StringType(), True),
+    StructField("totalQuestions", IntegerType(), True),
+    StructField("primaryCategory", StringType(), True),
+    StructField("minimumPassPercentage", FloatType(), True),
+    StructField("compatibilityLevel", IntegerType(), True),
+    StructField("noOfSection", IntegerType(), True)
+])
+
+submit_assessment_response_schema_with_children = StructType([
+    StructField("result", FloatType(), False),
+    StructField("total", IntegerType(), False),
+    StructField("blank", IntegerType(), False),
+    StructField("correct", IntegerType(), False),
+    StructField("incorrect", IntegerType(), False),
+    StructField("pass", BooleanType(), False),
+    StructField("overallResult", FloatType(), False),
+    StructField("passPercentage", FloatType(), False),
+    StructField("totalSectionMarks", FloatType(), False),
+    StructField("totalPercentage", FloatType(), False),
+    StructField("totalMarks", IntegerType(), False),
+    StructField("children", ArrayType(StructType([
+        StructField("identifier", StringType(), True),
+        StructField("name", StringType(), False),
+        StructField("result", FloatType(), False),
+        StructField("sectionResult", StringType(), False),
+        StructField("sectionMarks", StringType(), False)
+    ]), True), True)
+])
+
 def get_hierarchy_schema():
         level3 = StructType([
             StructField("identifier", StringType(), True),

@@ -7,6 +7,8 @@ from pyspark.sql.functions import (
 )
 import os
 import duckdb
+import shutil
+import uuid
 from concurrent.futures import ThreadPoolExecutor, as_completed
 
 # Add parent directory to sys.path for importing project-specific modules
@@ -17,7 +19,8 @@ from constants.ParquetFileConstants import ParquetFileConstants
 from dfutil.user import userDFUtil
 from dfutil.enrolment.acbp import acbpDFUtil
 from dfutil.enrolment import enrolmentDFUtil
-from dfutil.content import contentDFUtil
+from dfutil.content import contentDFUtil 
+
 
 
 def write_csv_per_mdo_id(df, output_dir, groupByAttr, isIndividualWrite=False, threshold=100000, csv_filename="report.csv"):
@@ -336,6 +339,47 @@ def write_single_csv_duckdb(df, output_path: str, parquet_tmp_path: str = None, 
         'total_rows': total_rows,
         'filter_applied': filter_condition is not None
     }
+
+# Legacy method for writing single parquet file (not used in current workflow but kept for reference)
+def write_single_parquet(df, final_path: str):
+    """
+    Writes a PySpark DataFrame as a single parquet file with a custom filename.
+
+    Args:
+        df: PySpark DataFrame
+        final_path (str): Full destination path including filename (.parquet)
+        spark: SparkSession (optional, only needed for some environments)
+    """
+
+    # Create a unique temp directory
+    temp_dir = f"{final_path}_tmp_{uuid.uuid4().hex}"
+
+    # Step 1: Write to temp directory as single partition
+    df.coalesce(1) \
+      .write \
+      .mode("overwrite") \
+      .parquet(temp_dir)
+
+    # Step 2: Locate the generated parquet part file
+    part_file = None
+    for file in os.listdir(temp_dir):
+        if file.endswith(".parquet"):
+            part_file = os.path.join(temp_dir, file)
+            break
+
+    if not part_file:
+        raise Exception("No parquet part file found in temp directory")
+
+    # Step 3: Ensure final directory exists
+    os.makedirs(os.path.dirname(final_path), exist_ok=True)
+
+    # Step 4: Move and rename to final path
+    shutil.move(part_file, final_path)
+
+    # Step 5: Clean up temp directory
+    shutil.rmtree(temp_dir, ignore_errors=True)
+
+    print(f"✅ Parquet written to: {final_path}")
 
 def write_csv_combined(df, single_csv_path: str, partitioned_output_dir: str, 
                       partition_column: str, parquet_tmp_path: str = None, 

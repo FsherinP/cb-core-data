@@ -175,8 +175,8 @@ def processUserReport(config):
             col("userOrgID").alias("mdoid")
         )
 
-        #dfexportutil.write_csv_per_mdo_id(mdoWiseReportDF, f"{config.localReportDir}/{config.userReportPath}/{today}",
-        #                                  'mdoid', csv_filename=config.userReport)
+        dfexportutil.write_csv_per_mdo_id(mdoWiseReportDF, f"{config.localReportDir}/{config.userReportPath}/{today}",
+                                          'mdoid', csv_filename=config.userReport)
 
         warehouseDF = user_complete_data \
             .withColumn("marked_as_not_my_user",
@@ -300,7 +300,18 @@ def processUserReport(config):
         )
         
         # Write to warehouse tables
-        exploded_df.coalesce(1).write.mode("overwrite").option("compression", "snappy").parquet(
+        exploded_df \
+            .select(
+                col("userID").alias("user_id"),
+                col("mdo_id"),
+                col("attribute_name"),
+                col("attribute_value")
+            ) \
+            .coalesce(1) \
+            .write \
+            .mode("overwrite") \
+            .option("compression", "snappy") \
+            .parquet(
             f"{config.warehouseReportDir}/userCustomFields"
         )
         
@@ -363,7 +374,7 @@ def processUserReport(config):
             )
         ).repartition(col("mdoid")).cache()  # Repartition by org and cache
 
-        base_out = f"standalone-reports/{config.userReportPath}/{today}"
+        base_out = f"standalone-reports/user-custom-report/{today}"
 
         print("📊 Pre-collecting organization metadata...")
         org_metadata = (
@@ -470,7 +481,7 @@ def processUserReport(config):
                 ordered = joined.selectExpr(*select_expressions)
                 
                 out_path = f"{config.localReportDir}/{base_out}/mdoid={org_id}"
-                csv_file_path = f"{out_path}/{config.userReport}"
+                csv_file_path = f"{out_path}/UserCustomReport.csv"
                 
                 os.makedirs(out_path, exist_ok=True)
                 
@@ -480,6 +491,14 @@ def processUserReport(config):
                     parquet_tmp_path=f"{out_path}/temp_parquet_{org_id}",
                     keep_parquets=False
                 )
+
+                # write warehouse files - 'warehouseUserCustomReportDir': 'user_custom_report'
+                warehouse_user_custom_report_file = f"{config.warehouseReportDir}/{config.warehouseUserCustomReportDir}/{org_id}_custom_report.parquet"
+                
+                # Write as Parquet
+                dfexportutil.write_single_parquet(
+                    df=ordered,
+                    final_path=warehouse_user_custom_report_file)
                 
                 return {
                     'org_id': org_id,
