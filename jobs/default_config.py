@@ -233,6 +233,7 @@ DEFAULT_CONFIG = {
     'gcpBucket': 'igotproddp',
     'password': '123456',
     'createFullReport': False,
+    'warehouseUserCustomReportDir': 'user_custom_report',
 
     # Job Configuration
     'parallelization': '16',
