@@ -311,6 +311,65 @@ def read_elasticsearch_data(spark: SparkSession, host: str, port: str, index: st
 
     return df
 
+def read_elasticsearch_data_scroll(spark: SparkSession, host: str, port: str, index: str, fields: list = None, scroll_size: int = 1000, scroll_timeout: str = "2m", query: dict = None, es_user: str = None, es_pass: str = None) -> DataFrame:
+    """
+    Fetch all data from Elasticsearch index using scroll API.
+
+    Parameters:
+        spark (SparkSession): The Spark session.
+        host (str): Elasticsearch host.
+        port (str): Elasticsearch port.
+        index (str): Index name.
+        fields (list, optional): List of fields to fetch.
+        scroll_size (int, optional): Number of docs per scroll batch. Default 1000.
+        scroll_timeout (str, optional): Scroll context timeout (e.g. "2m"). Default "2m".
+        query (dict, optional): Query DSL dict. Default match_all.
+        es_user (str, optional): Elasticsearch username.
+        es_pass (str, optional): Elasticsearch password.
+
+    Returns:
+        DataFrame: All documents from the index as a Spark DataFrame.
+    """
+    import requests
+    from requests.auth import HTTPBasicAuth
+    import json
+    all_docs = []
+    url = f"http://{host}:{port}/{index}/_search?scroll={scroll_timeout}"
+    headers = {"Content-Type": "application/json"}
+    payload = {
+        "size": scroll_size,
+        "query": query if query else {"match_all": {}},
+    }
+    if fields:
+        payload["_source"] = fields
+    auth = HTTPBasicAuth(es_user, es_pass) if es_user and es_pass else None
+    # Initial search
+    resp = requests.post(url, headers=headers, data=json.dumps(payload), auth=auth)
+    resp.raise_for_status()
+    data = resp.json()
+    scroll_id = data.get("_scroll_id")
+    hits = data.get("hits", {}).get("hits", [])
+    all_docs.extend([hit["_source"] for hit in hits])
+    # Scroll loop
+    while scroll_id and hits:
+        scroll_url = f"http://{host}:{port}/_search/scroll"
+        scroll_payload = {"scroll": scroll_timeout, "scroll_id": scroll_id}
+        resp = requests.post(scroll_url, headers=headers, data=json.dumps(scroll_payload), auth=auth)
+        resp.raise_for_status()
+        data = resp.json()
+        scroll_id = data.get("_scroll_id")
+        hits = data.get("hits", {}).get("hits", [])
+        all_docs.extend([hit["_source"] for hit in hits])
+        if not hits:
+            break
+    # Convert to DataFrame
+    if not all_docs:
+        print(f"No documents found in index: {index}")
+        return spark.createDataFrame([], schema=None)
+    df = spark.read.json(spark.sparkContext.parallelize([json.dumps(doc) for doc in all_docs]))
+    print(f"Loaded {df.count()} documents from ES index '{index}' using scroll API.")
+    return df
+
 def writeToCassandra(df, keyspace: str, table: str, mode: str = "append"):
     df.write \
         .format("org.apache.spark.sql.cassandra") \
