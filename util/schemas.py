@@ -442,7 +442,9 @@ cios_data_schema = StructType([
                     StructField("badgeSubTitle", StringType()),
                     StructField("badgeTemplate", StringType()),
                     StructField("badgeEarningDateEnabled", BooleanType()),
-                    StructField("badgeEarningDateTime", LongType())
+                    StructField("badgeEarningDateTime", LongType()),
+                    StructField("createdOn", StringType()),
+                    StructField("badgeCreatedDateTime", LongType())
                 ])
             )),
             StructField("contentPartner", StructType([
