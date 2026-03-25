@@ -2,9 +2,10 @@ import findspark
 findspark.init()
 
 from pathlib import Path
-from pyspark.sql import SparkSession
-from pyspark.sql.functions import current_date, current_timestamp, struct, lit, col, collect_list, row_number, floor, array, concat, date_format
-from datetime import datetime, time
+from pyspark.sql import DataFrame, SparkSession
+from pyspark.sql.functions import current_date, current_timestamp, struct, lit, col, collect_list, row_number, floor, array, concat, date_format, when
+from datetime import datetime
+import time
 import sys
 import os
 import requests
@@ -43,13 +44,26 @@ class PeerValidationNotificationSender:
                 .option("driver", "org.postgresql.Driver") \
                 .mode(mode) \
                 .save()
+            
+    def read_postgres_table(self, table: str) -> "DataFrame":
+        """Read data from PostgreSQL table"""
+        postgres_url = f"jdbc:postgresql://{self.config.dwPostgresHost}/{self.config.dwPostgresSchema}"
+
+        return self.spark.read \
+            .format("jdbc") \
+            .option("url", postgres_url) \
+            .option("dbtable", table) \
+            .option("user", self.config.dwPostgresUsername,) \
+            .option("password", self.config.dwPostgresCredential) \
+            .option("driver", "org.postgresql.Driver") \
+            .load()
 
 
     def send_notification(self):
         try:
             today = self.get_date()
             eligibleUsersDF = self.spark.read.parquet(ParquetFileConstants.PEER_VALIDATION_ELIGIBLE_USERS_PARQUET_FILE)
-            usersWindow = Window.orderBy("userID")
+            usersWindow = Window.orderBy("user_id")
 
             eligibleUsersDF = eligibleUsersDF.withColumn("row_num", row_number().over(usersWindow)) \
                 .withColumn("batch_id", floor((col("row_num") - 1) / self.config.notificationBatchSize))
@@ -57,7 +71,7 @@ class PeerValidationNotificationSender:
             notificationDF = eligibleUsersDF.withColumn(
                 "notification",
                 struct(
-                    col("userID"),
+                    col("user_id"),
                     lit("IN_APP").alias("type"),
                     lit("PEER_VALIDATION").alias("category"),
                     lit("PEER_VALIDATION").alias("sub_type"),
@@ -66,22 +80,22 @@ class PeerValidationNotificationSender:
                     struct(
                         array(
                             struct(
-                                col("formId"),
-                                col("courseID").alias("contextId"),
-                                col("courseName"),
+                                col("form_id").alias("formId"),
+                                col("course_id").alias("contextId"),
+                                col("course_name"),
                                 lit(False).alias("isSurveySubmitted"),
-                                date_format(col("firstCompletedOn"), "yyyy-MM-dd'T'HH:mm:ss.SSS'Z'").alias("completionDate"),
-                                col("createdBy").alias("surveyCreatedById"),
+                                date_format(col("firstCompletedOn_date"), "yyyy-MM-dd'T'HH:mm:ss.SSS'Z'").alias("completionDate"),
+                                col("created_by").alias("surveyCreatedById"),
                                 col("title").alias("surveyName"),
-                                date_format(col("surveyEndDate"), "yyyy-MM-dd'T'HH:mm:ss'Z'").alias("surveyEndDate"),
-                                col("fullName").alias("learnerName"),
-                                col("formOrgId").alias('contextOrgId'),
+                                date_format(col("survey_end_date"), "yyyy-MM-dd'T'HH:mm:ss'Z'").alias("surveyEndDate"),
+                                col("user_full_name").alias("learnerName"),
+                                col("form_org_id").alias('contextOrgId'),
                                 col("thumbnail")
                             )
                         ).alias("data"),
                         concat(
                             lit("Peer validation survey is now available for "),
-                            col("courseName"),
+                            col("course_name"),
                             lit(".")
                         ).alias("body")
                     ).alias("message")
@@ -100,7 +114,7 @@ class PeerValidationNotificationSender:
                     for notif in batch["request"]:
                         notif_dict = notif.asDict(recursive=True)
                         clean_request.append({
-                            "userID": notif_dict["userID"],
+                            "user_id": notif_dict["user_id"],
                             "type": notif_dict["type"],
                             "category": notif_dict["category"],
                             "sub_type": notif_dict["sub_type"],
@@ -126,7 +140,7 @@ class PeerValidationNotificationSender:
                     for notif in clean_request:
                         data_item = notif["message"]["data"][0]
                         results.append((
-                            notif["userID"],
+                            notif["user_id"],
                             data_item["formId"],
                             data_item["contextId"],
                             data_item["completionDate"],
@@ -138,6 +152,7 @@ class PeerValidationNotificationSender:
                     results,
                     ["user_id", "form_id", "course_id", "first_completed_on", "http_status", "response_body"]
                 )
+                
                 successDF = apiResponseDF.filter(col("http_status") == 200) \
                 .withColumn("notification_sent_on", current_timestamp()) \
                 .withColumn("data_generated_on", current_timestamp()) \
@@ -149,19 +164,42 @@ class PeerValidationNotificationSender:
 
             else:
                 notificationDF.write.mode("overwrite").json(f"{self.config.localReportDir}/{self.config.peerValidationAPIPath}/{today}")
-                successDF = eligibleUsersDF.withColumn("form_id", col("formId")) \
-                            .withColumn("notification_status", lit(200)) \
-                            .withColumn("notification_sent_on", current_timestamp()) \
-                            .withColumn("data_generated_on", current_timestamp())
+                successDF = eligibleUsersDF.withColumn("notification_status", lit(200)) \
+                    .withColumn("notification_sent_on", current_timestamp()) \
+                    .withColumn("data_generated_on", current_timestamp()) \
+                    .withColumn("first_completed_on", date_format(col("firstCompletedOn_date"), "yyyy-MM-dd'T'HH:mm:ss.SSS'Z'")) \
+                    .withColumn("response_body", lit("Saved to local file system as API based notification is disabled")) \
+                        .select(
+                        "user_id",
+                        "form_id",
+                        "course_id",
+                        "first_completed_on",
+                        "notification_status",
+                        "notification_sent_on",
+                        "response_body",
+                        "data_generated_on"
+                    )
 
-            successDF = successDF.join(
-                eligibleUsersDF.select(
-                    col("userID").alias("user_id"), 
-                    col("formId").alias("form_id"), 
-                    col("first_trigger_end")
-                ),
+    
+            successDF = successDF.alias("su").join(
+                eligibleUsersDF.alias("eu").select("user_id","form_id","first_trigger_end"),
                 on=["user_id", "form_id"],
                 how="inner"
+            ).withColumn(
+            "response_body",
+            when(col("response_body").isNull(), lit("Saved to local file system as API based notification is disabled"))
+            .otherwise(col("response_body"))
+            ).select(
+                "user_id",
+                "form_id",
+                "course_id",
+                col("first_completed_on").cast("timestamp"),
+                "notification_status",
+                "notification_sent_on",
+                "response_body",
+                col("first_trigger_end").cast("timestamp"),
+                col("data_generated_on").cast("timestamp")
+
             )
             self.write_postgres_table(successDF,self.config.dwnotifiedUsersTable,mode="append")
 
@@ -170,7 +208,7 @@ class PeerValidationNotificationSender:
 
             if successDF.count() > 0:
                 newStateUpdatesDF = successDF.select(
-                    col("formId").alias("form_id"),
+                    "form_id",
                     col("first_trigger_end").alias("last_processed_date")
                 ).distinct() \
                 .withColumn("data_generated_at", current_timestamp())
