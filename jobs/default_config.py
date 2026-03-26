@@ -180,13 +180,13 @@ DEFAULT_CONFIG = {
     #Peer Validation Configuration
     'notificationBatchSize': 100,
     'apiBasedNotificationEnabled': False,
-    'notificationAPIURL': 'http://10.175.3.100/cb-notification/v1/notifications/bulk/create/peervalidation',
+    'notificationAPIURL': '',
     
 
     # Gamification  Configuration
     'gamificationNotificationEligibilityDays': 7,
     'gamificationNotificationBatchSize': 100,
-    'gamificationNotificationEndpoint' : 'http://10.175.3.100/cb-notification/v1/notifications/bulk/create/peervalidation',
+    'gamificationNotificationEndpoint' : '',
 
     # Communications Console Configuration
     'commsConsolePrarambhEmailSuffix': '.kb@karmayogi.in',
