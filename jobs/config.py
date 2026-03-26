@@ -91,6 +91,7 @@ DATABASE_CONFIG = {
     'mlMongoDatabase': '{{ dashboards_mongo_survey_observation_db }}',
     'surveyCollection': '{{ dashboards_mongo_survey_collection }}',
     'reportConfigCollection': '{{ dashboards_mongo_report_config_collection }}',
+
 }
 
 # Spark Configuration
@@ -121,6 +122,11 @@ STORAGE_CONFIG = {
     'dpRawTelemetryBackupLocation': '{{ dp_raw_telemetry_backup_location }}',
 }
 
+API_CONFIG = {
+    'notificationAPIURL': '{{ notification_api_url }}',
+    'gamificationNotificationEndpoint': '{{ gamification_notification_endpoint }}',
+}
+
 # Report Path Configuration
 REPORT_PATHS = {
     'userReportPath': '{{ user_report_path }}',
@@ -128,6 +134,7 @@ REPORT_PATHS = {
     'courseReportPath': '{{ course_report_path }}',
     'cbaReportPath': '{{ cba_report_path }}',
     'standaloneAssessmentReportPath': '{{ standalone_assessment_report_path }}',
+    'gamificationReportPath': '{{ gamification_report_path }}',
     'taggedUsersPath': '{{ tagged_users_path }}',
     'blendedReportPath': '{{ blended_report_path }}',
     'orgHierarchyReportPath': '{{ org_hierarchy_report_path }}',
@@ -140,10 +147,12 @@ REPORT_PATHS = {
     'bqScriptPath': '{{ bq_script_path }}',
 }
 
+
 # Kafka/Messaging Configuration
 KAFKA_CONFIG = {
     'brokerList': '{{ brokerlist }}',
     'topic': '{{ topic }}',
+    'peerValidationKafkaTopic' : '{{ peerValidationKafkaTopic }}',
     'compression': '{{ dashboards_broker_compression }}',
     
     # Side Output Topics
@@ -279,6 +288,7 @@ def get_config():
     config.update(KAFKA_CONFIG)
     config.update(JOB_CONFIG)
     config.update(EXTERNAL_SERVICES)
+    config.update(API_CONFIG)
     return config
 
 # Environment-specific overrides

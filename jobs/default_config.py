@@ -80,11 +80,10 @@ DEFAULT_CONFIG = {
     'dwNLWUserLeaderboardTable': 'nlw_user_leaderboard',
     'dwAparCBPEnrollmentTable': 'apar_cbp_enrollment',
     'dwCourseCompletionSurveryTable': 'course_completion_survey_details',
-    'dwnotifiedUsersTable': 'peer_validation_notifications_success',
-    'dwfailednotifiedUsersTable': 'peer_validation_notification_failure',
+    'dwpeerValidationNotificationQueue': 'peer_validation_notification_queue',
     'dwpeerValidationFormStateTable': 'peer_validation_form_state',
     'dwcourseReminderStateTable' : 'gamification_course_state',
-    'dwnotificationQueue' : 'notification_queue',
+    'dwnotificationQueue' : 'gamification_notification_queue',
 
     # Cassandra Keyspaces
     'cassandraUserKeyspace': 'sunbird',
@@ -166,7 +165,6 @@ DEFAULT_CONFIG = {
     'commsConsoleReportPath': 'standalone-reports/comms-console',
     'validationReportPath': 'standalone-reports/validation-report',
     'courseCompletionSurveyPath': 'standalone-reports/course-completion-survey-report',
-    "peerValidationAPIPath" : 'standalone-reports/peer-validation-notifications',
 
     'blendedProgramReport' : 'BlendedProgramReport.csv',
     'cbaReport' : 'UserAssessmentReport.csv',
@@ -182,13 +180,13 @@ DEFAULT_CONFIG = {
     #Peer Validation Configuration
     'notificationBatchSize': 100,
     'apiBasedNotificationEnabled': False,
-    'notificationAPIURL': "http://10.175.2.100/cb-notification/v1/notifications/bulk/create/peervalidation",
-    'peerValidationKafkaTopic': 'dev-peer-survey-notification-sent',
+    'notificationAPIURL': 'http://10.175.3.100/cb-notification/v1/notifications/bulk/create/peervalidation',
+    
 
     # Gamification  Configuration
     'gamificationNotificationEligibilityDays': 7,
     'gamificationNotificationBatchSize': 100,
-    'gamificationNotificationEndpoint' : "http://10.175.2.100/cb-notification/v1/notifications/bulk/create/peervalidation",
+    'gamificationNotificationEndpoint' : 'http://10.175.3.100/cb-notification/v1/notifications/bulk/create/peervalidation',
 
     # Communications Console Configuration
     'commsConsolePrarambhEmailSuffix': '.kb@karmayogi.in',
@@ -226,8 +224,8 @@ DEFAULT_CONFIG = {
     'kcmSyncPath': 'standalone-reports/merged/kcm/',
     'unifiedParquetPath': 'airflowData/',
     'unifiedParquetLocalPath': '/home/analytics/pyspark/warehouse/unified/',
-    'directoriesToSelect': ["blended-program-report-mdo","cbp-report-mdo-summary","course-report","cba-report","cbp-report-mdo-enrolment","user-report","user-enrollment-report"],
-    'pysparkDirectoriesToSelect': ["blended-program-report-mdo","cbp-report-mdo-summary","course-report","cba-report","cbp-report-mdo-enrolment","user-report","user-enrollment-report"],
+    'directoriesToSelect': ["blended-program-report-mdo","gamification-report","cbp-report-mdo-summary","course-report","cba-report","cbp-report-mdo-enrolment","user-report","user-enrollment-report"],
+    'pysparkDirectoriesToSelect': ["blended-program-report-mdo","gamification-report","cbp-report-mdo-summary","course-report","cba-report","cbp-report-mdo-enrolment","user-report","user-enrollment-report"],
     'pysparkCBPDirectoriesToSelect': ["blended-program-report-cbp","user-assessment-report-cbp", "course-completion-survey-report"],
     'googleServiceAccountFilePath': '/home/analytics/pyspark/jobs/gcp_service_account.json',
     'gcpBucket': 'igotproddp',
@@ -246,6 +244,7 @@ DEFAULT_CONFIG = {
     # Kafka/Messaging Configuration
     'brokerList': '192.168.3.249:9092',
     'topic': 'dev.dashboard.default',
+    'peerValidationKafkaTopic': 'dev-peer-survey-notification-sent',
     'compression': 'none',
 }
 

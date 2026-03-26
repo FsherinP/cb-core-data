@@ -25,18 +25,18 @@ class GamificationNotificationConsumer:
     def process_batch(self, conn):
         
         cursor = conn.cursor()
-        query = """
-            UPDATE notification_queue 
+        query = f"""
+            UPDATE {self.config.dwnotificationQueue} 
             SET status = 'PROCESSING', updated_at = NOW()
-            WHERE id IN (
-                SELECT id FROM notification_queue 
+            WHERE notification_id IN (
+                SELECT notification_id FROM {self.config.dwnotificationQueue}
                 WHERE event_type = 'gamification' 
                 AND status = 'PENDING'
                 ORDER BY created_at ASC 
                 LIMIT %s
-                FOR UPDATE
+                FOR UPDATE SKIP LOCKED
             )
-            RETURNING id, user_id, payload;
+            RETURNING notification_id, user_id, payload;
         """
         cursor.execute(query, (self.config.gamificationNotificationBatchSize,))
         rows = cursor.fetchall()
@@ -46,20 +46,20 @@ class GamificationNotificationConsumer:
         
         success_count = 0
         for row in rows:
-            (id, user_id, payload) = row
+            (notification_id, user_id, payload) = row
             try:
                 response = requests.post(self.config.gamificationNotificationEndpoint, json=payload, timeout=300)
                 if response.status_code == 200:
-                    cursor.execute("""UPDATE notification_queue SET status = 'SENT', updated_at = NOW() WHERE id = %s""", (id,))
+                    cursor.execute(f"""UPDATE {self.config.dwnotificationQueue} SET status = 'SENT', error_message = %s, updated_at = NOW() WHERE notification_id = %s""", (response.text, notification_id))
                     success_count += 1
                 else:
                     cursor.execute(
-                        "UPDATE notification_queue SET status = 'FAILED', error_message = %s, updated_at = NOW() WHERE id = %s", 
-                        (response.text, id)
+                        f"UPDATE {self.config.dwnotificationQueue} SET status = 'FAILED', error_message = %s, updated_at = NOW() WHERE notification_id = %s",
+                        (response.text, notification_id)
                     )
 
             except Exception as e:
-                cursor.execute("""UPDATE notification_queue SET status = 'FAILED', error_message = %s, updated_at = NOW() WHERE id = %s""", (str(e), id))
+                cursor.execute(f"""UPDATE {self.config.dwnotificationQueue} SET status = 'FAILED', error_message = %s, updated_at = NOW() WHERE notification_id = %s""", (str(e), notification_id))
         conn.commit()
         return success_count
 def main():
