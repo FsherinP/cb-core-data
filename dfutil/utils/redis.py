@@ -338,6 +338,12 @@ class Redis:
         # Collect DataFrame as list of rows and convert to dictionary
         rows = df.select(keyField, valueField).collect()
         return {str(row[keyField]): str(row[valueField]) for row in rows}
+
+    def dispatchDataFrameList(self, redisKey: str, df: DataFrame, keyField: str, valueFields: list, replace: bool = True, conf=None):
+        """"Convert DataFrame to map with multiple columns"""
+        rows = df.select([keyField] + valueFields).collect()
+        dfMap = {str(row[keyField]): json.dumps({field: row[field] for field in valueFields}) for row in rows}
+        self.dispatch(redisKey, dfMap, replace, conf)
     
     def emptySchemaDataFrame(self, schema: StructType, spark: SparkSession) -> DataFrame:
         """Create empty DataFrame with given schema"""

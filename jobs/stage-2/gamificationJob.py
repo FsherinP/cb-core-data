@@ -1,14 +1,19 @@
+import os
+
 import findspark
-from duckdb.experimental.spark.sql.functions import current_date
+from duckdb.experimental.spark.sql.functions import current_date, broadcast
+from pyspark import StorageLevel
+from pyspark.sql.types import *
 
 findspark.init()
 import sys
 from pathlib import Path
 from pyspark.sql import SparkSession, Window
+from pyspark.sql import functions as F
 from pyspark.sql.functions import (
-    col, when, coalesce, lit,current_date, expr, to_date,
-    current_timestamp, date_format, from_unixtime, concat_ws, from_json, explode, trim, length, first, countDistinct,
-    rank, to_timestamp, date_sub, dense_rank
+    col, when, lit, current_date, expr, to_date, explode_outer, size,
+    current_timestamp, from_unixtime, countDistinct,
+    rank, to_timestamp, date_sub, dense_rank, trunc, add_months, date_format
 )
 import time
 from datetime import datetime
@@ -21,6 +26,7 @@ from constants.ParquetFileConstants import ParquetFileConstants
 from jobs.default_config import create_config
 from jobs.config import get_environment_config
 from dfutil.utils.redis import Redis
+from dfutil.dfexport import dfexportutil
 
 
 # Initialize Spark
@@ -30,124 +36,356 @@ spark = SparkSession.builder \
     .config("spark.driver.memory", "15g") \
     .config("spark.sql.caseSensitive", "true") \
     .config("spark.sql.shuffle.partitions", "64") \
+    .config("spark.sql.adaptive.enabled", "true") \
     .config("spark.sql.legacy.timeParserPolicy", "LEGACY") \
     .getOrCreate()
 
 print("✅ Spark Session initialized")
 
 
+def build_metric_df(spark, metric_name, total, prev, curr):
+    if prev == 0:
+        if curr > 0:
+            trend = "INCREASED",
+            count_rate = 100.0
+        else:
+            trend = "NO_CHANGE",
+            count_rate = 0.0
+    else:
+        count_rate = ((curr - prev) / prev) * 100
+        if curr > prev:
+            trend = "INCREASED"
+        elif curr < prev:
+            trend = "DECREASED"
+        else:
+            trend = "NO_CHANGE"
+    return spark.createDataFrame([Row(
+        metric=metric_name,
+        totalCount=total,
+        countRate=count_rate,
+        trend=trend
+    )])
+
 def processGamificationJob(config):
 
     try:
         start_time = time.time()
+        currentDateTime = date_format(current_timestamp(), ParquetFileConstants.DATE_TIME_WITH_AMPM_FORMAT)
 
-        # Step 1: Load User Master Data
-        print("📊 Step 1: Loading User Master Data...")
-        user_master_df = spark.read.parquet(ParquetFileConstants.USER_ORG_COMPUTED_FILE)
-        print("✅ Step 1 Complete")
-
-        # Step 2: Load Enrolment Data
-        print("📚 Step 2: Loading Enrolment Data...")
+        # Step 1: Load Enrolment Data
+        print("📚 Step 1: Loading Enrolment Data...")
         enrolment_df = spark.read.parquet(ParquetFileConstants.ENROLMENT_COMPUTED_PARQUET_FILE)
 
         user_enrolment_df = (enrolment_df
-                             .withColumn("badge_details", explode("issued_badges"))
+                             .withColumn("badge_details", explode_outer("issued_badges"))
                              .select("userID","courseID", "dbCompletionStatus", "certificateID",
-                                     col("badge_details")["badgeid"].alias("badge_id"),
-                                     col("badge_details")["criteria"].alias("badge_criteria"),col("badge_details")["issuedOn"].alias("badge_issued_on"))
-                             .withColumn("badge_issued_ts", to_timestamp(col("badge_issued_on"), "yyyy-MM-dd'T'HH:mm:ss.SSSZ"))
+                                     col("badge_details")["badgeId"].alias("badge_id"),
+                                     col("badge_details")["criteria"].alias("badge_criteria_enrolment"),
+                                     col("badge_details")["issuedOn"].alias("badge_issued_on"))
+                             .withColumn("badge_issued_ts", to_date(to_timestamp(col("badge_issued_on"), "yyyy-MM-dd'T'HH:mm:ss.SSSZ")))
                              )
+        external_enrolment_df = (spark.read.parquet(ParquetFileConstants.EXTERNAL_ENROLMENT_COMPUTED_PARQUET_FILE)
+                                 .withColumn("badge_details", explode_outer("issued_badges"))
+                                 .withColumn("certificateID",
+                                             when(col("issued_certificates").isNull(), "")
+                                             .otherwise(col("issued_certificates")[size(col("issued_certificates")) - 1]["identifier"]))
+                                 .withColumnRenamed("content_id", "courseID")
+                                 .withColumnRenamed("userid", "userID")
+                                 .withColumnRenamed("status", "dbCompletionStatus")
+                                 .select("userID","courseID", "dbCompletionStatus", "certificateID",
+                                         col("badge_details.badgeId").alias("badge_id"),
+                                         col("badge_details.criteria").alias("badge_criteria_enrolment"),
+                                         col("badge_details.issuedOn").alias("badge_issued_on"))
+                                 .withColumn("badge_issued_ts", to_date(to_timestamp(col("badge_issued_on"), "yyyy-MM-dd'T'HH:mm:ss.SSSZ"))))
+        enrolment_complete_data = user_enrolment_df.unionByName(external_enrolment_df)
+        enrolment_complete_data.cache(StorageLevel.MEMORY_AND_DISK)
+        enrolment_complete_data.count()
+        print("✅ Step 1 Complete")
+
+        # Step 2: Load External Content Data
+        print("📚 Step 2: Loading External Content Data...")
+        external_content_data = (spark.read.parquet(ParquetFileConstants.EXTERNAL_CONTENT_COMPUTED_PARQUET_FILE)
+                                 .filter(col("badge").isNotNull())
+                                 #.withColumn("parsed", from_json(col("cios_data"), schema))
+                                 .withColumn("badge", explode_outer(col("badge")))
+                                 .withColumn("badge_earning_date_time", when(col("badge.badgeEarningDateEnabled") == True,
+                                                                             from_unixtime(col("badge.badgeEarningDateTime")/1000)).otherwise(lit(None)))
+                                 .withColumn("is_badge_active", when(col("badge.badgeEarningDateEnabled") == False, True)
+                                             .when((col("badge.badgeEarningDateEnabled") == True) & (col("badge_earning_date_time").isNotNull()) &
+                                                   (col("badge_earning_date_time") >= current_timestamp()), True).otherwise(False))
+                                 .select("content_id","is_badge_active", col("badge.badgeId").alias("badge_id"),
+                                         col("badge.criteria").alias("badge_criteria_content"),
+                                         col("badge.badgeTitle").alias("badge_title"),col("courseName"),
+                                         to_date(to_timestamp(col("badge.createdOn"), "yyyy-MM-dd'T'HH:mm:ss.SSSX")).alias("badge_created_date_time"),
+                                         col("badge.badgeSubTitle").alias("badge_sub_title"), col("badge.badgeEarningDateTime").alias("badge_earning_date"))
+                                 )
         print("✅ Step 2 Complete")
 
-        # Step 3: Load Content Data from ES
-        print("📖 Step 3: Loading Content Data...")
+        # Step 3: Load Content Badges data
+        print("🏷️ Step 3: Loading Content Badges data...")
         es_content_data = spark.read.parquet(ParquetFileConstants.ALL_COURSE_PROGRAM_COMPUTED_PARQUET_FILE)
+        badge_data = (es_content_data
+                      .filter(col("badgeDetails_v1").isNotNull())
+                      .withColumn("badge_details", explode_outer("badgeDetails_v1"))
+                      .withColumn("badge_earning_date_time", from_unixtime(col("badge_details.badgeEarningDateTime")/1000))
+                      .withColumn("is_badge_active", when(col("badge_details.badgeEarningDateEnabled") == False, True)
+                                  .when((col("badge_details.badgeEarningDateEnabled") == True) & (col("badge_earning_date_time").isNotNull()) &
+                                        (col("badge_earning_date_time") >= current_timestamp()), True).otherwise(False))
+                      .select(
+                            col("courseID").alias("content_id"),
+                            col("is_badge_active"),
+                            col("badge_details.badgeId").alias("badge_id"),
+                            col("badge_details.criteria").alias("badge_criteria_content"),
+                            col("badge_details.badgeTitle").alias("badge_title"),col("courseName"),
+                            to_date(to_timestamp(col("badge_details.createdOn"), "yyyy-MM-dd'T'HH:mm:ss.SSSX")).alias("badge_created_date_time"),
+                            col("badge_details.badgeSubTitle").alias("badge_sub_title"), col("badge_details.badgeEarningDateTime").alias("badge_earning_date")
+            )
+        )
+        content_badge_complete_data = badge_data.unionByName(external_content_data)
         print("✅ Step 3 Complete")
 
-        # Step 4: Load Badges data
-        print("🏷️ Step 4: Loading Badges data...")
-        primary_categories= ["Course", "Program", "Blended Program", "CuratedCollections", "Curated Program"]
-        badge_data = (es_content_data
-                      .filter(col("category").isin(primary_categories))
-                      .withColumn("badge_details", explode("badgeDetails_v1"))
-                      .select(
-            col("courseID").alias("content_id"),
-            col("category"),
-            col("badge_details.badgeEarningDateTime").alias("badge_earning_date_time"),
-            col("badge_details.badgeId").alias("badge_id"),
-            col("badge_details.criteria").alias("badge_criteria"),
-            col("badge_details.badgeTitle").alias("badge_title"),
-            col("badge_details.badgeSubTitle").alias("badge_sub_title")
-        ).withColumn("badge_earning_date_time", from_unixtime(col("badge_earning_date_time")/1000))
-                      .filter(col("badge_id").isNotNull())
-                      )
+        # Step 4: Join User Enrolment and Badge Data
+        print("🔗 Step 4: Joining User Enrolment and Badge Data...")
+        enrolment_content_with_badge_data = (enrolment_complete_data.withColumnRenamed("courseID", "content_id").withColumnRenamed("badge_id", "enrolment_badge_id")
+                                             .join(broadcast(content_badge_complete_data), on="content_id", how="left"))
+        enrolment_content_with_badge_data.cache()
+        enrolment_content_with_badge_data.count()
+        enrolment_content_with_badge_data.write.mode("overwrite").option("compression", "snappy").parquet(ParquetFileConstants.GAMIFICATION_BADGE_USER_ENROLMENT_PARQUET_FILE)
         print("✅ Step 4 Complete")
 
-        # Step 5: Join User Enrolment and Badge Data
-        print("🔗 Step 5: Joining User Enrolment and Badge Data...")
-        enrolment_content_with_badge_data = (user_enrolment_df.withColumnRenamed("courseID", "content_id").withColumnRenamed("badge_id", "enrolment_badge_id")
-                                             .join(badge_data, on="content_id", how="left"))
+        current_month_start = trunc(current_date(), "month")
+        previous_month_start = trunc(add_months(current_date(), -1), "month")
+
+        # Step 5: Add Total Badges and Live Badges Metrics
+        print("📊 Step 5: Adding Total Badges and Live Badges Metrics...")
+        badge_related_data_metrics = content_badge_complete_data.select(
+            # -------------------------------
+            # Total badges
+            # -------------------------------
+            F.countDistinct("badge_id").alias("total_badges"),
+            F.countDistinct(F.when(
+                (col("badge_created_date_time") >= previous_month_start) &
+                (col("badge_created_date_time") < current_month_start), col("badge_id")
+            )).alias("total_badges_previous_month"),
+            F.countDistinct(F.when(
+                col("badge_created_date_time") >= current_month_start , col("badge_id")
+            )).alias("total_badges_current_month"),
+
+            # -------------------------------
+            # Total live badges
+            # -------------------------------
+            F.countDistinct(F.when(col("is_badge_active") == True, col("badge_id"))).alias("total_live_badges"),
+            F.countDistinct(F.when(
+                (col("is_badge_active") == True) &
+                (col("badge_created_date_time") >= previous_month_start) &
+                (col("badge_created_date_time") < current_month_start), col("badge_id")
+            )).alias("total_live_badges_previous_month"),
+            F.countDistinct(F.when(
+                (col("is_badge_active") == True) &
+                (col("badge_created_date_time") >= current_month_start) , col("badge_id")
+            )).alias("total_live_badges_current_month")
+        ).collect()[0]
+
+        # -------------------------------
+        # Total badges
+        # -------------------------------
+        total_badges = badge_related_data_metrics["total_badges"]
+        total_badges_previous_month = badge_related_data_metrics["total_badges_previous_month"]
+        total_badges_current_month = badge_related_data_metrics["total_badges_current_month"]
+        total_badges_metric = build_metric_df(spark, "total_badges", total_badges, total_badges_previous_month, total_badges_current_month)
+        Redis.dispatchDataFrameList("dashboard_all_course_badge_count_last_month_diff",
+                                    total_badges_metric, "metric", ["totalCount", "countRate", "trend"],  conf = config)
+
+        # -------------------------------
+        # Total live badges
+        # -------------------------------
+        total_live_badges = badge_related_data_metrics["total_live_badges"]
+        total_live_badges_previous_month = badge_related_data_metrics["total_live_badges_previous_month"]
+        total_live_badges_current_month = badge_related_data_metrics["total_live_badges_current_month"]
+        total_live_badges_metric = build_metric_df(spark, "total_live_badges", total_live_badges, total_live_badges_previous_month, total_live_badges_current_month)
+        Redis.dispatchDataFrameList("dashboard_live_course_badge_count_last_month_diff",
+                                    total_live_badges_metric, "metric", ["totalCount", "countRate", "trend"], conf = config)
         print("✅ Step 5 Complete")
 
-        # Step 6: Add Total Badges Metric
-        print("📊 Step 6: Adding Total Badges Metric...")
-        total_badges = badge_data.select("badge_id").distinct().count()
-        Redis.update("dashboard_all_course_badge_count", str(total_badges), conf = config)
+        # Step 6: Add Enrolment Related Metrics
+        print("✨ Step 6: Adding Enrolment Related Metrics...")
+        enrolment_related_metrics = enrolment_content_with_badge_data.select(
+            # -------------------------------
+            # Total badges awarded
+            # -------------------------------
+            F.count(F.when(col("enrolment_badge_id").isNotNull(), col("enrolment_badge_id"))).alias("total_badges_awarded"),
+            F.sum(F.when(
+                (col("badge_issued_ts") >= previous_month_start) &
+                (col("badge_issued_ts") < current_month_start), 1)
+                  .otherwise(0)).alias("total_badges_awarded_previous_month"),
+            F.sum(F.when(
+                col("badge_issued_ts") >= current_month_start, 1
+            ).otherwise(0)).alias("total_badges_awarded_current_month"),
+
+            # -------------------------------
+            # Active Learners
+            # -------------------------------
+            F.countDistinct(F.when(
+                (col("dbCompletionStatus") == 1) & (col("badge_id").isNotNull()), col("userID")
+            )).alias("active_learners"),
+            F.countDistinct(F.when(
+                (col("dbCompletionStatus") == 1) &
+                (col("badge_id").isNotNull()) &
+                (col("badge_issued_ts") >= previous_month_start) &
+                (col("badge_issued_ts") < current_month_start), col("userID")
+            )).alias("active_learners_previous_month"),
+            F.countDistinct(F.when(
+                (col("dbCompletionStatus") == 1) &
+                (col("badge_id").isNotNull()) &
+                (col("badge_issued_ts") >= current_month_start), col("userID")
+            )).alias("active_learners_current_month"),
+
+            # -------------------------------
+            # Badge earned learners
+            # -------------------------------
+            F.countDistinct(F.when(
+                (col("dbCompletionStatus") == 2) & (col("enrolment_badge_id").isNotNull()), col("userID")
+            )).alias("badge_earned_learners"),
+            F.countDistinct(F.when(
+                (col("dbCompletionStatus") == 2) &
+                (col("enrolment_badge_id").isNotNull()) &
+                (col("badge_issued_ts") >= previous_month_start) &
+                (col("badge_issued_ts") < current_month_start),  col("userID")
+            )).alias("badge_earned_learners_previous_month"),
+            F.countDistinct(F.when(
+                (col("dbCompletionStatus") == 2) &
+                (col("enrolment_badge_id").isNotNull()) &
+                (col("badge_issued_ts") >= current_month_start),  col("userID")
+            )).alias("badge_earned_learners_current_month")
+        ).collect()[0]
+
+        # -------------------------------
+        # Total badges awarded
+        # -------------------------------
+        total_badges_awarded = enrolment_related_metrics["total_badges_awarded"]
+        total_badges_awarded_previous_month = enrolment_related_metrics["total_badges_awarded_previous_month"]
+        total_badges_awarded_current_month = enrolment_related_metrics["total_badges_awarded_current_month"]
+        total_badges_awarded_diff = build_metric_df(spark, "badges_awarded", total_badges_awarded, total_badges_awarded_previous_month, total_badges_awarded_current_month)
+        Redis.dispatchDataFrameList("dashboard_total_badge_awarded_count_last_month_diff",
+                                    total_badges_awarded_diff,"metric",["totalCount", "countRate", "trend"], conf = config)
+
+        # -------------------------------
+        # Active Learners
+        # -------------------------------
+        active_learners = enrolment_related_metrics["active_learners"]
+        active_learners_previous_month = enrolment_related_metrics["active_learners_previous_month"]
+        active_learners_current_month = enrolment_related_metrics["active_learners_current_month"]
+        active_learners_diff = build_metric_df(spark, "active_learners_diff", active_learners, active_learners_previous_month, active_learners_current_month)
+        Redis.dispatchDataFrameList("dashboard_active_learners_for_badge_courses_count_last_month_diff",
+                                    active_learners_diff, "metric", ["totalCount", "countRate", "trend"],conf = config)
+
+        # -------------------------------
+        # Badge earned learners
+        # -------------------------------
+        badge_earned_learners = enrolment_related_metrics["badge_earned_learners"]
+        badge_earned_learners_previous_month = enrolment_related_metrics["badge_earned_learners_previous_month"]
+        badge_earned_learners_current_month = enrolment_related_metrics["badge_earned_learners_current_month"]
+        badge_earning_rate = (badge_earned_learners / active_learners * 100) if active_learners > 0 else 0
+        badge_earning_rate_previous_month = (badge_earned_learners_previous_month / active_learners_previous_month * 100) if active_learners_previous_month > 0 else 0
+        badge_earning_rate_current_month = (badge_earned_learners_current_month / active_learners_current_month * 100) if active_learners_current_month > 0 else 0
+        badge_earning_rate_diff = build_metric_df(spark, "badge_earned_learners", badge_earning_rate, badge_earning_rate_previous_month, badge_earning_rate_current_month)
+        Redis.dispatchDataFrameList("dashboard_badge_earning_rate_last_month_diff",
+                                    badge_earning_rate_diff,"metric", ["totalCount", "countRate", "trend"], conf = config)
         print("✅ Step 6 Complete")
 
-        # Step 7: Add Total Live Badges Metric
-        print("✨ Step 7: Adding Total Live Badges Metric...")
-        total_live_badges = badge_data.filter(col("badge_earning_date_time") >= current_timestamp()).select("badge_id").distinct().count()
-        Redis.update("dashboard_live_course_badge_count", str(total_live_badges), conf = config)
+        # Step 7: Create a slim df
+        print("🎯 Step 7: Creating slim df...")
+        slim_df = enrolment_content_with_badge_data.select(
+            "userID",
+            "badge_title",
+            "content_id",
+            "dbCompletionStatus",
+            "certificateID",
+            "enrolment_badge_id"
+        ).cache()
+        slim_df.count()
         print("✅ Step 7 Complete")
 
-        # Step 8: Add Total Badges Awarded Metric
-        print("🎯 Step 8: Adding Total Badges Awarded Metric...")
-        total_badges_awarded = user_enrolment_df.select("badge_id").count()
-        Redis.update("dashboard_total_badge_awarded_count", str(total_badges_awarded), conf = config)
+        # Step 8: Add Badge Performance Rate Metric
+        print("📁 Step 8: Adding Badge Performance Rate Metric...")
+        badge_performance_df = slim_df.filter(col("enrolment_badge_id").isNotNull()).groupBy("enrolment_badge_id","badge_title").agg(countDistinct("userID").alias("user_count"))
+        window_spec = Window.orderBy(col("user_count").desc())
+        badge_performance = badge_performance_df.withColumn("rank", dense_rank().over(window_spec))
+        Redis.dispatchDataFrameList("dashboard_badge_performance_rate", badge_performance, "badge_title", ["rank","user_count"], conf = config)
         print("✅ Step 8 Complete")
 
-        # Step 9: Add Active Learners Metric
-        print("📁 Step 9: Adding Active Learners Metric...")
-        active_learners = (enrolment_content_with_badge_data.filter(col("dbCompletionStatus") == 1)
-                           .select("userID").distinct().count()
-                           )
-        Redis.update("dashboard_active_learners_for_badge_courses_count", str(active_learners), conf = config)
+        # Step 9: Add Content Completion Rate Metric
+        print("🔍 Step 9: Adding Content Completion Rate Metric...")
+        content_data = (slim_df.groupBy("content_id").agg(
+            expr("count(distinct userID)").alias("total_enrolments"),
+            expr("""
+                count(DISTINCT CASE 
+                    WHEN dbCompletionStatus = 2 
+                         AND certificateID IS NOT NULL 
+                         AND enrolment_badge_id IS NOT NULL 
+                    THEN userID 
+                END)
+            """).alias("total_completions_with_badge")
+        ).join(
+            es_content_data.select(col("courseID").alias("content_id"), col("courseName").alias("content_name")), on="content_id", how="inner"
+        ).select(
+            "content_name","total_enrolments","total_completions_with_badge"
+        ).withColumn(
+            "sort_col",
+            F.when(
+                F.max("total_completions_with_badge").over(Window.rowsBetween(Window.unboundedPreceding, Window.unboundedFollowing)) == 0,
+                F.col("total_enrolments")
+            ).otherwise(F.col("total_completions_with_badge"))
+        ).orderBy(F.col("sort_col").desc()).limit(10).drop("sort_col"))
+        Redis.dispatchDataFrameList("dashboard_content_completion_rate",content_data,"content_name", ["total_enrolments", "total_completions_with_badge"],conf = config)
         print("✅ Step 9 Complete")
 
+        # Step 10: Add Gamification MDO report
+        print("🔍 Step 10: Adding Gamification MDO report...")
+        user_master_df = spark.read.parquet(ParquetFileConstants.USER_ORG_COMPUTED_FILE).select(
+            "userID",col("fullName").alias("Learner Name"), col("ministry_name").alias("Ministry"),
+            col("dept_name").alias("Department"), col("userOrgID").alias("Organization ID"))
+        es_data = es_content_data.select("courseID", col("category").alias("Source"))
+        reporting_data = (enrolment_content_with_badge_data.select(
+            col("userID"),
+            col("enrolment_badge_id").alias("Badge ID"),
+            col("badge_title").alias("Badge Title"),
+            col("badge_sub_title").alias("Badge Subtitle"),
+            col("badge_criteria_enrolment").alias("Rule/criteria ID"),
+            col("content_id").alias("courseID"),
+            col("badge_issued_ts").alias("Date and time of award")
+        ).join(user_master_df, on="userID", how="inner")
+                          .join(broadcast(es_data), on="courseID", how="inner")
+                          )
+        reporting_data = (reporting_data
+                          .select("Learner Name", "Badge ID","Badge Title","Badge Subtitle","Rule/criteria ID", "Source", "Date and time of award", "Ministry", "Department", "Organization ID")
+                          .withColumn("Report_Last_Generated_On", currentDateTime)
+                          .repartition(col("Organization ID")).cache())
+        org_ids = [row["Organization ID"] for row in reporting_data.select("Organization ID").distinct().collect()]
+        today = datetime.now().strftime("%Y-%m-%d")
+        base_out = f"{config.gamificationReportPath}/{today}"
 
-        # Step 10: Add Badge Award Rate Metric
-        print("🔍 Step 10: Adding Badge Award Rate Metric...")
-        badge_earned_learners = enrolment_content_with_badge_data.filter(col("dbCompletionStatus") == 2).select("userID").distinct().count()
-        badge_earning_rate = (badge_earned_learners / active_learners * 100) if active_learners > 0 else 0
-        Redis.update("dashboard_badge_award_rate", str(badge_earning_rate), conf = config)
+        for org_id in org_ids:
+            org_df = reporting_data.filter(col("Organization ID") == org_id)
+
+            out_path = f"{config.localReportDir}/{base_out}/mdoid={org_id}"
+            csv_file_path = f"{out_path}/GamificationReport.csv"
+
+            os.makedirs(out_path, exist_ok=True)
+
+            dfexportutil.write_single_csv_duckdb(
+                df=org_df,
+                output_path=csv_file_path,
+                parquet_tmp_path=f"{out_path}/temp_parquet_{org_id}",
+                keep_parquets=False
+            )
+
+        print(f"✅ Written MDO: {org_id}")
         print("✅ Step 10 Complete")
-
-        # Step 11: Add Badge Performance Rate Metric
-        print("🔍 Step 11: Adding Badge Performance Rate Metric...")
-        window_spec = Window.orderBy(col("user_count").desc())
-        badge_performance = (enrolment_content_with_badge_data
-                             .groupBy("badge_title")
-                             .agg(countDistinct("userID").alias("user_count"))
-                             .withColumn("rank", dense_rank().over(window_spec))
-                             .select("badge_title","user_count", "rank"))
-        Redis.dispatchDataFrame("dashboard_badge_performance_rate", badge_performance, "badge_title", "rank", conf = config)
-        print("✅ Step 11 Complete")
-
-        # Step 12: Add Content Completion Rate Metric
-        print("🔍 Step 12: Adding Content Completion Rate Metric...")
-        content_data = (enrolment_content_with_badge_data
-                        .groupBy("content_id")
-                        .agg(
-            expr("count(distinct userID)").alias("total_enrolments"),
-            expr("""countDistinct(when(count(distinct case (col("dbCompletionStatus")) == 2 & when dbCompletionStatus = 2 (col("certificateID").isNotNull()) & and certificateID is not null 
-                (col("badge_id").isNotNull()), col("userID")).alias("total_completions_with_badge"))
-                and badge_id is not null then userID end)""").alias("total_completions_with_badge")
-        ).join(es_content_data.select(col("courseID").alias("content_id"), col("courseName").alias("content_name")), on="content_id", how="inner")
-                        .select("content_name","total_enrolments","total_completions_with_badge")
-                        )
-        Redis.dispatchDataFrame("dashboard_content_completion_rate", content_data, "content_name", "total_enrolments",conf = config)
-        print("✅ Step 12 Complete")
+        reporting_data.unpersist()
+        enrolment_complete_data.unpersist(blocking=True)
+        enrolment_content_with_badge_data.unpersist(blocking=True)
+        slim_df.unpersist()
 
     except Exception as e:
         print(f"\n❌ Error occurred: {str(e)}")
@@ -158,11 +396,11 @@ def main():
     config_dict = get_environment_config()
     config = create_config(config_dict)
     start_time = datetime.now()
-    print(f"[START] UserReport processing started at: {start_time.strftime('%Y-%m-%d %H:%M:%S')}")
+    print(f"[START] Gamification processing started at: {start_time.strftime('%Y-%m-%d %H:%M:%S')}")
     processGamificationJob(config)
     end_time = datetime.now()
     duration = end_time - start_time
-    print(f"[END] UserReport completed at: {end_time.strftime('%Y-%m-%d %H:%M:%S')}")
+    print(f"[END] Gamification completed at: {end_time.strftime('%Y-%m-%d %H:%M:%S')}")
     print(f"[INFO] Total duration: {duration}")
     spark.stop()
 

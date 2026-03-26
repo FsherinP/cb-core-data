@@ -81,6 +81,7 @@ class UserEnrolmentModel:
             # Process platform data and cache the result
             df = (
                 UserEnrolmentModel.duration_format(allCourseProgramCompletionWithDetailsDFWithRating, "courseDuration")
+                .withColumn("badge_details", explode_outer("issued_badges"))
                 .withColumn("completedOn",
                             date_format(col("courseCompletedTimestamp"), ParquetFileConstants.DATE_TIME_FORMAT))
                 .withColumn("enrolledOn",
@@ -107,7 +108,7 @@ class UserEnrolmentModel:
             print("🔄 Processing external/marketplace enrolments...")
 
             # Load external data
-            externalEnrolmentDF = spark.read.parquet(ParquetFileConstants.EXTERNAL_ENROLMENT_COMPUTED_PARQUET_FILE)
+            externalEnrolmentDF = spark.read.parquet(ParquetFileConstants.EXTERNAL_ENROLMENT_COMPUTED_PARQUET_FILE).withColumn("badge_details", explode_outer("issued_badges"))
             externalContentOrgDF = spark.read.parquet(ParquetFileConstants.EXTERNAL_CONTENT_COMPUTED_PARQUET_FILE)
 
             # Process marketplace data and cache
@@ -269,6 +270,7 @@ class UserEnrolmentModel:
                 col("userRating").alias("user_rating"),
                 col("certificateID").alias("certificate_id"),
                 col("live_cbp_plan_mandate"),
+                col("badge_details.badgeid").alias("badge_id"),
                 col("data_last_generated_on")
             )
                                       .withColumn("karma_points", lit(0).cast(IntegerType()))
@@ -372,7 +374,8 @@ class UserEnrolmentModel:
                 col("Certificate_ID").alias("certificate_id"),
                 col("live_cbp_plan_mandate"),
                 col("data_last_generated_on"),
-                col("karma_points")
+                col("karma_points"),
+                col("badge_details")["badgeid"].alias("badge_id"),
             )
                                    .fillna(0, subset=["karma_points"])
                                    .dropDuplicates(["user_id", "batch_id", "content_id"])
@@ -395,7 +398,7 @@ class UserEnrolmentModel:
             )
 
             print("📦 Writing warehouse data...")
-            warehouseDF = platformWarehouseDF.union(marketPlaceWarehouseDF)
+            warehouseDF = platformWarehouseDF.unionByName(marketPlaceWarehouseDF)
             warehouseDF.coalesce(1).write.mode("overwrite").option("compression", "snappy").parquet(
                 f"{config.warehouseReportDir}/{config.dwEnrollmentsTable}")
 
