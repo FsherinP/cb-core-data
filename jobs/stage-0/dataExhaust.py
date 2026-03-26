@@ -665,7 +665,7 @@ class DataExhaustModel:
             fields = ["formId", "contextId", "contextName", "version", "status", "submittedBy", "submittedDate",
                       "responses"]
             fields_clause = ",".join([f'"{f}"' for f in fields])
-            array_fields = ["responses.answer", "response.question"]
+            array_fields = ["responses.answer", "responses.question"]
             query = f'{{"_source":[{fields_clause}],"query":{{"match_all":{{}}}}}}'
             course_completion_survey_df = utils.read_elasticsearch_data(
                 self.spark,
