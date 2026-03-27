@@ -12,7 +12,7 @@ from pyspark.sql.functions import (
 )
 from pyspark.sql.types import FloatType, IntegerType
 from util import schemas
-from pyspark.sql.window import Window, row_number
+from pyspark.sql.window import Window
 
 
 def print_dataframe_info(df: DataFrame, df_name: str, show_sample: bool = True, sample_rows: int = 5):
