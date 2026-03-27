@@ -8,7 +8,7 @@ from dfutil.user.userDFUtil import exportDFToParquet
 from pyspark.sql import SparkSession, DataFrame
 from pyspark.sql.functions import (
     col, explode_outer, from_json,
-    unix_timestamp, expr, lit, concat_ws, when, coalesce, first, count, row_number,
+    unix_timestamp, expr, lit, concat_ws, when, coalesce, row_number , first, count, sum
 )
 from pyspark.sql.types import FloatType, IntegerType
 from util import schemas
@@ -852,7 +852,7 @@ def parse_raw_assessment_data(spark: SparkSession, config):
         print(f"❌ Error in parse_raw_assessment_data: {str(e)}")
         raise
 
-def write_parquet(self, df: "DataFrame", path: str, partition_cols: list = None, mode: str = "overwrite"):
+def write_parquet(df: "DataFrame", path: str, partition_cols: list = None, mode: str = "overwrite"):
         """Write DataFrame to Parquet with optimization"""
         writer = df.coalesce(16)
 
