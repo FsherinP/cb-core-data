@@ -98,7 +98,7 @@ def processGamificationJob(config):
                                          col("badge_details.issuedOn").alias("badge_issued_on"))
                                  .withColumn("badge_issued_ts", to_date(to_timestamp(col("badge_issued_on"), "yyyy-MM-dd'T'HH:mm:ss.SSSZ"))))
         enrolment_complete_data = user_enrolment_df.unionByName(external_enrolment_df)
-        enrolment_complete_data.cache(StorageLevel.MEMORY_AND_DISK)
+        enrolment_complete_data.cache()
         enrolment_complete_data.count()
         print("✅ Step 1 Complete")
 
@@ -345,7 +345,7 @@ def processGamificationJob(config):
         user_master_df = spark.read.parquet(ParquetFileConstants.USER_ORG_COMPUTED_FILE).select(
             "userID",col("fullName").alias("Learner Name"), col("ministry_name").alias("Ministry"),
             col("dept_name").alias("Department"), col("userOrgID").alias("Organization ID"))
-        es_data = es_content_data.select("courseID", col("category").alias("Source"))
+        es_data = es_content_data.select("courseID", col("category").alias("Source"), col("courseName").alias("Content Name"))
         reporting_data = (enrolment_content_with_badge_data.select(
             col("userID"),
             col("enrolment_badge_id").alias("Badge ID"),
@@ -353,12 +353,18 @@ def processGamificationJob(config):
             col("badge_sub_title").alias("Badge Subtitle"),
             col("badge_criteria_enrolment").alias("Rule/criteria ID"),
             col("content_id").alias("courseID"),
-            col("badge_issued_ts").alias("Date and time of award")
+            col("badge_issued_ts").alias("Date and time of award"),
+            col("badge_id"),
+            when(col("dbCompletionStatus").isNull(), "not-enrolled")
+            .when(col("dbCompletionStatus") == 0, "not-started")
+            .when(col("dbCompletionStatus") == 1, "in-progress")
+            .otherwise("completed")
+            .alias("Content Completion Status")
         ).join(user_master_df, on="userID", how="inner")
                           .join(broadcast(es_data), on="courseID", how="inner")
                           )
-        reporting_data = (reporting_data
-                          .select("Learner Name", "Badge ID","Badge Title","Badge Subtitle","Rule/criteria ID", "Source", "Date and time of award", "Ministry", "Department", "Organization ID")
+        reporting_data = (reporting_data.filter(col("badge_id").isNotNull())
+                          .select("Learner Name","Content Name", "Content Completion Status", "Badge ID","Badge Title","Badge Subtitle","Rule/criteria ID", "Source", "Date and time of award", "Ministry", "Department", "Organization ID")
                           .withColumn("Report_Last_Generated_On", currentDateTime)
                           .repartition(col("Organization ID")).cache())
         org_ids = [row["Organization ID"] for row in reporting_data.select("Organization ID").distinct().collect()]
