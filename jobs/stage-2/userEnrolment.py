@@ -270,7 +270,7 @@ class UserEnrolmentModel:
                 col("userRating").alias("user_rating"),
                 col("certificateID").alias("certificate_id"),
                 col("live_cbp_plan_mandate"),
-                col("badge_details.badgeid").alias("badge_id"),
+                col("badge_details.badgeId").alias("badge_id"),
                 col("data_last_generated_on")
             )
                                       .withColumn("karma_points", lit(0).cast(IntegerType()))
@@ -375,7 +375,7 @@ class UserEnrolmentModel:
                 col("live_cbp_plan_mandate"),
                 col("data_last_generated_on"),
                 col("karma_points"),
-                col("badge_details")["badgeid"].alias("badge_id"),
+                col("badge_details")["badgeId"].alias("badge_id"),
             )
                                    .fillna(0, subset=["karma_points"])
                                    .dropDuplicates(["user_id", "batch_id", "content_id"])
