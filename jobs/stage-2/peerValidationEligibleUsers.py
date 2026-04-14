@@ -225,8 +225,7 @@ class PeerValidationEligibleUsers:
                 col("status").cast("string"),
                 col("error_message").cast("string"),
                 col("payload").cast("string"),
-                col("first_trigger_end").cast("timestamp"),
-                col("data_generated_on").cast("timestamp"),
+                col("first_trigger_end").cast("timestamp"), 
                 col("created_at").cast("timestamp"),
                 col("updated_at").cast("timestamp")
             )
