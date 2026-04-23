@@ -5,7 +5,7 @@ import time
 from pathlib import Path
 from pyspark.sql import DataFrame, SparkSession
 from pyspark.sql.window import Window
-from pyspark.sql.functions import (array, col, concat, concat_ws, current_timestamp, date_format, date_add, md5, struct, to_date,lit,explode, date_sub, size, from_unixtime,when, to_json)
+from pyspark.sql.functions import (array, col, concat, concat_ws, current_timestamp, date_format, date_add, explode_outer, md5, struct, to_date,lit, date_sub, from_unixtime,when, to_json)
 from datetime import datetime
 import sys
 import os
@@ -44,7 +44,7 @@ class PeerValidationEligibleUsers:
             .load()
     
     def write_postgres_table(self, df, table: str, mode: str = "overwrite"):
-            postgres_url = f"jdbc:postgresql://{self.config.dwPostgresHost}/{self.config.dwPostgresSchema}"
+            postgres_url = f"jdbc:postgresql://{self.config.dwPostgresHost}/{self.config.dwPostgresSchema}?stringtype=unspecified"
             df.write \
                 .format("jdbc") \
                 .option("url", postgres_url) \
@@ -91,32 +91,26 @@ class PeerValidationEligibleUsers:
             )
     
     def expand_forms(self, formsDF: DataFrame) -> DataFrame:
-        spv = formsDF.filter(col("is_spv_created") == True) \
-            .withColumn("form_org_id", lit(None)) \
-            .drop("createdFor")
-
-        mdo = formsDF.filter(
-            (col("is_spv_created") == False) & (size(col("createdFor")) > 0)
-        ).withColumn("org", explode(col("createdFor"))) \
-            .withColumn("form_org_id", col("org.orgId")) \
-            .drop("org", "createdFor")
-
-        return spv.union(mdo)
+        return formsDF \
+        .withColumn("org", explode_outer(col("createdFor"))) \
+        .withColumn("form_org_id", col("org.orgId")) \
+        .drop("org")
     
     def add_trigger_windows(self, df: DataFrame) -> DataFrame:
         return df.withColumn('first_trigger_start', when(col('last_processed_date').isNull(), date_sub(col("published_date"), col("max_trigger_days"))) \
                                     .otherwise(date_add(col("last_processed_date"), 1))) \
                 .withColumn('first_trigger_end', when(col('last_processed_date').isNull(), date_sub(col("published_date"), col("min_trigger_days"))) \
                                     .otherwise(date_add(col("last_processed_date"), 1)))
+    
     def compute_eligible_users(self, formsDF: DataFrame, enrolmentDF: DataFrame, userOrgDF: DataFrame, courseDetailsDF: DataFrame) -> DataFrame:
         return  enrolmentDF.join(userOrgDF.alias("org"), on="user_id", how="left") \
                 .join(formsDF.alias("forms"), on="course_id", how="inner") \
             .join(courseDetailsDF.alias("course"), on="course_id", how="left") \
             .filter(
                 (
-                    col("forms.form_org_id").isNull() |
+                    (col("forms.is_spv_created") == True) |
                     (
-                        col("forms.form_org_id").isNotNull() &
+                        (col("forms.is_spv_created") == False) &
                         (col("org.userOrgID") == col("forms.form_org_id"))
                     )
                 ) &
@@ -229,9 +223,8 @@ class PeerValidationEligibleUsers:
                 col("created_at").cast("timestamp"),
                 col("updated_at").cast("timestamp")
             )
-        
-            self.write_postgres_table(eligibleUsersDF, self.config.dwpeerValidationNotificationQueue, mode="append")
             count = eligibleUsersDF.count()
+            self.write_postgres_table(eligibleUsersDF, self.config.dwpeerValidationNotificationQueue, mode="append")
             print(f"Step 8 Complete - {count} notifications inserted into queue.")
             
         except Exception as e:
