@@ -344,7 +344,7 @@ class Redis:
         rows = df.select([keyField] + valueFields).collect()
         dfMap = {str(row[keyField]): json.dumps({field: row[field] for field in valueFields}) for row in rows}
         self.dispatchToKpRedis(redisKey, dfMap, replace, conf)
-
+    
     def emptySchemaDataFrame(self, schema: StructType, spark: SparkSession) -> DataFrame:
         """Create empty DataFrame with given schema"""
         return spark.createDataFrame([], schema)

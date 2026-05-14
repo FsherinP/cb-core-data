@@ -108,7 +108,7 @@ class ACBPModel:
              .withColumn("assignmentTypeInfo", when(col("assignmentType") == "alluser", lit("AllUser")
              ).otherwise(col("assignmentTypeInfo"))) \
              .withColumn("assignmentType", array_join(F.transform(
-                split(col("assignmentType"), "\\|"),
+                split(col("assignmentType"), "\\|"), 
                 lambda x: mapping_expr[trim(x)]),"|"))
 
             # Write to warehouse with mapped names

@@ -420,8 +420,8 @@ class CAPAccessControlModel:
                     u.user_id, ce.cap_id, ce.cap_name, ce.created_by_id,
                     ce.user_group_id, 'service' as matched_type
                 FROM users u
-                INNER JOIN criteria_exploded ce
-                    ON ce.criteria_type        = 'service'
+                INNER JOIN criteria_exploded ce 
+                    ON ce.criteria_type = 'service'
                     AND u.civil_services_lower = ce.criteria_value
                 LEFT JOIN rootorgid_lookup ro
                     ON ro.cap_id        = ce.cap_id
@@ -450,8 +450,8 @@ class CAPAccessControlModel:
                     u.user_id, ce.cap_id, ce.cap_name, ce.created_by_id,
                     ce.user_group_id, 'isoncentraldeputation' as matched_type
                 FROM users u
-                INNER JOIN criteria_exploded ce
-                    ON ce.criteria_type                  = 'isoncentraldeputation'
+                INNER JOIN criteria_exploded ce 
+                    ON ce.criteria_type = 'isoncentraldeputation'
                     AND u.is_on_central_deputation_lower = ce.criteria_value
                 LEFT JOIN rootorgid_lookup ro
                     ON ro.cap_id        = ce.cap_id
@@ -527,16 +527,16 @@ class CAPAccessControlModel:
                         user_group_id,
                         REPLACE(REPLACE(REPLACE(REPLACE(REPLACE(REPLACE(REPLACE(REPLACE(REPLACE(REPLACE(
                             allotment_type,
-                            'rootorgid',            'mdo_id'),
-                            'customuser',           'user_id'),
-                            'alluser',              'user_id'),
-                            'group',                'groups'),
-                            'batch',                'cadre_batch'),
-                            'service',              'civil_services'),
-                            'isprofileverified',    'is_verified_karmayogi'),
-                            'isoncentraldeputation','is_on_central_deputation'),
-                            'profilestatus',        'profile_status'),
-                            'user',                 'user_id'
+                            'rootorgid', 'mdo_id'),
+                            'customuser', 'user_id'),
+                            'alluser', 'user_id'),
+                            'group', 'groups'),
+                            'batch', 'cadre_batch'),
+                            'service', 'civil_services'),
+                            'isprofileverified', 'is_verified_karmayogi'),
+                            'isoncentraldeputation', 'is_on_central_deputation'),
+                            'profilestatus', 'profile_status'),
+                            'user', 'user_id'
                         ) as allotment_type_mapped,
                         allotment_to as allotment_to_mapped
                     FROM read_parquet('{cap_criteria_path}/**.parquet')
@@ -558,7 +558,7 @@ class CAPAccessControlModel:
                     ua.cap_name,
                     ua.created_by_id,
                     dc.allotment_type_mapped as allotment_type,
-                    dc.allotment_to_mapped   as allotment_to
+                    dc.allotment_to_mapped as allotment_to
                 FROM user_allocations ua
                 INNER JOIN users u ON ua.user_id = u.user_id
                 LEFT JOIN cap_allocation_mapped dc

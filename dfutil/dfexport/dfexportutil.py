@@ -614,7 +614,7 @@ def convert_partitioned_parquets_to_csv(parquet_input_dir: str, csv_output_dir: 
 
                 # Get row count
                 row_count = con.execute("SELECT COUNT(*) FROM partition_df").fetchone()[0]
-
+                
                 # Write to CSV
                 con.execute(f"""
                     COPY (
