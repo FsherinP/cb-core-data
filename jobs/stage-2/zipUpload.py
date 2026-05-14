@@ -357,16 +357,16 @@ def main():
     # Initialize Spark Session with optimized settings
     spark = SparkSession.builder \
         .appName("Zip Upload Model") \
-        .config("spark.executor.memory", "42g") \
-        .config("spark.driver.memory", "10g") \
-        .config("spark.sql.shuffle.partitions", "64") \
-        .config("spark.driver.bindAddress", "127.0.0.1") \
+        .config("spark.master", "local[28]") \
+        .config("spark.driver.memory", "180g") \
+        .config("spark.driver.memoryOverhead", "24g") \
+        .config("spark.driver.maxResultSize", "12g") \
+        .config("spark.sql.shuffle.partitions", "224") \
+        .config("spark.sql.files.maxPartitionBytes", "256MB") \
+        .config("spark.sql.adaptive.enabled", "true") \
+        .config("spark.sql.adaptive.coalescePartitions.enabled", "true") \
+        .config("spark.sql.adaptive.skewJoin.enabled", "true") \
         .config("spark.sql.legacy.timeParserPolicy", "LEGACY") \
-        .config("spark.network.timeout", "600s") \
-        .config("spark.executor.heartbeatInterval", "60s") \
-        .config("spark.shuffle.io.connectionTimeout", "300s") \
-        .config("spark.shuffle.io.maxRetries", "20") \
-        .config("spark.shuffle.io.retryWait", "10s") \
         .getOrCreate()
 
     # Create model instance

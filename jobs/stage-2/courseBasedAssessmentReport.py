@@ -76,7 +76,26 @@ class CourseBasedAssessmentModel:
                 .filter(col("assessUserStatus") == "SUBMITTED") \
                 .withColumn("assessStartTime", col("assessStartTimestamp").cast("long")) \
                 .withColumn("assessEndTime", col("assessEndTimestamp").cast("long"))
+            # Window for basic assessment — rank by highest assessPassPercentageOriginal
+            windowBasic = Window.partitionBy("userID", "assessChildID") \
+                .orderBy(col("assessOverallResult").desc())
 
+            # Window for sectional assessment — rank by highest assessTotalSectionMarks
+            windowSectional = Window.partitionBy("userID", "assessChildID") \
+                .orderBy(col("assessTotalSectionMarks").desc())
+
+            userAssessmentDF = userAssessmentDF \
+                .withColumn("rn",
+                            when(
+                                col("assessTotalSectionMarks").isNull(),
+                                row_number().over(windowBasic)      # basic assessment
+                            ).otherwise(
+                                row_number().over(windowSectional)  # sectional assessment
+                            )
+                            ) \
+                .filter(col("rn") == 1) \
+                .drop("rn")
+            print(userAssessmentDF.columns)
             print("Stage 5: Complete")
 
             userAssessChildrenDF = assessmentDFUtil.user_assessment_children_dataframe(userAssessmentDF,
@@ -107,18 +126,26 @@ class CourseBasedAssessmentModel:
             retakesDF = userAssessChildrenDetailsDF.groupBy("assessChildID", "userID").agg(
                 countDistinct("assessStartTime").alias("retakes"))
 
-            # Step 2: Get latest entry per (assessChildID, userID) using row_number()
+            # Step 2: Get highest scored entry per (assessChildID, userID) using row_number()
+            #windowSpec = Window.partitionBy("assessChildID", "userID").orderBy(col("assessEndTimestamp").desc())
+            #userAssessChildDataLatestDF = userAssessChildrenDetailsDF\
+            #.join(retakesDF.select("assessChildID","userID","retakes"),["assessChildID","userID"], "left")
+            #userAssessChildDataLatestDF.printSchema()
+            #userAssessChildDataLatestDF.filter(col("userID") == "745f1095-82ff-41f3-9c73-23e07a5e181d") \
+            #.select("userID", "assessPassOriginal", "assessOverallResultOriginal", "assessPassPercentageOriginal") \
+            #.show(truncate=False)
+
             windowSpec = Window.partitionBy("assessChildID", "userID").orderBy(col("assessEndTimestamp").desc())
 
             userAssessChildDataLatestDF = userAssessChildrenDetailsDF.withColumn("rowNum",
                                                                                  row_number().over(windowSpec)).filter(
                 F.col("rowNum") == 1).drop("rowNum") \
                 .join(retakesDF.select("assessChildID", "userID", "retakes"), ["assessChildID", "userID"], "left")
-            userAssessChildDataLatestDF.select("assessPass").distinct().show()
+
             finalDF = userAssessChildDataLatestDF.withColumn("userAssessmentDuration",
                                                              unix_timestamp("assessEndTimestamp") - unix_timestamp(
                                                                  "assessStartTimestamp")) \
-                .withColumn("Pass", when(col("assessPass") == "pass", "Yes").otherwise("No")) \
+                .withColumn("Pass", when(col("assessPass") == 1, "Yes").otherwise("No")) \
                 .withColumn("assessPercentage",
                             when(col("assessPassPercentage").isNotNull(), col("assessPassPercentage")).otherwise(
                                 lit("Need to pass in all sections"))) \
@@ -292,7 +319,7 @@ class CourseBasedAssessmentModel:
                         col("assessMaxQuestions").alias("total_question"),
                         col("assessIncorrect").alias("number_of_incorrect_responses"),
                         lit(0).alias("number_of_retakes"),
-                        col("assessPass").alias("pass"),
+                        when(col("assessPass") == 1, "Yes").otherwise("No").alias("pass"),
                         col("data_last_generated_on"))
 
             finalAssessmentDF = self.duration_format(finalAssessmentDF, "assessment_duration")
@@ -300,6 +327,7 @@ class CourseBasedAssessmentModel:
 
             warehouseDF = fullReportDF.withColumn("data_last_generated_on", currentDateTime) \
                 .withColumn("cut_off_percentage", col("assessPercentage").cast("float")) \
+                .withColumn("pass", when(col("Pass") == "Yes", "Yes").otherwise("No")) \
                 .select(
                 col("userID").alias("user_id"),
                 col("course_id").alias("content_id"),
@@ -316,14 +344,18 @@ class CourseBasedAssessmentModel:
                 col("total_questions").alias("total_question"),
                 col("incorrect_count").alias("number_of_incorrect_responses"),
                 col("retakes").alias("number_of_retakes"),
-                col("Pass").alias("pass"),
+                col("pass"),
                 col("data_last_generated_on"))
 
             warehouseDF = warehouseDF.unionByName(finalAssessmentDF)
+            #print("\n[BEFORE JOIN]")
+            #print(f"warehouseDF count: {warehouseDF.count()}")
+            #print(f"warehouseDF distinct content_ids: {warehouseDF.select('content_id').distinct().count()}")
+            # request from anshu to replace assesment_type 'Course Assessment' with 'Comprehensive Assessment Progam'
+            # when course sub type is 'Comprehensive Assessment Program'
             assessmentMinPassDF = spark.read.parquet(f"{config.baseCachePath}/esCourseAssessment")
 
             # assessment Minimum Pass DF
-            assessmentMinPassDF.printSchema()
             assessMinPassDF = assessmentMinPassDF.filter(
                 col('minimumPassPercentage').isNotNull() & (col('minimumPassPercentage') > 0)) \
                 .select(
@@ -370,7 +402,7 @@ class CourseBasedAssessmentModel:
                 col("pass"),
                 col("data_last_generated_on"))
 
-            w = Window.partitionBy("user_id", "content_id", "assessment_id").orderBy(col("score_achieved").desc())
+            w = Window.partitionBy("user_id", "content_id", "assessment_id").orderBy(col("score_achieved").desc(), col("completion_date").desc())
 
             warehouseDF = (warehouseDF.withColumn("rn", row_number().over(w)).filter(col("rn") == 1).drop("rn"))
             dfexportutil.write_csv_per_mdo_id_duckdb(
@@ -483,8 +515,8 @@ def main():
     spark = SparkSession.builder \
         .appName("Course Based Assessment Report Model - Cached") \
         .config("spark.sql.shuffle.partitions", "200") \
-        .config("spark.executor.memory", "18g") \
-        .config("spark.driver.memory", "18g") \
+        .config("spark.executor.memory", "30g") \
+        .config("spark.driver.memory", "128g") \
         .config("spark.driver.maxResultSize", "3g") \
         .config("spark.executor.memoryFraction", "0.7") \
         .config("spark.storage.memoryFraction", "0.2") \

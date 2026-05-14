@@ -836,39 +836,30 @@ class ContentStatusValidationModel:
             # Read common data
             print("[LOADING DATA] Reading data for validation...")
 
-            enrollment_df = spark.read.parquet(ParquetFileConstants.ENROLMENT_SELECT_PARQUET_FILE)
-            print(f"  ✓ Enrollment table loaded")
+            '''enrollment_df = spark.read.parquet(ParquetFileConstants.ENROLMENT_SELECT_PARQUET_FILE)
+            print(f"  ✓ Enrollment table loaded")'''
 
             # CACHE CASSANDRA CONSUMPTION DATA
             cache_path = getattr(config, 'baseCachePath', '/home/analytics/pyspark/data-res/pq_files/cache_pq/')
             cached_consumption_path = f"{cache_path}/consumption_v2"
+            print(f"  → Reading consumption from Cassandra (this will take time)...")
+            consumption_df = spark.read \
+                .format("org.apache.spark.sql.cassandra") \
+                .options(table="user_content_consumption_v2", keyspace="sunbird_courses") \
+                .load()
+            print(f"  → Caching consumption to: {cached_consumption_path}")
+            consumption_df.write.mode("overwrite").parquet(cached_consumption_path)
+            print(f"  ✓ Cached consumption data")
 
-            if os.path.exists(cached_consumption_path):
-                print(f"  ✓ Using cached consumption from: {cached_consumption_path}")
-                consumption_df = spark.read.parquet(cached_consumption_path)
-            else:
-                print(f"  → Reading consumption from Cassandra (this will take time)...")
-                consumption_df = spark.read \
-                    .format("org.apache.spark.sql.cassandra") \
-                    .options(table="user_content_consumption_v2", keyspace="sunbird_courses") \
-                    .load()
-                print(f"  → Caching consumption to: {cached_consumption_path}")
-                consumption_df.write.mode("overwrite").parquet(cached_consumption_path)
-                print(f"  ✓ Cached consumption data")
-
-            print(f"  ✓ Consumption table loaded")
-
-            content_warehouse_df = spark.read.parquet(ParquetFileConstants.CONTENT_WAREHOUSE_COMPUTED_PARQUET_FILE)
+            '''content_warehouse_df = spark.read.parquet(ParquetFileConstants.CONTENT_WAREHOUSE_COMPUTED_PARQUET_FILE)
             print(f"  ✓ Content warehouse loaded")
 
             # FLOW 1: Validate courses (PySpark - working logic)
-            course_mismatches = self.validate_courses(spark, config, enrollment_df, consumption_df,
-                                                      content_warehouse_df)
+            course_mismatches = self.validate_courses(spark, config, enrollment_df, consumption_df, content_warehouse_df)
             course_mismatch_count = course_mismatches.count()
 
             # FLOW 2: Validate programs (DuckDB - pass cached consumption path)
-            program_mismatches, cert_mismatch_df, metric1_df = self.validate_programs_duckdb(spark, config,
-                                                                                             cached_consumption_path)
+            program_mismatches, cert_mismatch_df, metric1_df = self.validate_programs_duckdb(spark, config, cached_consumption_path)
             program_mismatch_count = program_mismatches.count()
 
             # NEW METRIC 2: Courses ready for certification
@@ -939,7 +930,7 @@ class ContentStatusValidationModel:
             if metric2_df is not None and metric2_df.count() > 0:
                 metric2_output_path = f"/tmp/courses_ready_for_cert_{self.get_date()}"
                 metric2_df.coalesce(1).write.mode("overwrite").csv(metric2_output_path, header=True)
-                print(f"✓ Courses ready for certification report written to: {metric2_output_path}")
+                print(f"✓ Courses ready for certification report written to: {metric2_output_path}")'''
 
             print("\n" + "=" * 80)
             print(f"Validation completed at: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")

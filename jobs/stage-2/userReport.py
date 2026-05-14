@@ -226,7 +226,7 @@ def processUserReport(config):
 
         # Step 9: Export Data
         print("📁 Step 9: Exporting Warehouse Data...")
-        warehouseDF.coalesce(1).write.mode("overwrite").option("compression", "snappy").parquet(
+        warehouseDF.write.mode("overwrite").option("compression", "snappy").parquet(
             f"{config.warehouseReportDir}/{config.dwUserTable}")
         print("✅ Step 9 Complete")
 
@@ -266,7 +266,7 @@ def processUserReport(config):
         direct_values_df = (
             exploded_df_base
             .filter(
-                (col("field_type") != "masterList") & 
+                (col("field_type") != "masterList") &
                 col("direct_value").isNotNull()
             )
             .select(
@@ -281,7 +281,7 @@ def processUserReport(config):
         master_list_values_df = (
             exploded_df_base
             .filter(
-                (col("field_type") == "masterList") & 
+                (col("field_type") == "masterList") &
                 col("values_array").isNotNull()
             )
             .withColumn("valueItem", explode(col("values_array")))
@@ -295,7 +295,7 @@ def processUserReport(config):
         
         # Combine both direct values and masterList values
         exploded_df = direct_values_df.union(master_list_values_df).filter(
-            col("attribute_name").isNotNull() & 
+            col("attribute_name").isNotNull() &
             col("attribute_value").isNotNull()
         )
         
@@ -364,9 +364,9 @@ def processUserReport(config):
                 coalesce(col("total_content_enrolments"), lit(0)).alias("Course_Enrolments"),
                 coalesce(col("total_content_completions"), lit(0)).alias("Course_Completions"),
                 coalesce(col("total_content_duration"), lit(0)).alias("Course_Learning_Hours"),
-                (coalesce(col("total_event_enrolments"), lit(0)) + 
+                (coalesce(col("total_event_enrolments"), lit(0)) +
                 coalesce(col("total_content_enrolments"), lit(0))).alias("Total_Enrolments"),
-                (coalesce(col("total_event_completions"), lit(0)) + 
+                (coalesce(col("total_event_completions"), lit(0)) +
                 coalesce(col("total_content_completions"), lit(0))).alias("Total_Completions"),
                 coalesce(col("Total_Learning_Hours"), lit(0)).alias("Total_Learning_Hours"),
                 lit(currentDateTime).alias("Report_Last_Generated_On"),
@@ -385,7 +385,7 @@ def processUserReport(config):
         )
 
         org_custom_fields = {
-            row.mdo_id: sorted([field for field in row.custom_fields if field and field.strip()]) 
+            row.mdo_id: sorted([field for field in row.custom_fields if field and field.strip()])
             for row in org_metadata
         }
 
@@ -517,7 +517,7 @@ def processUserReport(config):
                     'error': str(e)
                 }
 
-        max_workers = min(8, len(org_ids)) 
+        max_workers = min(8, len(org_ids))
         print(f"Processing {len(org_ids)} organizations using {max_workers} parallel workers...")
 
         successful_orgs = 0
@@ -529,7 +529,7 @@ def processUserReport(config):
             # Parallel processing for multiple organizations
             with ThreadPoolExecutor(max_workers=max_workers) as executor:
                 # Submit all tasks
-                future_to_org = {executor.submit(process_single_organization, org_id): org_id 
+                future_to_org = {executor.submit(process_single_organization, org_id): org_id
                                 for org_id in org_ids}
                 
                 # Collect results as they complete

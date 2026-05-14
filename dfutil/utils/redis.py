@@ -343,12 +343,23 @@ class Redis:
         """"Convert DataFrame to map with multiple columns"""
         rows = df.select([keyField] + valueFields).collect()
         dfMap = {str(row[keyField]): json.dumps({field: row[field] for field in valueFields}) for row in rows}
-        self.dispatch(redisKey, dfMap, replace, conf)
-    
+        self.dispatchToKpRedis(redisKey, dfMap, replace, conf)
+
     def emptySchemaDataFrame(self, schema: StructType, spark: SparkSession) -> DataFrame:
         """Create empty DataFrame with given schema"""
         return spark.createDataFrame([], schema)
 
+    # Set map
+    def dispatchToKpRedis(self, key: str, data: Dict[str, str], replace: bool = True, conf=None, db: int = None, host: str = None, port: int = None):
+        """Dispatch map to Redis"""
+        if conf is not None and db is not None:
+            self.dispatchWithParams(conf.redisKpHost, conf.redisPort, db, key, data, replace)
+        elif conf is not None:
+            self.dispatchWithParams(conf.redisKpHost, conf.redisPort, conf.redisDB, key, data, replace)
+        elif all(param is not None for param in [host, port, db]):
+            self.dispatchWithParams(host, port, db, key, data, replace)
+        else:
+            raise ValueError("Either conf or host/port/db must be provided")
 
 # Create global instance (similar to Scala object)
 Redis = Redis()

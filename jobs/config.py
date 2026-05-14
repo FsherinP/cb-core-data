@@ -5,48 +5,48 @@
 # Database Configuration
 DATABASE_CONFIG = {
     # Cassandra Configuration
-    'cassandraCourseKeyspace': '{{ course_keyspace }}',
-    'cassandraUserKeyspace': '{{ user_table_keyspace }}',
-    'cassandraHierarchyStoreKeyspace': '{{ hierarchy_store_keyspace }}',
-    
+    'cassandraCourseKeyspace': 'sunbird_courses',
+    'cassandraUserKeyspace': 'sunbird',
+    'cassandraHierarchyStoreKeyspace': 'prod_hierarchy_store',
+
     # Cassandra Core Host
-    'sparkCassandraConnectionHost': '{{ core_cassandra_host }}',
-    'lpCassandraHost': '{{ lp_cassandra_host }}',
-    
+    'sparkCassandraConnectionHost': '10.175.5.7',
+    'lpCassandraHost': '10.175.5.7',
+
     # Cassandra Table Names
-    'cassandraUserEnrolmentsTable': '{{ dashboards_cassandra_user_enrolments_table }}',
-    'cassandraCourseBatchTable': '{{ dashboards_cassandra_course_batch_table }}',
-    'cassandraFrameworkHierarchyTable': '{{ dashboards_cassandra_framework_hierarchy_table }}',
-    'cassandraUserAssessmentTable': '{{ dashboards_cassandra_user_assessment_table }}',
-    'cassandraContentHierarchyTable': '{{ dashboards_cassandra_content_hierarchy_table }}',
-    'cassandraRatingSummaryTable': '{{ dashboards_cassandra_rating_summary_table }}',
-    'cassandraAcbpTable': '{{ dashboards_cassandra_acbp_table }}',
-    'cassandraRatingsTable': '{{ dashboards_cassandra_ratings_table }}',
-    'cassandraUserRolesTable': '{{ dashboards_cassandra_user_roles_table }}',
-    'cassandraOrgTable': '{{ dashboards_cassandra_org_table }}',
-    'cassandraUserTable': '{{ dashboards_cassandra_user_table }}',
-    'cassandraLearnerLeaderBoardTable': '{{ dashboards_cassandra_learner_leaderboard_table }}',
-    'cassandraLearnerLeaderBoardLookupTable': '{{ dashboards_cassandra_learner_leaderboard_lookup_table }}',
-    'cassandraKarmaPointsTable': '{{ dashboards_cassandra_karma_points_table }}',
-    'cassandraKarmaPointsSummaryTable': '{{ dashboards_cassandra_karma_points_summary_table }}',
-    'cassandraKarmaPointsLookupTable': '{{ dashboards_cassandra_karma_points_lookup_table }}',
-    'cassandraOldAssesmentTable': '{{ dashboards_cassandra_old_assessment_table }}',
-    'cassandraLearnerStatsTable': '{{ dashboards_cassandra_learner_stats_table }}',
-    'cassandraOrgHierarchyTable': '{{ dashboards_cassandra_org_hierarchy_table }}',
-    'cassandraUserEntityEnrolmentTable': '{{ dashboards_cassandra_user_entity_enrolment_table }}',
-    'cassandraPublicUserAssessmentDataTable': '{{ dashboards_cassandra_public_userassessmenttable }}',
-    'cassandraUserFeedKeyspace': '{{ dashboards_cassandra_user_feed_keyspace }}',
-    'cassandraUserFeedTable': '{{ dashboards_cassandra_user_feed_table }}',
-    'cassandraHallOfFameTable': '{{ dashboards_cassandra_mdo_karma_points_table }}',
-    'cassandraMDOLearnerLeaderboardTable': '{{ dashboards_cassandra_mdo_learner_leaderboard_table }}',
-    'cassandraSLWMdoLeaderboardTable': '{{ dashboards_cassandra_slw_mdo_leaderboard_table }}',
-    'cassandraSLWMdoTopLearnerTable': '{{ dashboards_cassandra_slw_mdo_top_learners_table }}',
-    'cassandraNLWMdoLeaderboardTable': '{{ dashboards_cassandra_nlw_mdo_table }}',
-    'cassandraNLWUserLeaderboardTable': '{{ dashboards_cassandra_nlw_user_table }}',
-    'cassandraGroupDesignationTable': '{{ dashboards_cassandra_group_designation_table }}',
-    
+    'cassandraUserEnrolmentsTable': 'user_enrolments_v2',
+    'cassandraCourseBatchTable': 'course_batch',
+    'cassandraFrameworkHierarchyTable': 'framework_hierarchy',
+    'cassandraUserAssessmentTable': 'user_assessment_data_v2',
+    'cassandraContentHierarchyTable': 'content_hierarchy',
+    'cassandraRatingSummaryTable': 'ratings_summary',
+    'cassandraAcbpTable': 'cb_plan_v2',
+    'cassandraRatingsTable': 'ratings',
+    'cassandraUserRolesTable': 'user_roles',
+    'cassandraOrgTable': 'organisation',
+    'cassandraUserTable': 'user',
+    'cassandraLearnerLeaderBoardTable': 'learner_leaderboard',
+    'cassandraLearnerLeaderBoardLookupTable': 'learner_leaderboard_lookup',
+    'cassandraKarmaPointsTable': 'user_karma_points',
+    'cassandraKarmaPointsSummaryTable': 'user_karma_points_summary',
+    'cassandraKarmaPointsLookupTable': 'user_karma_points_credit_lookup',
+    'cassandraOldAssesmentTable': 'user_assessment_master',
+    'cassandraLearnerStatsTable': 'learner_stats',
+    'cassandraOrgHierarchyTable': 'org_hierarchy',
+    'cassandraUserEntityEnrolmentTable': 'user_entity_enrolments',
+    'cassandraPublicUserAssessmentDataTable': 'public_user_assessment_data',
+    'cassandraUserFeedKeyspace': 'sunbird_notifications',
+    'cassandraUserFeedTable': 'notification_feed',
+    'cassandraHallOfFameTable': 'mdo_karma_points',
+    'cassandraMDOLearnerLeaderboardTable': 'mdo_top_learners',
+    'cassandraSLWMdoLeaderboardTable': 'slw_mdo_leaderboard',
+    'cassandraSLWMdoTopLearnerTable': 'slw_mdo_top_learners',
+    'cassandraNLWMdoLeaderboardTable': 'nlw_mdo_leaderboard',
+    'cassandraNLWUserLeaderboardTable': 'nlw_user_leaderboard',
+    'cassandraGroupDesignationTable': 'kb_group_designation_content_data',
+
     # PostgreSQL Application Database
-    'appPostgresHost': '{{ app_postgres_host }}',
+    'appPostgresHost': '10.175.5.15:5432',
     'appPostgresSchema': 'sunbird',
     'appOrgHierarchyTable': 'org_hierarchy_v4',
     'appPostgresUsername': 'sunbird',
@@ -55,10 +55,10 @@ DATABASE_CONFIG = {
     'postgresCompetencyHierarchyTable': 'node_mapping',
     
     # PostgreSQL Data Warehouse
-    'dwPostgresHost': '{{ dw_postgres_host }}',
+    'dwPostgresHost': '10.175.5.62:5432',
     'dwPostgresSchema': 'warehouse',
     'dwPostgresUsername': 'postgres',
-    'dwPostgresCredential': '{{ dw_postgres_credential }}',
+    'dwPostgresCredential': 'password123',
     'dwUserTable': 'user_detail',
     'dwCourseTable': 'content',
     'dwContentResourceTable': 'content_resource',
@@ -78,102 +78,94 @@ DATABASE_CONFIG = {
     'dwAparCBPEnrollmentTable': 'apar_cbp_enrollment',
     
     # Elasticsearch Configuration
-    'sparkElasticsearchConnectionHost': '{{ single_node_es_host }}',
-    'sparkElasticsearchAuditConnectionHost': '{{ es_host_audit_logs }}',
-    'sparkElasticsearchConnectionPort': '{{ single_node_es_port }}',
-    'esFormDataIndex': '{{ es_form_data_index }}',
-    'esFormDataIds': '{{ es_form_data_ids }}',
-    
-    # MongoDB Configuration
-    'mongoDatabase': '{{ dashboards_mongo_discussions_db }}',
-    'mongoDBCollection': '{{ dashboards_mongo_discussions_db_collection }}',
-    'mlSparkMongoConnectionHost': '{{ ml_mongo_host }}',
-    'mlMongoDatabase': '{{ dashboards_mongo_survey_observation_db }}',
-    'surveyCollection': '{{ dashboards_mongo_survey_collection }}',
-    'reportConfigCollection': '{{ dashboards_mongo_report_config_collection }}',
+    'sparkElasticsearchConnectionHost': '10.175.5.10',
+    'sparkElasticsearchAuditConnectionHost': '10.175.5.10',
+    'sparkElasticsearchConnectionPort': '9200',
+    'esFormDataIndex': 'fs-forms-data',
+    'esFormDataIds': '1720793361489,1718964921012',
 
+    # MongoDB Configuration
+    'mongoDatabase': 'nodebb',
+    'mongoDBCollection': 'objects',
+    'mlSparkMongoConnectionHost': '10.175.5.38',
+    'mlMongoDatabase': 'ml-survey',
+    'surveyCollection': 'solutions',
+    'reportConfigCollection': 'dataProductConfigurations',
 }
 
 # Spark Configuration
 SPARK_CONFIG = {
-    'sparkCassandraConnectionHost': '{{ core_cassandra_host }}',
-    'sparkDruidRouterHost': '{{ druid_router_host }}',
-    'mlSparkDruidRouterHost': '{{ ml_druid_router_host }}',
-    'sparkElasticsearchConnectionHost': '{{ single_node_es_host }}',
-    'sparkElasticsearchAuditConnectionHost': '{{ es_host_audit_logs }}',
+    'sparkCassandraConnectionHost': '10.175.5.7',
+    'sparkDruidRouterHost': '10.175.5.33',
+    'mlSparkDruidRouterHost': '10.175.5.37',
+    'sparkElasticsearchConnectionHost': '10.175.5.10',
+    'sparkElasticsearchAuditConnectionHost': '10.175.5.10',
 }
 
 # Redis Configuration
 REDIS_CONFIG = {
-    'redisHost': '{{ dashboards_redis_host }}',
-    'redisPort': '{{ dashboards_redis_port }}',
-    'redisDB': '{{ dashboards_redis_db }}',
+    'redisHost': '10.175.5.20',
+    'redisPort': '6379',
+    'redisDB': '12',
 }
 
 # Storage Configuration
 STORAGE_CONFIG = {
-    'bucket': '{{ cloud_storage_bucket_secor }}',
-    'container': '{{ cloud_storage_bucket_reports }}',
+    'bucket': 'igotproddp',
+    'container': 'igotproddp',
     'key': 'storage.key.config',
     'secret': 'storage.secret.config',
     'storageKeyConfig': 'storage.key.config',
     'storageSecretConfig': 'storage.secret.config',
-    'store': '{{ report_storage_type }}',
-    'dpRawTelemetryBackupLocation': '{{ dp_raw_telemetry_backup_location }}',
-}
-
-API_CONFIG = {
-    'notificationAPIURL': '{{ notification_api_url }}',
-    'gamificationNotificationEndpoint': '{{ gamification_notification_endpoint }}',
+    'store': 'gs',
+    'dpRawTelemetryBackupLocation': 'secor-prod/unique/raw/',
 }
 
 # Report Path Configuration
 REPORT_PATHS = {
-    'userReportPath': '{{ user_report_path }}',
-    'userEnrolmentReportPath': '{{ user_enrolment_report_path }}',
-    'courseReportPath': '{{ course_report_path }}',
-    'cbaReportPath': '{{ cba_report_path }}',
-    'standaloneAssessmentReportPath': '{{ standalone_assessment_report_path }}',
-    'gamificationReportPath': '{{ gamification_report_path }}',
-    'taggedUsersPath': '{{ tagged_users_path }}',
-    'blendedReportPath': '{{ blended_report_path }}',
-    'orgHierarchyReportPath': '{{ org_hierarchy_report_path }}',
-    'commsConsoleReportPath': '{{ comms_console_report_path }}',
-    'acbpReportPath': '{{ acbp_report_path }}',
-    'acbpMdoEnrolmentReportPath': '{{ acbp_mdo_enrolment_report_path }}',
-    'acbpMdoSummaryReportPath': '{{ acbp_mdo_summary_report_path }}',
-    'kcmReportPath': '{{ kcm_report_path }}',
-    'mlReportPath': '{{ ml_report_path }}',
-    'bqScriptPath': '{{ bq_script_path }}',
+    'userReportPath': 'standalone-reports/user-report',
+    'userEnrolmentReportPath': 'standalone-reports/user-enrollment-report',
+    'courseReportPath': 'standalone-reports/course-report',
+    'cbaReportPath': 'standalone-reports/cba-report',
+    'standaloneAssessmentReportPath': 'standalone-reports/user-assessment-report-cbp',
+    'taggedUsersPath': 'tagged-users/',
+    'blendedReportPath': 'standalone-reports/blended-program-report',
+    'orgHierarchyReportPath': 'standalone-reports/org-hierarchy-report',
+    'commsConsoleReportPath': 'standalone-reports/comms-console',
+    'acbpReportPath': 'standalone-reports/cbp-report',
+    'acbpMdoEnrolmentReportPath': 'standalone-reports/cbp-report-mdo-enrolment',
+    'acbpMdoSummaryReportPath': 'standalone-reports/cbp-report-mdo-summary',
+    'kcmReportPath': 'standalone-reports/kcm-report',
+    'mlReportPath': 'standalone-reports/ml-report',
+    'bqScriptPath': '/home/analytics/pyspark/bq-scripts.sh',
 }
 
 
 # Kafka/Messaging Configuration
 KAFKA_CONFIG = {
-    'brokerList': '{{ brokerlist }}',
-    'topic': '{{ topic }}',
-    'peerValidationKafkaTopic' : '{{ peerValidationKafkaTopic }}',
-    'compression': '{{ dashboards_broker_compression }}',
-    
+    'brokerList': '10.175.5.154:9092,10.175.5.155:9092,10.175.5.208:9092',
+    'topic': 'prod.telemetry.derived',
+    'compression': 'none',
+
     # Side Output Topics
     'sideOutput': {
-        'brokerList': '{{ brokerlist }}',
-        'compression': '{{ dashboards_broker_compression }}',
+        'brokerList': '10.175.5.154:9092,10.175.5.155:9092,10.175.5.156:9092',
+        'compression': 'none',
         'topics': {
-            'roleUserCount': '{{ dashboards_role_count_topic }}',
-            'orgRoleUserCount': '{{ dashboards_org_role_count_topic }}',
-            'allCourses': '{{ dashboards_courses_topic }}',
-            'userCourseProgramProgress': '{{ dashboards_user_course_program_progress_topic }}',
-            'fracCompetency': '{{ dashboards_frac_competency_topic }}',
-            'courseCompetency': '{{ dashboards_course_competency_topic }}',
-            'expectedCompetency': '{{ dashboards_expected_competency_topic }}',
-            'declaredCompetency': '{{ dashboards_declared_competency_topic }}',
-            'competencyGap': '{{ dashboards_competency_gap_topic }}',
-            'userOrg': '{{ dashboards_user_org_topic }}',
-            'org': '{{ dashboards_org_topic }}',
-            'userAssessment': '{{ dashboards_user_assessment_topic }}',
-            'assessment': '{{ dashboards_assessment_topic }}',
-            'acbpEnrolment': '{{ dashboards_acbp_enrolment_topic }}',
+            'roleUserCount': 'prod.dashboards.role.count',
+            'orgRoleUserCount': 'prod.dashboards.org.role.count',
+            'allCourses': 'prod.dashboards.course',
+            'userCourseProgramProgress': 'prod.dashboards.user.course.program.progress',
+            'fracCompetency': 'prod.dashboards.competency.frac',
+            'courseCompetency': 'prod.dashboards.competency.course',
+            'expectedCompetency': 'prod.dashboards.competency.expected',
+            'declaredCompetency': 'prod.dashboards.competency.declared',
+            'competencyGap': 'prod.dashboards.competency.gap',
+            'userOrg': 'prod.dashboards.user.org',
+            'org': 'prod.dashboards.org',
+            'userAssessment': 'prod.dashboards.user.assessment',
+            'assessment': 'prod.dashboards.assessment',
+            'acbpEnrolment': 'prod.dashboards.acbp.enrolment',
         }
     }
 }
@@ -188,54 +180,52 @@ JOB_CONFIG = {
     'deviceMapping': False,
     'apiVersion': 'v2',
     'modelParamsParallelization': 200,
-    
+
     # Report Sync Configuration
-    'reportSyncEnable': '{{ operational_report_sync_enable }}',
-    'reportSyncEnableSL': '{{ operational_sl_report_sync_enable }}',
-    'reportZipSyncEnable': '{{ operational_report_zip_sync_enable }}',
-    
+    'reportSyncEnable': 'false',
+    'reportSyncEnableSL': 'true',
+    'reportZipSyncEnable': 'true',
+
     # Survey and Assessment Configuration
-    'mdoIDs': '{{ report_mdo_ids }}',
-    'solutionIDs': '{{ report_solution_ids }}',
-    'anonymousAssessmentNonLoggedInUserAssessmentIDs': '{{ anonymous_assessment_non_loggedIn_user_assessment_ids }}',
-    'anonymousAssessmentLoggedInUserContentIDs': '{{ anonymous_assessment_loggedIn_user_content_ids }}',
-    'platformRatingSurveyId': '{{ dashboards_platform_rating_survey_id }}',
-    'gracePeriod': '{{ report_grace_period }}',
-    'baseUrlForEvidences': '{{ report_base_url_for_evidences }}',
-    'includeExpiredSolutionIDs': '{{ report_include_expired_solution_ids }}',
-    
+    'mdoIDs': '',
+    'solutionIDs': '',
+    'anonymousAssessmentNonLoggedInUserAssessmentIDs': 'do_114153388896780288112,do_11415336159226265611',
+    'anonymousAssessmentLoggedInUserContentIDs': 'do_1141533540853432321675,do_1141533857591132161321,do_1141525365329264641663,do_1141527106280980481664',
+    'platformRatingSurveyId': '1727072772658',
+    'gracePeriod': '2',
+    'baseUrlForEvidences': 'https://spv.igotkarmayogi.gov.in/apis/proxies/v8/cloud-services/mlcore/v1/files/download?file=',
+    'includeExpiredSolutionIDs': 'True',
+
     # Batch Size Configuration
-    'SurveyQuestionReportBatchSize': '{{ survey_question_report_batch_size }}',
-    'SurveyStatusReportBatchSize': '{{ survey_status_report_batch_size }}',
-    'ObservationQuestionReportBatchSize': '{{ observation_question_report_batch_size }}',
-    'ObservationStatusReportBatchSize': '{{ observation_status_report_batch_size }}',
-    
+    'SurveyQuestionReportBatchSize': '2000',
+    'SurveyStatusReportBatchSize': '40000',
+    'ObservationQuestionReportBatchSize': '2000',
+    'ObservationStatusReportBatchSize': '15000',
+
     # Learning Week Configuration
-    'nationalLearningWeekStart': '{{ national_learning_week_start }}',
-    'nationalLearningWeekEnd': '{{ national_learning_week_end }}',
-    'stateLearningWeekStart': '{{ state_learning_week_start }}',
-    'stateLearningWeekEnd': '{{ state_learning_week_end }}',
-    'sizeBucketString': '{{ state_learning_week_bucket_size }}',
-    
+    'nationalLearningWeekStart': '2026-04-01 00:00:00',
+    'nationalLearningWeekEnd': '2026-04-10 23:59:59',
+    'stateLearningWeekStart': '2025-07-11 00:00:00',
+    'stateLearningWeekEnd': '2025-07-18 23:59:59',
+
     # Communications Console Configuration
-    'commsConsolePrarambhEmailSuffix': '{{ comms_console_prarambh_email_suffix }}',
-    'commsConsoleNumDaysToConsider': '{{ comms_console_num_days_to_consider }}',
-    'commsConsoleNumTopLearnersToConsider': '{{ comms_console_num_top_learners_to_consider }}',
-    'commsConsolePrarambhTags': '{{ comms_console_prarambh_tags }}',
-    'commsConsolePrarambhCbpIds': '{{ comms_console_prarambh_cbp_ids }}',
-    'commsConsolePrarambhNCount': '{{ comms_console_prarambh_n_count }}',
-    
+    'commsConsolePrarambhEmailSuffix': '.kb@karmayogi.in',
+    'commsConsoleNumDaysToConsider': '15',
+    'commsConsoleNumTopLearnersToConsider': '100000',
+    'commsConsolePrarambhTags': 'rojgaar,rozgaar,rozgar',
+    'commsConsolePrarambhCbpIds': 'do_11359618144357580811,do_113569878939262976132,do_1136364937253437441916,do_113474579909279744117,do_113651330692145152128,do_1134122937914327041177,do_113473120005832704152,do_1136364244148060161889',
+    'commsConsolePrarambhNCount': '4',
+
     # Zip Reports Configuration
-    'prefixDirectoryPath': '{{ zip_reports_prefix_directory_path }}',
-    'destinationDirectoryPath': '{{ zip_reports_destination_path }}',
-    'directoriesToSelect': '{{ directories_to_select }}',
-    'password': '{{ zip_reports_password }}',
-    'pysparkCBPDirectoriesToSelect': ["blended-program-report-cbp","user-assessment-report-cbp"],
+    'prefixDirectoryPath': 'standalone-reports',
+    'destinationDirectoryPath': 'standalone-reports/merged',
+    'directoriesToSelect': 'blended-program-report-mdo,cbp-report-mdo-summary,course-report,cba-report,cbp-report-mdo-enrolment,user-report,user-enrollment-report',
+    'password': '123456',
 }
 
 # External Service Configuration
 EXTERNAL_SERVICES = {
-    'fracBackendHost': '{{ dashboards_frac_backend_host }}',
+    'fracBackendHost': 'frac-dictionary.igotkarmayogi.gov.in',
 }
 
 # Search Configuration
@@ -243,8 +233,8 @@ SEARCH_CONFIG = {
     'search': {
         'type': 'gcloud',
         'queries': [{
-            'bucket': '{{ cloud_storage_bucket_secor }}',
-            'prefix': '{{ dp_raw_telemetry_backup_location }}',
+            'bucket': 'igotproddp',
+            'prefix': 'secor-prod/unique/raw/',
             'endDate': '',  # Will be set dynamically
             'delta': 0
         }]
@@ -263,9 +253,9 @@ WFS_MODEL_CONFIG = {
     'output': [{
         'to': 'kafka',
         'params': {
-            'brokerList': '{{ brokerlist }}',
-            'topic': '{{ topic }}',
-            'compression': '{{ dashboards_broker_compression }}'
+            'brokerList': '10.175.5.154:9092,10.175.5.155:9092,10.175.5.156:9092',
+            'topic': 'prod.telemetry.derived',
+            'compression': 'none'
         }
     }],
     'parallelization': 200,
@@ -288,7 +278,6 @@ def get_config():
     config.update(KAFKA_CONFIG)
     config.update(JOB_CONFIG)
     config.update(EXTERNAL_SERVICES)
-    config.update(API_CONFIG)
     return config
 
 # Environment-specific overrides

@@ -131,10 +131,10 @@ class PeerValidationEligibleUsers:
             query = {"bool": {"must": [{"match": {"contextType": pc}} for pc in context_type]}}
 
             formsDF = utils.read_elasticsearch_data_scroll(
-                self.spark, 
+                self.spark,
                 self.config.sparkIGotElasticsearchConnectionHost,
                 self.config.sparkElasticsearchConnectionPort,
-                "fs-forms-alias-v2",
+                self.config.peerValidationFormIndex,
                 fields = fields,
                 query = query
             )
@@ -171,66 +171,70 @@ class PeerValidationEligibleUsers:
             print("Step 7: Removing Already Notified Users from Eligible Users...")
             eligibleUsersDF = eligibleUsersDF.join(notification_queue, on="notification_id", how="left_anti")
             print("✅ Step 7 Complete")
-            print("Step 8: Building Notification Payload and Saving to DB...")
-            eligibleUsersDF = eligibleUsersDF.withColumn(
-                "payload",
-                to_json(
-                    struct(
-                        col("user_id"),
-                        lit("IN_APP").alias("type"),
-                        lit("PEER_VALIDATION").alias("category"),
-                        lit("PEER_VALIDATION").alias("sub_type"),
-                        lit("SYSTEM_CREATED").alias("source"),
-                        lit("PEER_EVALUATION_ASSIGNED").alias("sub_category"),
-                        struct(
-                            array(
-                                struct(
-                                    col("form_id").alias("formId"),
-                                    col("course_id").alias("contextId"),
-                                    col("course_name").alias("courseName"),
-                                    lit(False).alias("isSurveySubmitted"),
-                                    date_format(col("firstCompletedOn_date"), "yyyy-MM-dd'T'HH:mm:ss.SSS'Z'").alias("completionDate"),
-                                    col("createdBy").alias("surveyCreatedById"),
-                                    col("title").alias("surveyName"),
-                                    date_format(col("endDate"), "yyyy-MM-dd'T'HH:mm:ss'Z'").alias("surveyEndDate"),
-                                    col("fullName").alias("learnerName"),
-                                    col("form_org_id").alias("contextOrgId"),
-                                    col("thumbnail")
-                                )
-                            ).alias("data"),
-                            concat(lit("Peer validation survey is now available for '"), col("course_name"), lit("'.")).alias("body")
-                        ).alias("message")
-                    )
-                )
-            ) \
-            .withColumn("status", lit("PENDING")) \
-            .withColumn("error_message", lit(None)) \
-            .withColumn("created_at", current_timestamp()) \
-            .withColumn("updated_at", current_timestamp()) \
-            .withColumn("first_trigger_end", col("first_trigger_end")) \
-            .select(
-                col("notification_id").cast("string"),
-                col("user_id").cast("string"),
-                lit("PEER_VALIDATION").alias("event_type").cast("string"),
-                col("form_id").cast("string"),
-                col("course_id").cast("string"),
-                col("course_name").cast("string"),
-                col("firstCompletedOn_date").alias("first_completed_on").cast("timestamp"),
-                col("status").cast("string"),
-                col("error_message").cast("string"),
-                col("payload").cast("string"),
-                col("first_trigger_end").cast("timestamp"), 
-                col("created_at").cast("timestamp"),
-                col("updated_at").cast("timestamp")
-            )
             count = eligibleUsersDF.count()
-            self.write_postgres_table(eligibleUsersDF, self.config.dwpeerValidationNotificationQueue, mode="append")
-            print(f"Step 8 Complete - {count} notifications inserted into queue.")
-            
+            if count > 0:
+                print("Step 8: Building Notification Payload and Saving to DB...")
+                eligibleUsersDF = eligibleUsersDF.withColumn(
+                    "payload",
+                    to_json(
+                        struct(
+                            col("user_id"),
+                            lit("IN_APP").alias("type"),
+                            lit("PEER_VALIDATION").alias("category"),
+                            lit("PEER_VALIDATION").alias("sub_type"),
+                            lit("SYSTEM_CREATED").alias("source"),
+                            lit("PEER_EVALUATION_ASSIGNED").alias("sub_category"),
+                            struct(
+                                array(
+                                    struct(
+                                        col("form_id").alias("formId"),
+                                        col("course_id").alias("contextId"),
+                                        col("course_name").alias("courseName"),
+                                        lit(False).alias("isSurveySubmitted"),
+                                        date_format(col("firstCompletedOn_date"), "yyyy-MM-dd'T'HH:mm:ss.SSS'Z'").alias("completionDate"),
+                                        col("createdBy").alias("surveyCreatedById"),
+                                        col("title").alias("surveyName"),
+                                        date_format(col("endDate"), "yyyy-MM-dd'T'HH:mm:ss'Z'").alias("surveyEndDate"),
+                                        col("fullName").alias("learnerName"),
+                                        col("form_org_id").alias("contextOrgId"),
+                                        col("thumbnail")
+                                    )
+                                ).alias("data"),
+                                concat(lit("Peer validation survey is now available for '"), col("course_name"), lit("'.")).alias("body")
+                            ).alias("message")
+                        )
+                    )
+                ) \
+                    .withColumn("status", lit("PENDING")) \
+                    .withColumn("error_message", lit(None)) \
+                    .withColumn("created_at", current_timestamp()) \
+                    .withColumn("updated_at", current_timestamp()) \
+                    .withColumn("first_trigger_end", col("first_trigger_end")) \
+                    .select(
+                    col("notification_id").cast("string"),
+                    col("user_id").cast("string"),
+                    lit("PEER_VALIDATION").alias("event_type").cast("string"),
+                    col("form_id").cast("string"),
+                    col("course_id").cast("string"),
+                    col("course_name").cast("string"),
+                    col("firstCompletedOn_date").alias("first_completed_on").cast("timestamp"),
+                    col("status").cast("string"),
+                    col("error_message").cast("string"),
+                    col("payload").cast("string"),
+                    col("first_trigger_end").cast("timestamp"),
+                    col("created_at").cast("timestamp"),
+                    col("updated_at").cast("timestamp")
+                )
+
+                print(f"Step 8 Complete - {count} notifications inserted into queue.")
+                self.write_postgres_table(eligibleUsersDF, self.config.dwpeerValidationNotificationQueue, mode="append")
+            else:
+                print("Step 8 Skipped - No eligible users found for notification.")
+
         except Exception as e:
             print(f"❌ Error: {str(e)}")
             raise
-    
+
 def main():
     os.environ[
         'PYSPARK_SUBMIT_ARGS'] = '--packages com.datastax.spark:spark-cassandra-connector_2.12:3.4.1,org.elasticsearch:elasticsearch-spark-30_2.12:8.11.0,org.postgresql:postgresql:42.6.0 pyspark-shell'

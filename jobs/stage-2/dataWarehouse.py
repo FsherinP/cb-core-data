@@ -7,7 +7,7 @@ from pyspark.sql import SparkSession
 from datetime import datetime
 from pathlib import Path
 from pyspark.sql.types import StructType, StructField, StringType, IntegerType, BooleanType, ArrayType
-from pyspark.sql.functions import (col, lower, when, lit, expr, concat_ws, explode_outer, from_json, to_date,
+from pyspark.sql.functions import (col, lower, when, lit, expr, concat_ws, explode_outer, from_json, to_date, regexp_replace,
                                    current_timestamp, date_format, round, coalesce, broadcast, size, map_keys,
                                    map_values)
 from zipfile import ZipFile, ZIP_DEFLATED
@@ -60,6 +60,7 @@ class DataWarehouseModel:
             postgres_url = f"jdbc:postgresql://{config.dwPostgresHost}/{config.dwPostgresSchema}"
             today_date = datetime.today().strftime('%Y-%m-%d')
 
+            print("📚 Step 1: Loading User Details Data...")
             userDetailsDF = spark.read.parquet(f"{warehouse_path}/{config.dwUserTable}") \
                 .withColumn("status", col("status").cast("int")) \
                 .withColumn("no_of_karma_points", col("no_of_karma_points").cast("int")) \
@@ -69,7 +70,10 @@ class DataWarehouseModel:
                 .withColumn("total_learning_hours", col("total_learning_hours").cast("double"))
             self.write_postgres_table(userDetailsDF, postgres_url, config.dwUserTable, config.dwPostgresUsername,
                                       config.dwPostgresCredential)
+            print("User details table updated")
 
+
+            print("📚 Step 2: Loading Content Data...")
             contentDF = spark.read.parquet(f"{warehouse_path}/{config.dwCourseTable}") \
                 .withColumn("resource_count", col("resource_count").cast("int")) \
                 .withColumn("total_certificates_issued", col("total_certificates_issued").cast("int")) \
@@ -77,6 +81,9 @@ class DataWarehouseModel:
                 .dropDuplicates(["content_id"])
             self.write_postgres_table(contentDF, postgres_url,config.dwCourseTable, config.dwPostgresUsername,
                                       config.dwPostgresCredential)
+            print("Content table updated")
+
+            print("📚 Step 3: Loading Assessment Data...")
             assessment = spark.read.parquet(f"{warehouse_path}/{config.dwAssessmentTable}") \
                 .withColumn("score_achieved", col("score_achieved").cast("float")) \
                 .withColumn("overall_score", col("overall_score").cast("float")) \
@@ -87,6 +94,9 @@ class DataWarehouseModel:
                 .filter(col("content_id").isNotNull())
             self.write_postgres_table(assessment, postgres_url, config.dwAssessmentTable, config.dwPostgresUsername,
                                       config.dwPostgresCredential)
+            print("Assessment table updated")
+
+            print("📚 Step 4: Loading BP Enrolments Data...")
             bp_enrolments = spark.read.parquet(f"{warehouse_path}/{config.dwBPEnrollmentsTable}") \
                 .withColumn("component_progress_percentage", col("component_progress_percentage").cast("float")) \
                 .withColumn("offline_session_date", to_date(col("offline_session_date"))) \
@@ -99,13 +109,54 @@ class DataWarehouseModel:
 
             self.write_postgres_table(bp_enrolments, postgres_url, config.dwBPEnrollmentsTable, config.dwPostgresUsername,
                                       config.dwPostgresCredential)
+            print("BP Enrolments table updated")
+
+            print("📚 Step 5: Loading Content Resource Data...")
             content_resource = spark.read.parquet(f"{warehouse_path}/{config.dwContentResourceTable}")
             self.write_postgres_table(content_resource, postgres_url, config.dwContentResourceTable,
                                       config.dwPostgresUsername, config.dwPostgresCredential)
+            print("Content resource table updated")
 
+            print("📚 Step 6: Loading CB Plan Data...")
             cb_plan = spark.read.parquet(f"{warehouse_path}/{config.dwCBPlanTable}")
             self.write_postgres_table(cb_plan, postgres_url, config.dwCBPlanTable, config.dwPostgresUsername,
                                       config.dwPostgresCredential)
+            print("CB Plan table updated")
+
+            print("📚 Step 8: Loading Org Hierarchy Data...")
+            org_hierarchy = spark.read.parquet(f"{config.warehouseReportDir}/{config.dwOrgTable}")
+            self.write_postgres_table(org_hierarchy, postgres_url, config.dwOrgTable, config.dwPostgresUsername,
+                                      config.dwPostgresCredential)
+            print("Org hierarchy table updated")
+
+            print("📚 Step 9: Loading KCM Content Data...")
+            kcm_content = spark.read.parquet(f"{warehouse_path}/{config.dwKcmContentTable}") \
+                .select("course_id", "competency_area_id", "competency_theme_id", "competency_sub_theme_id",
+                        "data_last_generated_on")
+            self.write_postgres_table(kcm_content, postgres_url, config.dwKcmContentTable, config.dwPostgresUsername,
+                                      config.dwPostgresCredential)
+            print("KCM Content table updated")
+
+            print("📚 Step 10: Loading KCM Dict Data...")
+            kcm_dict = spark.read.parquet(f"{warehouse_path}/{config.dwKcmDictionaryTable}")
+            self.write_postgres_table(kcm_dict, postgres_url, config.dwKcmDictionaryTable, config.dwPostgresUsername,
+                                      config.dwPostgresCredential)
+            print("KCM Dict table updated")
+
+            print("📚 Step 11: Loading Events Data...")
+            events = spark.read.parquet(f"{config.warehouseReportDir}/event_details")
+            self.write_postgres_table(events, postgres_url, config.dwEventsTable, config.dwPostgresUsername,
+                                      config.dwPostgresCredential)
+            print("Events table updated")
+
+            print("📚 Step 12: Loading Events Enrolments Data...")
+            eventsEnrolmentDataDFWithKarmaPoints = spark.read.parquet(f"{config.warehouseReportDir}/event_enrolment_details")
+            self.write_postgres_table(eventsEnrolmentDataDFWithKarmaPoints, postgres_url, config.dwEventsEnrolmentTable,
+                                      config.dwPostgresUsername, config.dwPostgresCredential)
+            #eventsEnrolmentDataDFWithKarmaPoints.show()
+            print("Events Enrolments table updated")
+
+            print("📚 Step 7: Loading User Enrolments Data...")
             enrolments = spark.read.parquet(f"{warehouse_path}/{config.dwEnrollmentsTable}") \
                 .withColumn("content_progress_percentage", col("content_progress_percentage").cast("float")) \
                 .withColumn("user_rating", col("user_rating").cast("float")) \
@@ -114,29 +165,13 @@ class DataWarehouseModel:
                 .filter(col("content_id").isNotNull())
             self.write_postgres_table(enrolments, postgres_url, config.dwEnrollmentsTable, config.dwPostgresUsername,
                                       config.dwPostgresCredential)
-            org_hierarchy = spark.read.parquet(f"{config.warehouseReportDir}/{config.dwOrgTable}")
-            self.write_postgres_table(org_hierarchy, postgres_url, config.dwOrgTable, config.dwPostgresUsername,
-                                      config.dwPostgresCredential)
-            kcm_content = spark.read.parquet(f"{warehouse_path}/{config.dwKcmContentTable}") \
-                .select("course_id", "competency_area_id", "competency_theme_id", "competency_sub_theme_id",
-                        "data_last_generated_on")
-            self.write_postgres_table(kcm_content, postgres_url, config.dwKcmContentTable, config.dwPostgresUsername,
-                                      config.dwPostgresCredential)
-            kcm_dict = spark.read.parquet(f"{warehouse_path}/{config.dwKcmDictionaryTable}")
-            self.write_postgres_table(kcm_dict, postgres_url, config.dwKcmDictionaryTable, config.dwPostgresUsername,
-                                      config.dwPostgresCredential)
-            events = spark.read.parquet(f"{config.warehouseReportDir}/event_details")
-            self.write_postgres_table(events, postgres_url, config.dwEventsTable, config.dwPostgresUsername,
-                                      config.dwPostgresCredential)
-   
-            eventsEnrolmentDataDFWithKarmaPoints = spark.read.parquet(f"{config.warehouseReportDir}/event_enrolment_details")
-            self.write_postgres_table(eventsEnrolmentDataDFWithKarmaPoints, postgres_url, config.dwEventsEnrolmentTable,
-                                      config.dwPostgresUsername, config.dwPostgresCredential)
-            
-            course_completion_survey_details_df = spark.read.parquet(f"{warehouse_path}/{config.dwCourseCompletionSurveryTable}")
-            self.write_postgres_table(course_completion_survey_details_df, postgres_url, config.dwCourseCompletionSurveryTable,      
-                                      config.dwPostgresUsername, config.dwPostgresCredential)
-            
+            print("User enrolments table updated")
+
+            #course_completion_survey_details_df = spark.read.parquet(f"{warehouse_path}/{config.dwCourseCompletionSurveryTable}")
+            #.withColumn("improvement_suggestions",regexp_replace(col("improvement_suggestions"), "[\\x00]", "")).withColumn("improvement_suggestions",regexp_replace(col("improvement_suggestions"), "\\r", ""))
+            #self.write_postgres_table(course_completion_survey_details_df, postgres_url, config.dwCourseCompletionSurveryTable,
+            #                          config.dwPostgresUsername, config.dwPostgresCredential)
+
             print("✅ Processing completed successfully!")
 
 
@@ -164,8 +199,8 @@ def create_spark_session_with_packages(config):
     spark = SparkSession.builder \
         .appName('DataWarehousetModel') \
         .master("local[*]") \
-        .config("spark.executor.memory", '42g') \
-        .config("spark.driver.memory", '18g') \
+        .config("spark.executor.memory", '180g') \
+        .config("spark.driver.memory", '30g') \
         .config("spark.executor.memoryFraction", '0.7') \
         .config("spark.storage.memoryFraction", '0.2') \
         .config("spark.storage.unrollFraction", "0.1") \

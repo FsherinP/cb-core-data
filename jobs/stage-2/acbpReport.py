@@ -46,7 +46,7 @@ class ACBPModel:
             primary_categories = ["Course", "Program", "Blended Program", "Curated Program", "Standalone Assessment"]
 
             print("📥 Reading source data...")
-            userOrgDF = spark.read.parquet(ParquetFileConstants.USER_ORG_COMPUTED_FILE).select("userID", 
+            userOrgDF = spark.read.parquet(ParquetFileConstants.USER_ORG_COMPUTED_FILE).select("userID",
                                                                                                 "fullName",
                                                                                                 "userStatus",
                                                                                                 "userPrimaryEmail",
@@ -58,7 +58,7 @@ class ACBPModel:
                                                                                                 "designation", "group",
                                                                                                 "additionalProperties.externalSystem",
                                                                                                 "additionalProperties.externalSystemId")
-            
+
             contentHierarchyDF = spark.read.parquet(ParquetFileConstants.CONTENT_HIERARCHY_SELECT_PARQUET_FILE)
             allCourseProgramESDF = spark.read.parquet(
                 ParquetFileConstants.ALL_COURSE_PROGRAM_COMPUTED_PARQUET_FILE).filter(
@@ -82,10 +82,6 @@ class ACBPModel:
                 .drop("acbpCourseIDList")\
             )
 
-
-            print("=done-==")
-            
-            
             # Assignment type mapping
             assignment_type_mapping = {
                 'rootorgid': 'mdo_id',
@@ -112,7 +108,7 @@ class ACBPModel:
              .withColumn("assignmentTypeInfo", when(col("assignmentType") == "alluser", lit("AllUser")
              ).otherwise(col("assignmentTypeInfo"))) \
              .withColumn("assignmentType", array_join(F.transform(
-                split(col("assignmentType"), "\\|"), 
+                split(col("assignmentType"), "\\|"),
                 lambda x: mapping_expr[trim(x)]),"|"))
 
             # Write to warehouse with mapped names
@@ -282,8 +278,9 @@ class ACBPModel:
             userAdditionalProperties = userOrgDF.select("userID", "externalSystem","externalSystemId")
     
             # preparing apar enrollment data
-            aparEnrolmentData = acbpEnrolmentDF.join(userAdditionalProperties, "userID", "left") \
-                .join(resultDF, acbpEnrolmentDF.courseID == resultDF.course_id, "left") \
+            aparEnrolmentData = acbpAllEnrolmentDF.where((col("acbpStatus") == "Live") & (col("isapar") == True)) \
+                .join(userAdditionalProperties, "userID", "left") \
+                .join(resultDF, acbpAllEnrolmentDF.courseID == resultDF.course_id, "left") \
                 .withColumn(
                     "content_duration",
                     F.when(F.col("courseDuration").isNull(), None)
@@ -316,8 +313,7 @@ class ACBPModel:
                     col("externalSystemId").alias("external_system_id"),
                     col("competency_areas").alias("competency_type"),
                     lit(None).cast("string").alias("parichay_id"),
-                    col("allocatedOn").cast("timestamp").alias("assigned_on")
-                )
+                    col("allocatedOn").cast("timestamp").alias("assigned_on")).dropDuplicates(["user_id", "content_id"])
 
             resultDF.unpersist()
             kcmMappingDF.unpersist()
@@ -434,9 +430,10 @@ def main():
     # Initialize Spark Session with optimized settings for caching
     spark = SparkSession.builder \
         .appName("ACBP Report") \
-        .config("spark.sql.shuffle.partitions", "200") \
-        .config("spark.executor.memory", "20g") \
-        .config("spark.driver.memory", "15g") \
+        .config("spark.sql.shuffle.partitions", "240") \
+        .config("spark.executor.memory", "30g") \
+        .config("spark.driver.memory", "128g") \
+        .config("spark.driver.memoryOverhead", "20g") \
         .config("spark.executor.memoryFraction", "0.7") \
         .config("spark.storage.memoryFraction", "0.2") \
         .config("spark.storage.unrollFraction", "0.1") \
