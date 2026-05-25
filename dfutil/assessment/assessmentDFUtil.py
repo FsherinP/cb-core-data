@@ -3,12 +3,12 @@ import time
 from constants.ParquetFileConstants import ParquetFileConstants
 from dfutil.content import contentDFUtil
 from dfutil.user.userDFUtil import exportDFToParquet
-from pyspark.sql import SparkSession, DataFrame
+from pyspark.sql import SparkSession, DataFrame, Window
 from pyspark.sql.functions import (
     col, explode_outer, from_json,
-    unix_timestamp, expr, lit, concat_ws, when
+    unix_timestamp, expr, lit, concat_ws, when, coalesce, row_number , first, count, sum
 )
-from pyspark.sql.types import FloatType
+from pyspark.sql.types import FloatType, IntegerType
 from util import schemas
 
 
@@ -566,6 +566,303 @@ def add_course_org_details(course_df: DataFrame, org_df: DataFrame) -> DataFrame
     except Exception as e:
         print(f"❌ Error in add_course_org_details: {str(e)}")
         raise
+
+def parse_raw_assessment_data(spark: SparkSession, config):
+    """
+    Parses raw assessment data by selecting relevant columns and parsing JSON fields with comprehensive logging.
+    """
+    print(f"\n🚀 Starting parse_raw_assessment_data function")
+    start_time = time.time()
+    logger = spark._jvm.org.apache.log4j.LogManager.getLogger("assessment prejoin")
+
+    try:
+        output_base_path = getattr(config, 'baseCachePath', '/home/analytics/pyspark/data-res/pq_files/cache_pq/')
+
+        print("🔧 Selecting and aliasing columns...")
+        # Parse JSON columns
+        # read questionset hierarchy
+        questionset_hierarchy_df = spark.read.parquet(ParquetFileConstants.QUESTIONSET_HIERARCHY_PARQUET_FILE)
+        # Read raw data - userAssessmentRaw
+        user_assessment_df = spark.read.parquet(ParquetFileConstants.ASSESSMENT_DATA_RAW_PARQUET_FILE)
+
+        # process JSON fields and select relevant columns
+        user_assessment_with_json = user_assessment_df.withColumn(
+            "readResponse", from_json(col("assessmentreadresponse"), schemas.assessment_read_response_schema)
+        ).withColumn(
+            "submitRequest", from_json(col("submitassessmentrequest"), schemas.submit_assessment_request_schema)
+        ).withColumn(
+            "submitResponse", from_json(col("submitassessmentresponse"), schemas.submit_assessment_response_schema_with_children)
+        ).withColumn(
+            "assessStartTimestamp", col("assessStartTime")
+        ).withColumn(
+            "assessEndTimestamp", col("assessEndTime")
+        )
+
+        # Extract main assessment fields (this is the base that keeps ALL records)
+        final_assessment_df = user_assessment_with_json \
+        .select(
+            col("assessChildID"),
+            col("assessUserStatus"),
+            col("userID"),
+            col("assessLanguage"),
+            col("readResponse.totalQuestions").alias("assessTotalQuestions"),
+            col("readResponse.maxQuestions").alias("assessMaxQuestions"),
+            col("readResponse.expectedDuration").alias("assessExpectedDuration"),
+            col("readResponse.version").alias("assessVersion"),
+            col("readResponse.maxAssessmentRetakeAttempts").alias("assessMaxRetakeAttempts"),
+            col("readResponse.status").alias("assessReadStatus"),
+            col("readResponse.primaryCategory").alias("assessPrimaryCategory"),
+            col("submitRequest.batchId").alias("assessBatchID"),
+            col("submitRequest.courseId").alias("courseID"),
+            col("submitRequest.isAssessment").cast(IntegerType()).alias("assessIsAssessment"),
+            col("submitRequest.timeLimit").alias("assessTimeLimit"),
+            col("submitResponse.result").alias("assessResult"),
+            col("submitResponse.total").alias("assessTotal"),
+            col("submitResponse.blank").alias("assessBlank"),
+            col("submitResponse.correct").alias("assessCorrect"),
+            col("submitResponse.incorrect").alias("assessIncorrect"),
+            col("submitResponse.pass").cast(IntegerType()).alias("assessPassOriginal"),  # Keep original
+            col("submitResponse.passPercentage").alias("assessPassPercentageOriginal"),  # Keep original
+            col("submitResponse.totalSectionMarks").alias("assessTotalSectionMarks"),
+            col("submitResponse.overallResult").alias("assessOverallResultOriginal"),
+            col("submitResponse.totalPercentage").alias("assessSectionPercentage"),  # Keep original
+            col("submitResponse.totalMarks").alias("assessTotalMarks"),
+            col("assessStartTimestamp"),
+            col("assessEndTimestamp"),
+            col("submitResponse.children").alias("assessSectionChildren")  # Keep for section logic
+        )
+
+        # ============================================================================
+        # NEW LOGIC: Calculate section-wise pass/fail (only for records with sections)
+        # ============================================================================
+
+        # Extract section data using explode_outer to preserve records without sections
+        assessment_section_df = user_assessment_with_json \
+       .withColumn("assessSections", explode_outer(col("submitResponse.children"))) \
+        .select(
+            col("assessChildID"),
+            col("userID"),
+            col("submitResponse.totalPercentage").alias("assessTotalPercentage"),
+            col("submitResponse.overallResult").alias("assessOverallResult"),
+            col("submitResponse.totalMarks").alias("assessTotalMarks"),
+            col("assessStartTimestamp"),
+            col("assessSections.sectionResult").alias("assessSectionFinalResult"),
+            col("assessSections.sectionMarks").alias("assessSectionMarks"),
+            col("submitResponse.passPercentage").alias("assessPassPercentage")
+        )
+
+        # Aggregate section-wise data
+        section_wise_user_assessment_df = (
+            assessment_section_df
+            # Cast BEFORE aggregation
+            .withColumn("assessSectionMarks", col("assessSectionMarks").cast(FloatType()))
+            .withColumn("assessTotalMarks", col("assessTotalMarks").cast(FloatType()))
+            .withColumn("assessTotalPercentage", col("assessTotalPercentage").cast(FloatType()))
+            .withColumn("assessOverallResult", col("assessOverallResult").cast(FloatType()))
+            .withColumn("assessPassPercentage", col("assessPassPercentage").cast(FloatType()))
+            .groupBy("assessChildID", "userID", "assessStartTimestamp")
+            .agg(
+                count("*").alias("assessTotalSectionCount"),
+                sum(when(col("assessSectionFinalResult") == "pass", 1).otherwise(0)).alias(
+                    "assessPassedSectionCount"),
+                sum(when(col("assessSectionFinalResult") == "fail", 1).otherwise(0)).alias(
+                    "assessFailedSectionCount"),
+                sum(col("assessSectionMarks")).alias("assessTotalSectionMarks"),
+                first(col("assessTotalMarks")).alias("assessTotalMarks"),
+                first(col("assessTotalPercentage")).alias("assessTotalPercentage"),
+                first(col("assessOverallResult")).alias("assessOverallResult"),
+                first(col("assessPassPercentage")).alias("assessPassPercentage")
+            )
+            .withColumn(
+                "assessPassedAllSections",
+                when(
+                    col("assessPassedSectionCount") == col("assessTotalSectionCount"),
+                    lit(1)
+                ).otherwise(lit(0))
+            )
+            .select(
+                "assessChildID",
+                "userID",
+                "assessStartTimestamp",
+                "assessTotalSectionCount",
+                "assessPassedSectionCount",
+                "assessFailedSectionCount",
+                "assessPassedAllSections",
+                "assessTotalSectionMarks",
+                "assessTotalMarks",
+                "assessTotalPercentage",
+                "assessPassPercentage",
+                "assessOverallResult"
+            )
+        )
+
+        # Join with questionset hierarchy and apply new pass/fail logic
+        final_assessment_data = (
+            section_wise_user_assessment_df.alias("sa")
+            .join(
+                questionset_hierarchy_df.alias("qh"),
+                col("sa.assessChildID") == col("qh.questionsetID"),
+                "inner"
+            )
+            # Cast numeric columns
+            .withColumn("assessOverallResult", col("assessOverallResult").cast(FloatType()))
+            .withColumn("assessPassPercentage", col("assessPassPercentage").cast(FloatType()))
+            # Safe effective pass percentage
+            .withColumn(
+                "effectivePassPercentage",
+                when(
+                    col("assessPassPercentage").isNotNull(),  # ← REMOVE the > 0 condition
+                    col("assessPassPercentage")
+                ).otherwise(col("questionsetMinimumPassPercentage")))
+
+            # Final result logic
+            .withColumn(
+                "finalResult",
+                when(
+                    col("scoreCutoffType") == "SectionLevel",
+                    when(
+                        col("assessTotalSectionCount") == col("questionsetNoOfSection"),
+                        when(col("assessPassedAllSections") == 1, lit("pass")).otherwise(lit("fail"))
+                    ).otherwise(lit("fail"))
+                ).otherwise(
+                    when(col("assessOverallResult") >= col("effectivePassPercentage"), lit("pass"))
+                    .otherwise(lit("fail"))
+                )
+            )
+            # Marks calculation
+            .withColumn(
+                "assessTotalSectionMarks",
+                when(col("scoreCutoffType") == "SectionLevel", col("assessTotalSectionMarks"))
+                .otherwise(col("assessOverallResult"))
+            )
+            #.withColumn(
+            #    "assessOverallResultNew",
+            #    when(col("assessTotalSectionMarks").isNotNull(), col("assessTotalSectionMarks"))
+            #    .otherwise(col("assessOverallResult"))
+            #)
+            .withColumn(
+                "assessOverallResultNew",
+                when(col("assessTotalSectionMarks").isNotNull(), col("assessTotalPercentage"))
+                .otherwise(col("assessOverallResult"))
+            )
+            .select(
+                col("assessChildID"),
+                col("userID"),
+                col("assessStartTimestamp"),
+                col("questionsetNoOfSection"),
+                col("assessTotalSectionCount"),
+                col("assessPassedSectionCount"),
+                col("assessFailedSectionCount"),
+                col("finalResult"),
+                col("assessTotalSectionMarks"),
+                col("assessTotalMarks"),
+                col("effectivePassPercentage"),
+                col("assessOverallResultNew"),
+                col("assessTotalPercentage")
+            )
+        )
+
+        # Deduplicate using window function
+        windowSpec = Window.partitionBy("assessChildID", "userID", "assessStartTimestamp").orderBy(
+            col("assessTotalSectionMarks").desc())
+        final_assessment_data_deduped = (
+            final_assessment_data
+            .withColumn("rn", row_number().over(windowSpec))
+            .filter(col("rn") == 1)
+            .drop("rn")
+        )
+
+        # ============================================================================
+        # KEY FIX: Use LEFT JOIN to preserve ALL records from final_assessment_df
+        # ============================================================================
+
+        fa_main = final_assessment_df.alias("fa_main")
+        fa_data = final_assessment_data_deduped.alias("fa_data")
+
+        final_assessment_df_merged = fa_main.join(
+            fa_data,
+            (col("fa_main.assessChildID") == col("fa_data.assessChildID")) &
+            (col("fa_main.userID") == col("fa_data.userID")) &
+            (coalesce(col("fa_main.assessStartTimestamp").cast("string"), lit("__NULL__")) ==
+             coalesce(col("fa_data.assessStartTimestamp").cast("string"), lit("__NULL__"))),
+            "left"  # LEFT JOIN - this is the key change!
+        ) \
+        .select(
+            col("fa_main.assessChildID"),
+            col("fa_main.assessUserStatus"),
+            col("fa_main.userID"),
+            col("fa_main.assessLanguage"),
+            col("fa_main.assessTotalQuestions"),
+            col("fa_main.assessMaxQuestions"),
+            col("fa_main.assessExpectedDuration"),
+            col("fa_main.assessVersion"),
+            col("fa_main.assessMaxRetakeAttempts"),
+            col("fa_main.assessReadStatus"),
+            col("fa_main.assessPrimaryCategory"),
+            col("fa_main.assessBatchID"),
+            col("fa_main.courseID"),
+            col("fa_main.assessIsAssessment"),
+            col("fa_main.assessTimeLimit"),
+            col("fa_main.assessResult"),
+            col("fa_main.assessTotal"),
+            col("fa_main.assessBlank"),
+            col("fa_main.assessCorrect"),
+            col("fa_main.assessIncorrect"),
+            # Use new logic if available, otherwise fall back to original
+            coalesce(col("fa_data.effectivePassPercentage"), col("fa_main.assessPassPercentageOriginal")).alias(
+                "assessPassPercentage"),
+            col("fa_main.assessTotalSectionMarks"),
+            coalesce(col("fa_data.assessOverallResultNew"), col("fa_main.assessOverallResultOriginal")).alias(
+                "assessOverallResult"),
+            col("fa_main.assessTotalMarks"),
+            col("fa_main.assessStartTimestamp"),
+            col("fa_main.assessEndTimestamp"),
+            col("fa_data.assessTotalPercentage"),
+            # For assessPass: use new logic if available, otherwise use original
+            when(col("fa_data.finalResult").isNotNull(),
+                 when(col("fa_data.finalResult") == "pass", lit(1)).otherwise(lit(0))
+                 ).otherwise(col("fa_main.assessPassOriginal")).alias("assessPass")
+        )
+
+        # Validation logging
+        original_count = final_assessment_df.count()
+        final_count = final_assessment_df_merged.count()
+        logger.info(f"Original record count: {original_count}")
+        logger.info(f"Final record count: {final_count}")
+        logger.info(f"Record count difference: {original_count - final_count}")
+
+        if original_count != final_count:
+            logger.warning(f"WARNING: Record count mismatch! Lost {original_count - final_count} records")
+        else:
+            logger.info("SUCCESS: All records preserved!")
+
+        # Write final output
+        write_parquet(final_assessment_df_merged, f"{output_base_path}/userAssessment")
+        # Cleanup
+        user_assessment_df.unpersist()
+        final_assessment_df.unpersist()
+        final_assessment_data.unpersist()
+        final_assessment_data_deduped.unpersist()
+        section_wise_user_assessment_df.unpersist()
+
+    except Exception as e:
+        print(f"❌ Error in parse_raw_assessment_data: {str(e)}")
+    raise
+
+
+
+def write_parquet(df: "DataFrame", path: str, partition_cols: list = None, mode: str = "overwrite"):
+        """Write DataFrame to Parquet with optimization"""
+        writer = df.coalesce(16)
+
+        if partition_cols:
+            writer = writer.write.partitionBy(*partition_cols)
+        else:
+            writer = writer.write
+
+        writer.mode(mode) \
+        .option("compression", "snappy") \
+        .parquet(path)
 
 
 def print_execution_summary():
