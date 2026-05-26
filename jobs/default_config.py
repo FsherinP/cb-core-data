@@ -15,17 +15,17 @@ DEFAULT_CONFIG = {
     'redisDB': '12',
 
     # Kfaka configuration
-    'brokerList': '10.175.5.154:9092,10.175.5.155:9092,10.175.5.208:9092',
+    'brokerList': '10.175.4.154:9092,10.175.4.155:9092,10.175.4.208:9092',
     'compression': None,
 
     # Spark Connection Hosts
-    'sparkCassandraConnectionHost': '10.175.5.9',
-    'sparkDruidRouterHost': '10.175.5.33',
-    'sparkElasticsearchConnectionHost': '10.175.5.10',
-    'sparkElasticsearchAuditConnectionHost': '10.175.5.10',
+    'sparkCassandraConnectionHost': '192.168.3.211',
+    'sparkDruidRouterHost': '192.168.3.91',
+    'sparkElasticsearchConnectionHost': '192.168.3.211',
+    'sparkElasticsearchAuditConnectionHost': '10.175.4.10',
     'sparkElasticsearchConnectionPort': '9200',
     'sparkMongoConnectionHost': '192.168.3.178',
-    'sparkIGotElasticsearchConnectionHost':'10.175.5.45',
+    'sparkIGotElasticsearchConnectionHost':'10.175.3.36',
 
     # External Service Configuration
     'fracBackendHost': 'frac-dictionary.karmayogi.nic.in',
@@ -49,7 +49,7 @@ DEFAULT_CONFIG = {
     'ObservationStatusReportBatchSize': '15000',
 
     # PostgreSQL Application Database
-    'appPostgresHost': '10.175.5.15:5432',
+    'appPostgresHost': '192.168.3.178:5432',
     'appPostgresUsername': 'sunbird',
     'appPostgresCredential': 'sunbird',
     'appPostgresSchema': 'sunbird',
@@ -58,7 +58,7 @@ DEFAULT_CONFIG = {
     'postgresCompetencyHierarchyTable': 'node_mapping',
 
     # PostgreSQL Data Warehouse
-    'dwPostgresHost': '10.175.5.62:5432',
+    'dwPostgresHost': '192.168.3.211:5432',
     'dwPostgresUsername': 'postgres',
     'dwPostgresCredential': 'Password@12345678',
     'dwPostgresSchema': 'warehouse',
@@ -89,7 +89,7 @@ DEFAULT_CONFIG = {
     'cassandraUserFeedKeyspace': 'sunbird_notifications',
 
     # Cassandra Core Host
-    'lpCassandraHost': '10.175.5.9',
+    'lpCassandraHost': '192.168.3.211',
 
     # Cassandra Tables
     'cassandraUserTable': 'user',
@@ -192,8 +192,8 @@ DEFAULT_CONFIG = {
     'contentEndSurveyFormid' : ['1766408457687'],
 
     # Learning Week Configuration
-    'nationalLearningWeekStart': '2026-04-01 00:00:00',
-    'nationalLearningWeekEnd': '2026-04-10 23:59:59',
+    'nationalLearningWeekStart': '2024-10-19 00:00:00',
+    'nationalLearningWeekEnd': '2024-10-27 23:59:59',
     'stateLearningWeekStart': '2024-10-19 00:00:00',
     'stateLearningWeekEnd': '2025-03-14 23:59:59',
     'sizeBucketString': '1-1000-XS,1001-2500-S,2501-5000-M,5001-10000-L,10001-50000-XL,above 50000-XXL',
@@ -236,7 +236,7 @@ DEFAULT_CONFIG = {
 
     # Kafka/Messaging Configuration
     'brokerList': '192.168.3.249:9092',
-    'topic': 'prod.dashboard.default',
+    'topic': 'dev.dashboard.default',
     'compression': 'none',
 
     # Peer validation configuration
@@ -246,7 +246,7 @@ DEFAULT_CONFIG = {
     'apiBasedNotificationEnabled': True,
     'notificationAPIURL': 'http://10.175.5.200/cb-notification/v1/notifications/bulk/create/peervalidation',
     'peerValidationKafkaTopic':'prod.peer.survey.notification.sent',
-    'peerValidationFormIndex': 'fs-forms-alias-v2'
+    'peerValidationFormIndex': 'fs-forms-alias-v2',
 
 }
 
@@ -255,19 +255,19 @@ DEFAULT_SIDE_OUTPUT = {
     'brokerList': '192.168.3.249:9092',
     'compression': 'none',
     'topics': {
-        'roleUserCount': 'prod.dashboards.role.count',
-        'orgRoleUserCount': 'prod.dashboards.org.role.count',
-        'allCourses': 'prod.dashboards.course',
-        'userCourseProgramProgress': 'prod.dashboards.user.course.program.progress',
-        'fracCompetency': 'prod.dashboards.competency.frac',
-        'courseCompetency': 'prod.dashboards.competency.course',
-        'expectedCompetency': 'prod.dashboards.competency.expected',
-        'declaredCompetency': 'prod.dashboards.competency.declared',
-        'competencyGap': 'prod.dashboards.competency.gap',
-        'userOrg': 'prod.dashboards.user.org',
-        'org': 'prod.dashboards.org',
-        'userAssessment': 'prod.dashboards.user.assessment',
-        'assessment': 'prod.dashboards.assessment'
+        'roleUserCount': 'dev.dashboards.role.count',
+        'orgRoleUserCount': 'dev.dashboards.org.role.count',
+        'allCourses': 'dev.dashboards.course',
+        'userCourseProgramProgress': 'dev.dashboards.user.course.program.progress',
+        'fracCompetency': 'dev.dashboards.competency.frac',
+        'courseCompetency': 'dev.dashboards.competency.course',
+        'expectedCompetency': 'dev.dashboards.competency.expected',
+        'declaredCompetency': 'dev.dashboards.competency.declared',
+        'competencyGap': 'dev.dashboards.competency.gap',
+        'userOrg': 'dev.dashboards.user.org',
+        'org': 'dev.dashboards.org',
+        'userAssessment': 'dev.dashboards.user.assessment',
+        'assessment': 'dev.dashboards.assessment'
     }
 }
 
