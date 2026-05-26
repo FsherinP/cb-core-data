@@ -10,6 +10,8 @@ from pyspark.sql.functions import (
 from pyspark.sql.types import (StructType, StructField,StringType)
 from datetime import datetime, timedelta, time, timezone
 import sys
+import requests
+import json
 
 sys.path.append(str(Path(__file__).resolve().parents[2]))
 from dfutil.content import contentDFUtil
@@ -48,15 +50,14 @@ class DSRComputationUpdatedModel:
         .withColumnRenamed("id", "user_id") \
                 .withColumnRenamed("rootorgid", "mdo_id") \
                 .withColumn("userCreatedTimestamp", to_timestamp(col("createddate"), "yyyy-MM-dd HH:mm:ss:SSSZ").cast("long")) \
-                .filter(col("status") == 1).cache()
+                .filter(col("status") == 1)
             contentEnrolmentDataDF = spark.read.parquet(ParquetFileConstants.ENROLMENT_SELECT_PARQUET_FILE)
             externalContentEnrolmentDataDF = spark.read.parquet(ParquetFileConstants.EXTERNAL_COURSE_ENROLMENTS_PARQUET_FILE)
-            contentFilter = (col("content_type").isin("Course", "Program", "Blended Program", "CuratedCollections", "Curated Program") &
-                            col("content_status").isin("Live", "Retired"))
             contentDF = spark.read.parquet(ParquetFileConstants.ESCONTENT_PARQUET_FILE) \
                 .withColumnRenamed("identifier", "content_id") \
                 .withColumnRenamed("primaryCategory", "content_type") \
-                .withColumnRenamed("status", "content_status")
+                .withColumnRenamed("status", "content_status") \
+                .withColumnRenamed("courseCategory", "content_sub_type")
 
 
             ist_offset = timezone(timedelta(hours=5, minutes=30))
@@ -65,10 +66,10 @@ class DSRComputationUpdatedModel:
 
             previous_day_start = datetime.combine(current_date - timedelta(days=1), time.min, tzinfo=ist_offset)
 
-            previous_day_end = datetime.combine(current_date, time.min, tzinfo=ist_offset) - timedelta(seconds=1)
+            previous_day_end = datetime.combine(current_date, time.min, tzinfo=ist_offset) - timedelta(milliseconds=1)
 
-            prev_start = previous_day_start.strftime("%Y-%m-%d %H:%M:%S")
-            prev_end = previous_day_end.strftime("%Y-%m-%d %H:%M:%S")
+            prev_start = previous_day_start.strftime("%Y-%m-%d %H:%M:%S.%f")[:-3]
+            prev_end   = previous_day_end.strftime("%Y-%m-%d %H:%M:%S.%f")[:-3]
 
             print("previous day start :", prev_start)
             print("previous day end   :", prev_end)
@@ -76,32 +77,77 @@ class DSRComputationUpdatedModel:
             prev_end_ts = lit(prev_end).cast("timestamp")
 
             #Count of Content Published
-            overall_live_content_count = contentDF.filter(col("content_status") == 'Live').count()
-            yest_total_live_content_count = contentDF.filter((col("content_status") == 'Live') &
+            internal_live_course_count = contentDF.filter(
+                (col("content_status") == 'Live') &
+                (col("content_type") == 'Course') &
+                (col("content_sub_type").isin('Course', 'Moderated Course'))).count()
+
+            internal_yest_live_course_count = contentDF.filter(
+                (col("content_status") == 'Live') &
+                (col("content_type") == 'Course') &
+                (col("content_sub_type").isin('Course', 'Moderated Course')) &
                 (col("lastPublishedOn") >= prev_start_ts) &
                 (col("lastPublishedOn") <= prev_end_ts)).count()
 
-            Redis.update("overall_live_course_published", str(overall_live_content_count), conf=config)
-            Redis.update("yesterday_live_course_published", str(yest_total_live_content_count), conf=config)
+            api_url = "https://portal.igotkarmayogi.gov.in/api/cios/v1/search/content"
+            headers = {"Authorization": "bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiI5a04xTW1TcGVuVTAyam8zVHg1U2p0amhTOFVXeGVSUiJ9.LWAgFust4e0wntxqY8_MQjf5WQ9RSD6Hg45jX_NoCXY",
+                       "Content-Type": "application/json"}
+            payload = {
+                "filterCriteriaMap": {},
+                "requestedFields": ["contentId"],
+                "facets": ["contentPartner.contentPartnerName"],
+                "pageNumber": 0,
+                "pageSize": 100,  # Adjust if needed
+                "orderBy": "duration",
+                "orderDirection": "desc"}
 
-            filteredContentDF = contentDF.filter(contentFilter).select("content_id", "content_type", "content_status")
+            try:
+                response = requests.post(api_url, headers=headers, json=payload)
+                response.raise_for_status()
+                api_data = response.json()
+                external_course_count = api_data.get("totalCount", 0)
+                print(f"External course count from API: {external_course_count}")
+            except Exception as e:
+                print(f"Error fetching external courses: {e}")
+                external_course_count = 0
 
-            # --- Content enrolments (active users only)
-            enrichedContentDF = contentEnrolmentDataDF.alias("e").join(
-                broadcast(filteredContentDF.alias("c")), col("e.courseID") == col("c.content_id"), "left")\
-                .join(broadcast(activeUsersDF.select("user_id").alias("u")), col("e.userID") == col("u.user_id"), "inner")\
-                .select(col("e.*"), col("c.content_type"), col("c.content_status")).cache()
+            overall_live_course_count = internal_live_course_count + external_course_count
 
-            enrichedContentEnrolmentsYestDF=enrichedContentDF.filter(
-                (col("courseEnrolledTimestamp") >= prev_start_ts) &
-                (col("courseEnrolledTimestamp") <= prev_end_ts))
+            # For yesterday count - we can only track internal since API doesn't have timestamps
+            # Store today's external count for tomorrow's calculation
+            current_external_count_str = Redis.get("external_course_count_current", conf=config)
+            previous_external_count = int(current_external_count_str) if current_external_count_str else 0
+
+            # Calculate yesterday's total = yesterday's internal + previous external count
+            yest_total_live_course_count = internal_yest_live_course_count + previous_external_count
+
+            # Update Redis keys
+            Redis.update("overall_live_course_published", str(overall_live_course_count), conf=config)
+            Redis.update("yesterday_live_course_published", str(yest_total_live_course_count), conf=config)
+            Redis.update("external_course_count_current", str(external_course_count), conf=config)
+
+            print(f"Internal courses: {internal_live_course_count}")
+            print(f"External courses: {external_course_count}")
+            print(f"Total live courses: {overall_live_course_count}")
+            print(f"Yesterday's count: {yest_total_live_course_count}")
+
+            contentFilter = (col("content_type").isin("Course", "Program", "Blended Program", "CuratedCollections", "Curated Program") &
+                             col("content_status").isin("Live", "Retired"))
+            enrichedContentEnrolmentsDF = contentEnrolmentDataDF.alias("e").join(
+                contentDF.select("content_id", "content_type", "content_status").alias("c"), col("e.courseID") == col("c.content_id"), "left") \
+                .join(activeUsersDF.select("user_id").alias("u"), col("e.userID") == col("u.user_id"), "inner") \
+                .select(col("e.*"), col("c.content_type"), col("c.content_status"))
+
+            # Overall Course enrolment count
+            total_enrolments = enrichedContentEnrolmentsDF.filter(contentFilter).count() + externalContentEnrolmentDataDF.count()
+
+            enrichedContentEnrolmentsYestDF=enrichedContentEnrolmentsDF.filter(contentFilter &
+                                                                               (col("courseEnrolledTimestamp") >= prev_start_ts) &
+                                                                               (col("courseEnrolledTimestamp") <= prev_end_ts))
 
             externalContentEnrolmentDataYestDF = externalContentEnrolmentDataDF.filter(
                 (col("enrolled_date") >= prev_start_ts) &
                 (col("enrolled_date") <= prev_end_ts))
-
-            # Overall Course enrolment count
-            total_enrolments = enrichedContentDF.count() + externalContentEnrolmentDataDF.count()
 
             #Yesterday Course enrolment count
             yesterday_enrolments = enrichedContentEnrolmentsYestDF.count() + externalContentEnrolmentDataYestDF.count()
@@ -115,18 +161,25 @@ class DSRComputationUpdatedModel:
             completionFilter = (
             (col("dbCompletionStatus") == 2)
             )
-            enrichedContentCompletedDF = enrichedContentDF.filter(completionFilter)
 
-            enrichedContentCompletedYestDF = enrichedContentCompletedDF.filter(
-                (col("courseCompletedTimestamp") >= prev_start_ts) &
-                (col("courseCompletedTimestamp") <= prev_end_ts))
+            enrichedContentCompletedDF = contentEnrolmentDataDF.alias("e").join(
+                contentDF.select("content_id", "content_type", "content_status").alias("c"), col("e.courseID") == col("c.content_id"), "left") \
+                .join(activeUsersDF.select("user_id").alias("u"), col("e.userID") == col("u.user_id"), "inner") \
+                .select(col("e.*"), col("c.content_type"), col("c.content_status"))
+
+            total_content_completions = enrichedContentCompletedDF.filter(contentFilter & completionFilter).count() + externalContentEnrolmentDataDF.filter(col("status") == 2).count()
+
+
+            enrichedContentCompletedYestDF = enrichedContentCompletedDF.filter(contentFilter &
+                                                                               completionFilter &
+                                                                               (col("courseCompletedTimestamp") >= prev_start_ts) &
+                                                                               (col("courseCompletedTimestamp") <= prev_end_ts))
 
             externalContentCompletedDataYestDF = externalContentEnrolmentDataDF.filter(
                 (col("status") == 2) &
                 (col("completedon") >= prev_start_ts) &
                 (col("completedon") <= prev_end_ts))
 
-            total_content_completions = enrichedContentCompletedDF.count() + externalContentEnrolmentDataDF.filter(col("status") == 2).count()
 
             # yesterday Content Completion Count
             yesterday_content_completions = enrichedContentCompletedYestDF.count() + externalContentCompletedDataYestDF.count()
@@ -135,7 +188,6 @@ class DSRComputationUpdatedModel:
             Redis.update("overall_course_completion", str(total_content_completions), conf=config)
             Redis.update("yerterday_course_completion", str(yesterday_content_completions), conf=config)
 
-            enrichedContentDF.unpersist()
             # --- Registered users (active) & registered yesterday ---
             total_registered_users = activeUsersDF.count()
 
@@ -146,16 +198,16 @@ class DSRComputationUpdatedModel:
             .withColumn("todayStartTimestamp", date_trunc("day", current_timestamp()).cast("long")) \
             .filter(expr("userCreatedTimestamp >= yesterdayStartTimestamp AND userCreatedTimestamp < todayStartTimestamp")) \
             .count()
-            print("Total live content:", overall_live_content_count)
-            print("Yesterday live content:", yest_total_live_content_count)
+            print("Total live content:", overall_live_course_count)
+            print("Yesterday live content:", yest_total_live_course_count)
             print("Total enrolments:", total_enrolments)
             print("Yesterday enrolments:", yesterday_enrolments)
             print("Total content completions:", total_content_completions)
             print("Yesterday content completions:", yesterday_content_completions)
             print("Total registered users:", total_registered_users)
             print("Yesterday registrations:", usersRegisteredYesterdayCount)
-            activeUsersDF.unpersist()
-            Redis.update("users_registered_yersterday", str(usersRegisteredYesterdayCount), conf=config)
+
+            Redis.update("sers_registered_yersterday", str(usersRegisteredYesterdayCount), conf=config)
 
             print("[SUCCESS] DSRComputationModel unified metrics updated")
 

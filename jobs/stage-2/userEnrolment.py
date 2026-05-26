@@ -414,9 +414,11 @@ def main():
     # Initialize Spark Session with optimized settings for caching
     spark = SparkSession.builder \
         .appName("User Enrolment Report Model - Cached") \
-        .config("spark.sql.shuffle.partitions", "200") \
-        .config("spark.executor.memory", "15g") \
-        .config("spark.driver.memory", "15g") \
+        .config("spark.master", "local[16]") \
+        .config("spark.sql.shuffle.partitions", "240") \
+        .config("spark.executor.memory", "30g") \
+        .config("spark.driver.memory", "128g") \
+        .config("spark.driver.memoryOverhead", "20g") \
         .config("spark.executor.memoryFraction", "0.7") \
         .config("spark.storage.memoryFraction", "0.2") \
         .config("spark.storage.unrollFraction", "0.1") \

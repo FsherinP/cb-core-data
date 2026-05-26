@@ -10,18 +10,19 @@ DEFAULT_CONFIG = {
 
     # Redis Configuration
     'redisHost': '10.175.5.20',
+    'redisKpHost':'10.175.5.19',
     'redisPort': '6379',
     'redisDB': '12',
 
     # Kfaka configuration
-    'brokerList': '10.175.5.154:9092,10.175.5.155:9092,10.175.5.156:9092',
+    'brokerList': '10.175.4.154:9092,10.175.4.155:9092,10.175.4.208:9092',
     'compression': None,
 
     # Spark Connection Hosts
     'sparkCassandraConnectionHost': '192.168.3.211',
     'sparkDruidRouterHost': '192.168.3.91',
     'sparkElasticsearchConnectionHost': '192.168.3.211',
-    'sparkElasticsearchAuditConnectionHost': '10.175.5.10',
+    'sparkElasticsearchAuditConnectionHost': '10.175.4.10',
     'sparkElasticsearchConnectionPort': '9200',
     'sparkMongoConnectionHost': '192.168.3.178',
     'sparkIGotElasticsearchConnectionHost':'10.175.3.36',
@@ -80,10 +81,6 @@ DEFAULT_CONFIG = {
     'dwNLWUserLeaderboardTable': 'nlw_user_leaderboard',
     'dwAparCBPEnrollmentTable': 'apar_cbp_enrollment',
     'dwCourseCompletionSurveryTable': 'course_completion_survey_details',
-    'dwpeerValidationNotificationQueue': 'peer_validation_notification_queue',
-    'dwpeerValidationFormStateTable': 'peer_validation_form_state',
-    'dwcourseReminderStateTable' : 'gamification_course_state',
-    'dwnotificationQueue' : 'gamification_notification_queue',
 
     # Cassandra Keyspaces
     'cassandraUserKeyspace': 'sunbird',
@@ -125,7 +122,8 @@ DEFAULT_CONFIG = {
     'cassandraSLWMdoLeaderboardTable': 'slw_mdo_leaderboard',
     'cassandraSLWMdoTopLearnerTable': 'slw_mdo_top_learners',
     'cassandraUserExtendedProfileTable' : "user_extended_profile",
-
+    'cassandraQuestionSetHierarchyTable': "questionset_hierarchy",
+    'cassandraAccessSettingRulesTable': "access_setting_rules_v2",
     # MongoDB Configuration
     'mongoDatabase': 'nodebb',
     'mongoDBCollection': 'objects',
@@ -165,6 +163,7 @@ DEFAULT_CONFIG = {
     'commsConsoleReportPath': 'standalone-reports/comms-console',
     'validationReportPath': 'standalone-reports/validation-report',
     'courseCompletionSurveyPath': 'standalone-reports/course-completion-survey-report',
+    'gamificationReportPath' : 'standalone-reports/gamification-report',
 
     'blendedProgramReport' : 'BlendedProgramReport.csv',
     'cbaReport' : 'UserAssessmentReport.csv',
@@ -177,16 +176,6 @@ DEFAULT_CONFIG = {
     'userReport' : 'UserReport.csv',
     'completionSurveyReport':'completionSurvey.csv',
 
-    #Peer Validation Configuration
-    'notificationBatchSize': 100,
-    'apiBasedNotificationEnabled': False,
-    'notificationAPIURL': '',
-    
-
-    # Gamification  Configuration
-    'gamificationNotificationEligibilityDays': 7,
-    'gamificationNotificationBatchSize': 100,
-    'gamificationNotificationEndpoint' : '',
 
     # Communications Console Configuration
     'commsConsolePrarambhEmailSuffix': '.kb@karmayogi.in',
@@ -199,7 +188,7 @@ DEFAULT_CONFIG = {
     # Elasticsearch Configuration
     'esFormDataIds': '1718964921012,1720793361489',
     'esFormDataIndex': 'form_data',
-    'completionSurveyFormIds':["1765870394436"],
+    'completionSurveyFormIds':["1766408457687","1766407740425"],
     'contentEndSurveyFormid' : ['1766408457687'],
 
     # Learning Week Configuration
@@ -207,7 +196,10 @@ DEFAULT_CONFIG = {
     'nationalLearningWeekEnd': '2024-10-27 23:59:59',
     'stateLearningWeekStart': '2024-10-19 00:00:00',
     'stateLearningWeekEnd': '2025-03-14 23:59:59',
-    'sizeBucketString': '1-100-XS,101-500-S,501-1000-M,1001-10000-L,10001-25000-X,above 25000-XXL',
+    'sizeBucketString': '1-1000-XS,1001-2500-S,2501-5000-M,5001-10000-L,10001-50000-XL,above 50000-XXL',
+    'stateSizeBucketString' : '1-100000-S,100001-500000-M,above 500000-L',
+    'nlwStatesList': 'ANDAMAN and NICOBAR,ANDHRA PRADESH,ARUNACHAL PRADESH,ASSAM,BIHAR,CHANDIGARH,CHHATTISGARH,Dadra and Nagar Haveli and Daman and Diu,DELHI,GOA,GUJARAT,HARYANA,HIMACHAL PRADESH,JAMMU and KASHMIR,JHARKHAND,KARNATAKA,KERALA,LADAKH,LAKSHADWEEP,MADHYA PRADESH,MAHARASHTRA,MANIPUR,MEGHALAYA,MIZORAM,NAGALAND,ODISHA,PUDUCHERRY,PUNJAB,RAJASTHAN,SIKKIM,TAMIL NADU,TELANGANA,TRIPURA,UTTAR PRADESH,UTTARAKHAND,WEST BENGAL',
+    'stateUniverseMap': {'CHANDIGARH': 37000,'CHHATTISGARH': 377881,'DELHI': 80000,'GUJARAT': 450000,'HIMACHAL PRADESH': 180000,'JAMMU and KASHMIR': 400000,'JHARKHAND': 150000,'KERALA': 600000,'LADAKH': 12000,'LAKSHADWEEP': 9600,'ODISHA': 400000,'PUDUCHERRY': 25000,'PUNJAB': 350000,'RAJASTHAN': 750000,'TAMIL NADU': 1500000,'TELANGANA': 500000,'UTTAR PRADESH': 2000000,'UTTARAKHAND': 177579,'WEST BENGAL': 1000000},
     'overridesForSlw': {},
     'rollupRequiredOrgs': [],
 
@@ -224,8 +216,8 @@ DEFAULT_CONFIG = {
     'kcmSyncPath': 'standalone-reports/merged/kcm/',
     'unifiedParquetPath': 'airflowData/',
     'unifiedParquetLocalPath': '/home/analytics/pyspark/warehouse/unified/',
-    'directoriesToSelect': ["blended-program-report-mdo","gamification-report","cbp-report-mdo-summary","course-report","cba-report","cbp-report-mdo-enrolment","user-report","user-enrollment-report"],
-    'pysparkDirectoriesToSelect': ["blended-program-report-mdo","gamification-report","cbp-report-mdo-summary","course-report","cba-report","cbp-report-mdo-enrolment","user-report","user-enrollment-report"],
+    'directoriesToSelect': ["blended-program-report-mdo","cbp-report-mdo-summary","course-report","cba-report","cbp-report-mdo-enrolment","user-report","user-enrollment-report"],
+    'pysparkDirectoriesToSelect': ["blended-program-report-mdo","cbp-report-mdo-summary","gamification-report","course-report","cba-report","cbp-report-mdo-enrolment","user-report","user-enrollment-report"],
     'pysparkCBPDirectoriesToSelect': ["blended-program-report-cbp","user-assessment-report-cbp", "course-completion-survey-report"],
     'googleServiceAccountFilePath': '/home/analytics/pyspark/jobs/gcp_service_account.json',
     'gcpBucket': 'igotproddp',
@@ -245,8 +237,17 @@ DEFAULT_CONFIG = {
     # Kafka/Messaging Configuration
     'brokerList': '192.168.3.249:9092',
     'topic': 'dev.dashboard.default',
-    'peerValidationKafkaTopic': 'dev-peer-survey-notification-sent',
     'compression': 'none',
+
+    # Peer validation configuration
+    'dwpeerValidationNotificationQueue': 'peer_validation_notification_queue',
+    'dwpeerValidationFormStateTable': 'peer_validation_form_state',
+    'notificationBatchSize': 100,
+    'apiBasedNotificationEnabled': True,
+    'notificationAPIURL': 'http://10.175.5.200/cb-notification/v1/notifications/bulk/create/peervalidation',
+    'peerValidationKafkaTopic':'prod.peer.survey.notification.sent',
+    'peerValidationFormIndex': 'fs-forms-alias-v2',
+
 }
 
 # Side Output Configuration (from Scala sideOutput map)

@@ -17,6 +17,7 @@ from pyspark.sql.functions import (
     expr, date_format, to_utc_timestamp, current_timestamp, coalesce,
     to_timestamp, isnan, isnull, format_string, array_join, first, count, sum, row_number
 )
+from pyspark.sql.functions import unix_timestamp, abs
 from pyspark.sql.types import StructType, StructField, StringType, IntegerType, BooleanType, FloatType, ArrayType
 from pyspark import StorageLevel
 import logging
@@ -239,7 +240,7 @@ class DataExhaustModel:
                 col("submitassessmentresponse"),
                 col("submitassessmentrequest"),
                 col("language").alias("assessLanguage")
-            ).fillna("{}", subset=["submitassessmentresponse", "submitassessmentrequest"])
+            ).fillna("{}", subset=["submitassessmentresponse", "submitassessmentrequest"]) \
 
             # write user assessment data to parquet
             self.write_parquet(user_assessment_df, f"{output_base_path}/userAssessmentRaw")
@@ -507,6 +508,7 @@ class DataExhaustModel:
                 col("name").alias("event_name"),
                 col("event_provider_mdo_id"),
                 col("event_start_datetime"),
+                col('durationInSecs'),
                 col("duration_formatted").alias("duration"),
                 col("status").alias("event_status"),
                 col("objectType").alias("event_type"),
@@ -573,11 +575,13 @@ class DataExhaustModel:
                 col("certificate_id"),
                 col("completionpercentage").alias("completion_percentage")
             )
+            events_enrolment_df = events_enrolment_df.join(event_details_df.select("event_id", "durationInSecs"), ["event_id"], "left")
+
 
             # Add duration formatting for events
             events_enrolment_with_duration_df = events_enrolment_df.withColumn(
                 "event_duration",
-                when(col("progress_details").isNotNull(), col("progress_details.max_size")).otherwise(None)
+                when(col("durationInSecs").isNotNull(), col("durationInSecs")).otherwise(None)
             ).withColumn(
                 "progress_duration",
                 when(col("progress_details").isNotNull(), col("progress_details.duration")).otherwise(None)
@@ -586,8 +590,9 @@ class DataExhaustModel:
                 when(col("progress_details").isNotNull(), col("progress_details.duration")).otherwise(None)
             ).withColumn(
                 "event_duration_seconds",
-                when(col("progress_details").isNotNull(), col("progress_details.max_size")).otherwise(None)
-            ).drop("progress_details")
+                when(col("durationInSecs").isNotNull(), col("durationInSecs")).otherwise(None)
+            ).drop("progress_details","durationInSecs")
+
 
             events_enrolment_with_duration_df = self.duration_format(events_enrolment_with_duration_df,
                                                                      "event_duration")
@@ -596,6 +601,7 @@ class DataExhaustModel:
 
             self.write_parquet(events_enrolment_with_duration_df.coalesce(1),
                                f"{output_base_path}/eventEnrolmentDetails")
+            event_details_df.unpersist()
             events_enrolment_df.unpersist()
 
             userExtendedProfileDF = self.read_cassandra_table(self.config.cassandraUserKeyspace,
@@ -630,13 +636,6 @@ class DataExhaustModel:
             self.write_parquet(es_final_assessment_df, f"{output_base_path}/esFinalAssessment")
             es_final_assessment_df.unpersist()
 
-            # Process access control settings for CAP
-            self.logger.info("Processing access control settings for CAP...")
-            access_control_settings_df = self.read_cassandra_table(self.config.cassandraCourseKeyspace, self.config.cassandraAccessSettingRulesTable)
-
-            self.write_parquet(access_control_settings_df, f"{output_base_path}/accessControlSettings")
-            access_control_settings_df.unpersist()
-
             # Process course assessment data
             self.logger.info("Processing assessment ES content data...")
             primary_categories = ["Course Assessment"]
@@ -660,12 +659,19 @@ class DataExhaustModel:
 
             self.logger.info("ES course assessment data processing completed.")
 
+            # Process access control settings for CAP
+            self.logger.info("Processing access control settings for CAP...")
+            access_control_settings_df = self.read_cassandra_table("sunbird_courses", "access_setting_rules_v2")
+
+            self.write_parquet(access_control_settings_df, f"{output_base_path}/accessControlSettings")
+            access_control_settings_df.unpersist()
+
             # Process Elasticsearch course completion data
             self.logger.info("Processing course completion survey data...")
             fields = ["formId", "contextId", "contextName", "version", "status", "submittedBy", "submittedDate",
                       "responses"]
             fields_clause = ",".join([f'"{f}"' for f in fields])
-            array_fields = ["responses.answer", "responses.question"]
+            array_fields = ["responses.answer", "response.question"]
             query = f'{{"_source":[{fields_clause}],"query":{{"match_all":{{}}}}}}'
             course_completion_survey_df = utils.read_elasticsearch_data(
                 self.spark,
@@ -695,8 +701,10 @@ def create_spark_session_with_packages(config):
     spark = SparkSession.builder \
         .appName('DataExhaustModel') \
         .master("local[*]") \
-        .config("spark.executor.memory", '42g') \
-        .config("spark.driver.memory", '18g') \
+        .config("spark.sql.shuffle.partitions", "240") \
+        .config("spark.executor.memory", "30g") \
+        .config("spark.driver.memory", "200g") \
+        .config("spark.driver.memoryOverhead", "20g") \
         .config("spark.executor.memoryFraction", '0.7') \
         .config("spark.storage.memoryFraction", '0.2') \
         .config("spark.storage.unrollFraction", "0.1") \

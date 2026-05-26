@@ -19,13 +19,13 @@ from constants.ParquetFileConstants import ParquetFileConstants
 from dfutil.user import userDFUtil
 from dfutil.enrolment.acbp import acbpDFUtil
 from dfutil.enrolment import enrolmentDFUtil
-from dfutil.content import contentDFUtil 
+from dfutil.content import contentDFUtil
 
 
 
 def write_csv_per_mdo_id(df, output_dir, groupByAttr, isIndividualWrite=False, threshold=100000, csv_filename="report.csv"):
     """
-    Optimized hybrid write strategy: 
+    Optimized hybrid write strategy:
     - Small/medium groups: Direct CSV write via Spark partitionBy
     - Large groups: Filter first, then write to parquet for DuckDB processing
     
@@ -155,7 +155,7 @@ def merge_csv_files(csv_files: list, output_file: Path):
                 else:
                     outfile.writelines(lines[1:])  # Skip header for subsequent files
 
-def write_csv_per_mdo_id_duckdb(df, output_dir: str, group_by_attr: str, parquet_tmp_path: str = None, 
+def write_csv_per_mdo_id_duckdb(df, output_dir: str, group_by_attr: str, parquet_tmp_path: str = None,
                                large_ids=None, max_workers: int = 4, keep_parquets: bool = False, csv_filename: str = "report.csv"):
     """
     Writes CSVs per group_by_attr using partitioned parquet files and parallel conversion.
@@ -217,7 +217,7 @@ def write_csv_per_mdo_id_duckdb(df, output_dir: str, group_by_attr: str, parquet
         'detailed_results': result
     }
 
-def write_single_csv_duckdb(df, output_path: str, parquet_tmp_path: str = None, filter_condition: str = None, 
+def write_single_csv_duckdb(df, output_path: str, parquet_tmp_path: str = None, filter_condition: str = None,
                            keep_parquets: bool = False):
     """
     Creates single CSV from all partitioned parquet files.
@@ -266,14 +266,14 @@ def write_single_csv_duckdb(df, output_path: str, parquet_tmp_path: str = None, 
     
     try:
         # DuckDB optimizations
-        con.execute("PRAGMA memory_limit='40GB';")
+        con.execute("PRAGMA memory_limit='80GB';")
         con.execute("PRAGMA threads=14;")
         con.execute("PRAGMA temp_directory='/tmp/duckdb_spill';")
         con.execute("INSTALL parquet; LOAD parquet;")
         
         # Load all parquet files from the partitioned directory
         con.execute(f"CREATE TABLE source_df AS SELECT * FROM parquet_scan('{parquet_tmp_path}/**/*.parquet');")
-        
+
         # Get row count for verification
         total_rows = con.execute("SELECT COUNT(*) FROM source_df").fetchone()[0]
         print(f"    - Total rows loaded: {total_rows:,}")
@@ -381,9 +381,9 @@ def write_single_parquet(df, final_path: str):
 
     print(f"✅ Parquet written to: {final_path}")
 
-def write_csv_combined(df, single_csv_path: str, partitioned_output_dir: str, 
-                      partition_column: str, parquet_tmp_path: str = None, 
-                      filter_condition: str = None, max_workers: int = 4, 
+def write_csv_combined(df, single_csv_path: str, partitioned_output_dir: str,
+                      partition_column: str, parquet_tmp_path: str = None,
+                      filter_condition: str = None, max_workers: int = 4,
                       keep_parquets: bool = False,csv_filename: str = "report.csv"):
     """
     Combined method using partitioned parquet approach for both outputs.
@@ -448,14 +448,14 @@ def write_csv_combined(df, single_csv_path: str, partitioned_output_dir: str,
     con = duckdb.connect()
     try:
         # DuckDB optimizations
-        con.execute("PRAGMA memory_limit='40GB';")
+        con.execute("PRAGMA memory_limit='80GB';")
         con.execute("PRAGMA threads=14;")
         con.execute("PRAGMA temp_directory='/tmp/duckdb_spill';")
         con.execute("INSTALL parquet; LOAD parquet;")
         
         # Load all partitioned parquet files - ONLY ONCE
         con.execute(f"CREATE TABLE source_df AS SELECT * FROM parquet_scan('{parquet_tmp_path}/**/*.parquet');")
-        
+
         # Get total row count
         total_rows = con.execute("SELECT COUNT(*) FROM source_df").fetchone()[0]
         summary['total_rows'] = total_rows
@@ -524,7 +524,7 @@ def write_csv_combined(df, single_csv_path: str, partitioned_output_dir: str,
     }
 
 
-def convert_partitioned_parquets_to_csv(parquet_input_dir: str, csv_output_dir: str, 
+def convert_partitioned_parquets_to_csv(parquet_input_dir: str, csv_output_dir: str,
                                       partition_column: str, max_workers: int = 4,
                                       process_subset: list = None, keep_parquets: bool = False,csv_filename: str = "report.csv"):
     """
@@ -554,10 +554,10 @@ def convert_partitioned_parquets_to_csv(parquet_input_dir: str, csv_output_dir: 
     if not parquet_path.exists():
         print(f"❌ Parquet directory does not exist: {parquet_input_dir}")
         return {'success': False, 'error': 'Parquet directory not found'}
-    
-    partition_dirs = [d for d in parquet_path.iterdir() 
+
+    partition_dirs = [d for d in parquet_path.iterdir()
                      if d.is_dir() and d.name.startswith(f"{partition_column}=")]
-    
+
     # Filter to process subset if specified
     if process_subset:
         filtered_dirs = []
@@ -603,15 +603,15 @@ def convert_partitioned_parquets_to_csv(parquet_input_dir: str, csv_output_dir: 
             
             try:
                 # DuckDB optimizations for single partition processing
-                con.execute("PRAGMA memory_limit='20GB';")  # Lower memory for parallel processing
-                con.execute("PRAGMA threads=4;")  # Lower threads for parallel processing
+                con.execute("PRAGMA memory_limit='80GB';")  # Lower memory for parallel processing
+                con.execute("PRAGMA threads=14;")  # Lower threads for parallel processing
                 con.execute("PRAGMA temp_directory='/tmp/duckdb_spill';")
                 con.execute("INSTALL parquet; LOAD parquet;")
                 
                 # Load the specific partition parquet files
                 parquet_pattern = f"{partition_dir}/*.parquet"
                 con.execute(f"CREATE TABLE partition_df AS SELECT * FROM parquet_scan('{parquet_pattern}');")
-                
+
                 # Get row count
                 row_count = con.execute("SELECT COUNT(*) FROM partition_df").fetchone()[0]
                 

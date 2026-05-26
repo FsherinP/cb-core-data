@@ -402,7 +402,6 @@ def dispatch_df_to_kafka(df, topic: str, broker_list: str):
 
     df.foreachPartition(send_partition)
 
-
 def read_elasticsearch_data_scroll(spark: SparkSession, host: str, port: str, index: str, fields: list = None, scroll_size: int = 1000, scroll_timeout: str = "2m", query: dict = None, es_user: str = None, es_pass: str = None) -> DataFrame:
     """
     Fetch all data from Elasticsearch index using scroll API.

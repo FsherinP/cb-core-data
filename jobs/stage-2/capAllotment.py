@@ -236,19 +236,23 @@ class CAPAccessControlModel:
                     is_on_central_deputation,
                     is_verified_karmayogi,
                     status,
-                    -- Normalized versions for matching
-                    LOWER(TRIM(COALESCE(user_id, ''))) as user_id_lower,
-                    LOWER(TRIM(COALESCE(mdo_id, ''))) as mdo_id_lower,
-                    LOWER(TRIM(COALESCE(designation, ''))) as designation_lower,
-                    LOWER(TRIM(COALESCE(groups, ''))) as groups_lower,
-                    LOWER(TRIM(COALESCE(tag, ''))) as tag_lower,
-                    LOWER(TRIM(COALESCE(cadre, ''))) as cadre_lower,
-                    LOWER(TRIM(COALESCE(civil_service_type, ''))) as civil_service_type_lower,
-                    LOWER(TRIM(COALESCE(civil_services, ''))) as civil_services_lower,
-                    LOWER(TRIM(COALESCE(cadre_batch, ''))) as cadre_batch_lower,
-                    LOWER(TRIM(COALESCE(is_on_central_deputation, ''))) as is_on_central_deputation_lower,
-                    LOWER(TRIM(COALESCE(CAST(is_verified_karmayogi AS VARCHAR), ''))) as is_verified_karmayogi_lower,
-                    LOWER(TRIM(COALESCE(profile_status, ''))) as profile_status_lower
+                    LOWER(TRIM(COALESCE(user_id, '')))                                AS user_id_lower,
+                    LOWER(TRIM(COALESCE(mdo_id, '')))                                 AS mdo_id_lower,
+                    LOWER(TRIM(COALESCE(designation, '')))                            AS designation_lower,
+                    LOWER(TRIM(COALESCE(groups, '')))                                 AS groups_lower,
+                    LOWER(TRIM(COALESCE(tag, '')))                                    AS tag_lower,
+                    LOWER(TRIM(COALESCE(cadre, '')))                                  AS cadre_lower,
+                    LOWER(TRIM(COALESCE(civil_service_type, '')))                     AS civil_service_type_lower,
+                    LOWER(TRIM(COALESCE(civil_services, '')))                         AS civil_services_lower,
+                    LOWER(TRIM(COALESCE(cadre_batch, '')))                            AS cadre_batch_lower,
+                    CASE
+                        WHEN is_on_central_deputation IS NULL
+                          OR TRIM(CAST(is_on_central_deputation AS VARCHAR)) = ''
+                        THEN 'false'
+                        ELSE LOWER(TRIM(CAST(is_on_central_deputation AS VARCHAR)))
+                    END                                                               AS is_on_central_deputation_lower,
+                    LOWER(TRIM(COALESCE(CAST(is_verified_karmayogi AS VARCHAR), ''))) AS is_verified_karmayogi_lower,
+                    LOWER(TRIM(COALESCE(profile_status, '')))                         AS profile_status_lower
                 FROM read_parquet('{user_data_path}/**.parquet')
                 WHERE status = 1
             """)
@@ -277,10 +281,29 @@ class CAPAccessControlModel:
                 WHERE LENGTH(TRIM(cv.value)) > 0
             """)
 
+            # ── KEY FIX: precompute rootorgid lookup once ──────────────────────
+            # Instead of correlated EXISTS/NOT EXISTS subqueries (which cause
+            # O(users × criteria × criteria) scans), we materialise all
+            # (cap_id, user_group_id) → org_value pairs into a small table and
+            # LEFT JOIN against it. This keeps matching at O(users × criteria).
+            #
+            # Logic preserved:
+            #   ro.org_value IS NULL  → no rootorgid in this group → no org restriction
+            #   ro.org_value IS NOT NULL → must match user's mdo_id
+            #   multiple rootorgid rows per group → one row per value, LEFT JOIN
+            #   naturally applies OR (any matching row satisfies the condition)
+            # ──────────────────────────────────────────────────────────────────
+            print("  Precomputing rootorgid lookup...")
+            con.execute("""
+                CREATE OR REPLACE TABLE rootorgid_lookup AS
+                SELECT DISTINCT cap_id, user_group_id, criteria_value AS org_value
+                FROM criteria_exploded
+                WHERE criteria_type = 'rootorgid'
+            """)
+
             print("\n[5/5] Matching users to CAP allocations with userGroup AND/OR logic...")
 
-            # Count criteria types per userGroup (for AND logic within userGroup)
-            con.execute(f"""
+            con.execute("""
                 CREATE OR REPLACE TABLE criteria_group_count AS
                 SELECT 
                     cap_id,
@@ -292,18 +315,13 @@ class CAPAccessControlModel:
                 GROUP BY cap_id, cap_name, created_by_id, user_group_id
             """)
 
-            # Match users to individual criteria (OR logic within each criteria type)
-            con.execute(f"""
+            con.execute("""
                 CREATE OR REPLACE TABLE user_criteria_matches AS
 
-                -- rootorgid (mdo_id)
-                SELECT DISTINCT 
-                    u.user_id,
-                    ce.cap_id,
-                    ce.cap_name,
-                    ce.created_by_id,
-                    ce.user_group_id,
-                    'rootorgid' as matched_type
+                -- rootorgid (mdo_id) — direct match, no org restriction needed
+                SELECT DISTINCT
+                    u.user_id, ce.cap_id, ce.cap_name, ce.created_by_id,
+                    ce.user_group_id, 'rootorgid' as matched_type
                 FROM users u
                 INNER JOIN criteria_exploded ce 
                     ON ce.criteria_type = 'rootorgid'
@@ -311,14 +329,10 @@ class CAPAccessControlModel:
 
                 UNION ALL
 
-                -- user, customuser, alluser (direct user_id matching)
-                SELECT DISTINCT 
-                    u.user_id,
-                    ce.cap_id,
-                    ce.cap_name,
-                    ce.created_by_id,
-                    ce.user_group_id,
-                    ce.criteria_type as matched_type
+                -- user / customuser / alluser — direct user_id match, no org restriction
+                SELECT DISTINCT
+                    u.user_id, ce.cap_id, ce.cap_name, ce.created_by_id,
+                    ce.user_group_id, ce.criteria_type as matched_type
                 FROM users u
                 INNER JOIN criteria_exploded ce 
                     ON ce.criteria_type IN ('user', 'customuser', 'alluser')
@@ -338,42 +352,32 @@ class CAPAccessControlModel:
                 INNER JOIN criteria_exploded ce 
                     ON ce.criteria_type = 'designation'
                     AND u.designation_lower = ce.criteria_value
-                INNER JOIN criteria_exploded org_check
-                    ON org_check.cap_id = ce.cap_id
-                    AND org_check.user_group_id = ce.user_group_id
-                    AND org_check.criteria_type = 'rootorgid'
-                    AND u.mdo_id_lower = org_check.criteria_value
+                LEFT JOIN rootorgid_lookup ro
+                    ON ro.cap_id        = ce.cap_id
+                    AND ro.user_group_id = ce.user_group_id
+                WHERE ro.org_value IS NULL OR u.mdo_id_lower = ro.org_value
 
                 UNION ALL
 
-                -- group (maps to groups field)
+                -- group
                 SELECT DISTINCT 
-                    u.user_id,
-                    ce.cap_id,
-                    ce.cap_name,
-                    ce.created_by_id,
-                    ce.user_group_id,
-                    'group' as matched_type
+                    u.user_id, ce.cap_id, ce.cap_name, ce.created_by_id,
+                    ce.user_group_id, 'group' as matched_type
                 FROM users u
                 INNER JOIN criteria_exploded ce 
                     ON ce.criteria_type = 'group'
-                    AND u.groups_lower = ce.criteria_value
-                INNER JOIN criteria_exploded org_check
-                    ON org_check.cap_id = ce.cap_id
-                    AND org_check.user_group_id = ce.user_group_id
-                    AND org_check.criteria_type = 'rootorgid'
-                    AND u.mdo_id_lower = org_check.criteria_value
+                    AND u.groups_lower  = ce.criteria_value
+                LEFT JOIN rootorgid_lookup ro
+                    ON ro.cap_id        = ce.cap_id
+                    AND ro.user_group_id = ce.user_group_id
+                WHERE ro.org_value IS NULL OR u.mdo_id_lower = ro.org_value
 
                 UNION ALL
 
-                -- tag (no org check needed)
-                SELECT DISTINCT 
-                    u.user_id,
-                    ce.cap_id,
-                    ce.cap_name,
-                    ce.created_by_id,
-                    ce.user_group_id,
-                    'tag' as matched_type
+                -- tag — intentionally no org restriction
+                SELECT DISTINCT
+                    u.user_id, ce.cap_id, ce.cap_name, ce.created_by_id,
+                    ce.user_group_id, 'tag' as matched_type
                 FROM users u
                 INNER JOIN criteria_exploded ce 
                     ON ce.criteria_type = 'tag'
@@ -382,154 +386,115 @@ class CAPAccessControlModel:
                 UNION ALL
 
                 -- cadre
-                SELECT DISTINCT 
-                    u.user_id,
-                    ce.cap_id,
-                    ce.cap_name,
-                    ce.created_by_id,
-                    ce.user_group_id,
-                    'cadre' as matched_type
+                SELECT DISTINCT
+                    u.user_id, ce.cap_id, ce.cap_name, ce.created_by_id,
+                    ce.user_group_id, 'cadre' as matched_type
                 FROM users u
                 INNER JOIN criteria_exploded ce 
                     ON ce.criteria_type = 'cadre'
-                    AND u.cadre_lower = ce.criteria_value
-                INNER JOIN criteria_exploded org_check
-                    ON org_check.cap_id = ce.cap_id
-                    AND org_check.user_group_id = ce.user_group_id
-                    AND org_check.criteria_type = 'rootorgid'
-                    AND u.mdo_id_lower = org_check.criteria_value
+                    AND u.cadre_lower   = ce.criteria_value
+                LEFT JOIN rootorgid_lookup ro
+                    ON ro.cap_id        = ce.cap_id
+                    AND ro.user_group_id = ce.user_group_id
+                WHERE ro.org_value IS NULL OR u.mdo_id_lower = ro.org_value
 
                 UNION ALL
 
                 -- civil_service_type
-                SELECT DISTINCT 
-                    u.user_id,
-                    ce.cap_id,
-                    ce.cap_name,
-                    ce.created_by_id,
-                    ce.user_group_id,
-                    'civil_service_type' as matched_type
+                SELECT DISTINCT
+                    u.user_id, ce.cap_id, ce.cap_name, ce.created_by_id,
+                    ce.user_group_id, 'civil_service_type' as matched_type
                 FROM users u
                 INNER JOIN criteria_exploded ce 
                     ON ce.criteria_type = 'civil_service_type'
                     AND u.civil_service_type_lower = ce.criteria_value
-                INNER JOIN criteria_exploded org_check
-                    ON org_check.cap_id = ce.cap_id
-                    AND org_check.user_group_id = ce.user_group_id
-                    AND org_check.criteria_type = 'rootorgid'
-                    AND u.mdo_id_lower = org_check.criteria_value
+                LEFT JOIN rootorgid_lookup ro
+                    ON ro.cap_id        = ce.cap_id
+                    AND ro.user_group_id = ce.user_group_id
+                WHERE ro.org_value IS NULL OR u.mdo_id_lower = ro.org_value
 
                 UNION ALL
 
                 -- service (maps to civil_services)
-                SELECT DISTINCT 
-                    u.user_id,
-                    ce.cap_id,
-                    ce.cap_name,
-                    ce.created_by_id,
-                    ce.user_group_id,
-                    'service' as matched_type
+                SELECT DISTINCT
+                    u.user_id, ce.cap_id, ce.cap_name, ce.created_by_id,
+                    ce.user_group_id, 'service' as matched_type
                 FROM users u
                 INNER JOIN criteria_exploded ce 
                     ON ce.criteria_type = 'service'
                     AND u.civil_services_lower = ce.criteria_value
-                INNER JOIN criteria_exploded org_check
-                    ON org_check.cap_id = ce.cap_id
-                    AND org_check.user_group_id = ce.user_group_id
-                    AND org_check.criteria_type = 'rootorgid'
-                    AND u.mdo_id_lower = org_check.criteria_value
+                LEFT JOIN rootorgid_lookup ro
+                    ON ro.cap_id        = ce.cap_id
+                    AND ro.user_group_id = ce.user_group_id
+                WHERE ro.org_value IS NULL OR u.mdo_id_lower = ro.org_value
 
                 UNION ALL
 
                 -- batch (maps to cadre_batch)
-                SELECT DISTINCT 
-                    u.user_id,
-                    ce.cap_id,
-                    ce.cap_name,
-                    ce.created_by_id,
-                    ce.user_group_id,
-                    'batch' as matched_type
+                SELECT DISTINCT
+                    u.user_id, ce.cap_id, ce.cap_name, ce.created_by_id,
+                    ce.user_group_id, 'batch' as matched_type
                 FROM users u
                 INNER JOIN criteria_exploded ce 
                     ON ce.criteria_type = 'batch'
                     AND u.cadre_batch_lower = ce.criteria_value
-                INNER JOIN criteria_exploded org_check
-                    ON org_check.cap_id = ce.cap_id
-                    AND org_check.user_group_id = ce.user_group_id
-                    AND org_check.criteria_type = 'rootorgid'
-                    AND u.mdo_id_lower = org_check.criteria_value
+                LEFT JOIN rootorgid_lookup ro
+                    ON ro.cap_id        = ce.cap_id
+                    AND ro.user_group_id = ce.user_group_id
+                WHERE ro.org_value IS NULL OR u.mdo_id_lower = ro.org_value
 
                 UNION ALL
 
-                -- isoncentraldeputation (maps to is_on_central_deputation)
-                SELECT DISTINCT 
-                    u.user_id,
-                    ce.cap_id,
-                    ce.cap_name,
-                    ce.created_by_id,
-                    ce.user_group_id,
-                    'isoncentraldeputation' as matched_type
+                -- isoncentraldeputation
+                SELECT DISTINCT
+                    u.user_id, ce.cap_id, ce.cap_name, ce.created_by_id,
+                    ce.user_group_id, 'isoncentraldeputation' as matched_type
                 FROM users u
                 INNER JOIN criteria_exploded ce 
                     ON ce.criteria_type = 'isoncentraldeputation'
                     AND u.is_on_central_deputation_lower = ce.criteria_value
-                INNER JOIN criteria_exploded org_check
-                    ON org_check.cap_id = ce.cap_id
-                    AND org_check.user_group_id = ce.user_group_id
-                    AND org_check.criteria_type = 'rootorgid'
-                    AND u.mdo_id_lower = org_check.criteria_value
+                LEFT JOIN rootorgid_lookup ro
+                    ON ro.cap_id        = ce.cap_id
+                    AND ro.user_group_id = ce.user_group_id
+                WHERE ro.org_value IS NULL OR u.mdo_id_lower = ro.org_value
 
                 UNION ALL
 
                 -- isprofileverified (maps to is_verified_karmayogi)
-                SELECT DISTINCT 
-                    u.user_id,
-                    ce.cap_id,
-                    ce.cap_name,
-                    ce.created_by_id,
-                    ce.user_group_id,
-                    'isprofileverified' as matched_type
+                SELECT DISTINCT
+                    u.user_id, ce.cap_id, ce.cap_name, ce.created_by_id,
+                    ce.user_group_id, 'isprofileverified' as matched_type
                 FROM users u
                 INNER JOIN criteria_exploded ce 
                     ON ce.criteria_type = 'isprofileverified'
                     AND u.is_verified_karmayogi_lower = ce.criteria_value
-                INNER JOIN criteria_exploded org_check
-                    ON org_check.cap_id = ce.cap_id
-                    AND org_check.user_group_id = ce.user_group_id
-                    AND org_check.criteria_type = 'rootorgid'
-                    AND u.mdo_id_lower = org_check.criteria_value
+                LEFT JOIN rootorgid_lookup ro
+                    ON ro.cap_id        = ce.cap_id
+                    AND ro.user_group_id = ce.user_group_id
+                WHERE ro.org_value IS NULL OR u.mdo_id_lower = ro.org_value
 
                 UNION ALL
 
-                -- profilestatus (maps to profile_status)
-                SELECT DISTINCT 
-                    u.user_id,
-                    ce.cap_id,
-                    ce.cap_name,
-                    ce.created_by_id,
-                    ce.user_group_id,
-                    'profilestatus' as matched_type
+                -- profilestatus
+                SELECT DISTINCT
+                    u.user_id, ce.cap_id, ce.cap_name, ce.created_by_id,
+                    ce.user_group_id, 'profilestatus' as matched_type
                 FROM users u
                 INNER JOIN criteria_exploded ce 
                     ON ce.criteria_type = 'profilestatus'
                     AND u.profile_status_lower = ce.criteria_value
-                INNER JOIN criteria_exploded org_check
-                    ON org_check.cap_id = ce.cap_id
-                    AND org_check.user_group_id = ce.user_group_id
-                    AND org_check.criteria_type = 'rootorgid'
-                   AND u.mdo_id_lower = org_check.criteria_value
+                LEFT JOIN rootorgid_lookup ro
+                    ON ro.cap_id        = ce.cap_id
+                    AND ro.user_group_id = ce.user_group_id
+                WHERE ro.org_value IS NULL OR u.mdo_id_lower = ro.org_value
             """)
 
             # Count how many criteria types each user matched per userGroup
             print("  Counting matched criteria per userGroup...")
-            con.execute(f"""
+            con.execute("""
                 CREATE OR REPLACE TABLE user_match_counts AS
-                SELECT 
-                    user_id,
-                    cap_id,
-                    cap_name,
-                    created_by_id,
-                    user_group_id,
+                SELECT
+                    user_id, cap_id, cap_name, created_by_id, user_group_id,
                     COUNT(DISTINCT matched_type) as matched_types
                 FROM user_criteria_matches
                 GROUP BY user_id, cap_id, cap_name, created_by_id, user_group_id
@@ -537,13 +502,10 @@ class CAPAccessControlModel:
 
             # Filter to users who matched ALL criteria within at least ONE userGroup (OR between userGroups)
             print("  Filtering for complete matches (AND within userGroup, OR between userGroups)...")
-            con.execute(f"""
+            con.execute("""
                 CREATE OR REPLACE TABLE complete_matches AS
                 SELECT DISTINCT
-                    umc.user_id,
-                    umc.cap_id,
-                    umc.cap_name,
-                    umc.created_by_id
+                    umc.user_id, umc.cap_id, umc.cap_name, umc.created_by_id, umc.user_group_id
                 FROM user_match_counts umc
                 INNER JOIN criteria_group_count cgc
                     ON umc.cap_id = cgc.cap_id
@@ -556,17 +518,13 @@ class CAPAccessControlModel:
             con.execute(f"""
                 CREATE OR REPLACE TABLE final_results AS
                 WITH user_allocations AS (
-                    SELECT DISTINCT
-                        cm.user_id,
-                        cm.cap_id,
-                        cm.cap_name,
-                        cm.created_by_id
-                    FROM complete_matches cm
+                    SELECT DISTINCT user_id, cap_id, cap_name, created_by_id, user_group_id
+                    FROM complete_matches
                 ),
                 cap_allocation_mapped AS (
                     SELECT 
                         cap_id,
-                        -- Map criteria types to actual field names for allotment_type
+                        user_group_id,
                         REPLACE(REPLACE(REPLACE(REPLACE(REPLACE(REPLACE(REPLACE(REPLACE(REPLACE(REPLACE(
                             allotment_type,
                             'rootorgid', 'mdo_id'),
@@ -583,13 +541,6 @@ class CAPAccessControlModel:
                         allotment_to as allotment_to_mapped
                     FROM read_parquet('{cap_criteria_path}/**.parquet')
                     WHERE cap_id IN (SELECT DISTINCT cap_id FROM user_allocations)
-                ),
-                distinct_caps AS (
-                    SELECT DISTINCT
-                        cap_id,
-                        allotment_type_mapped,
-                        allotment_to_mapped
-                    FROM cap_allocation_mapped
                 )
                 SELECT DISTINCT
                     u.user_id,
@@ -610,7 +561,9 @@ class CAPAccessControlModel:
                     dc.allotment_to_mapped as allotment_to
                 FROM user_allocations ua
                 INNER JOIN users u ON ua.user_id = u.user_id
-                LEFT JOIN distinct_caps dc ON ua.cap_id = dc.cap_id
+                LEFT JOIN cap_allocation_mapped dc
+                    ON  ua.cap_id        = dc.cap_id
+                    AND ua.user_group_id = dc.user_group_id
             """)
 
             # Write final output
@@ -654,7 +607,11 @@ class CAPAccessControlModel:
 
 def main():
     os.environ[
-        'PYSPARK_SUBMIT_ARGS'] = '--packages com.datastax.spark:spark-cassandra-connector_2.12:3.4.1,org.elasticsearch:elasticsearch-spark-30_2.12:8.11.0,org.postgresql:postgresql:42.6.0 pyspark-shell'
+        'PYSPARK_SUBMIT_ARGS'] = (
+        '--packages com.datastax.spark:spark-cassandra-connector_2.12:3.4.1,'
+        'org.elasticsearch:elasticsearch-spark-30_2.12:8.11.0,'
+        'org.postgresql:postgresql:42.6.0 pyspark-shell'
+    )
 
     config_dict = get_environment_config()
     config = create_config(config_dict)

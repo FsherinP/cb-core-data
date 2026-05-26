@@ -206,6 +206,7 @@ class NationalLearningWeekLeaderboardModel:
                 .agg(F.countDistinct("certificate_id").alias("total_certificates"))
             )
 
+            # TODO: badgeDetails_v1 source data issue - fix schema before uncommenting
             badgesDF = (
                 spark.read.parquet(ParquetFileConstants.GAMIFICATION_BADGE_USER_ENROLMENT_PARQUET_FILE)
                 .withColumnRenamed("userID", "user_id")
@@ -217,6 +218,8 @@ class NationalLearningWeekLeaderboardModel:
                 .groupBy("user_id")
                 .agg(F.count("enrolment_badge_id").alias("total_badges"))
             )
+            # Temporary: return empty badgesDF with 0 badges for all users
+            #badgesDF = spark.createDataFrame([], "user_id STRING, total_badges LONG")
 
             # -----------------------------------------------------------
             # 2. PER-USER LEARNING HOURS IN THE NLW WINDOW
@@ -366,10 +369,6 @@ class NationalLearningWeekLeaderboardModel:
 
             # FIX: materialize size + is_state into a concrete intermediate DataFrame
             # BEFORE defining the window and calling dense_rank().
-            # When size/is_state are added in the SAME withColumn chain as row_num,
-            # Spark's lazy resolution may evaluate partition keys as null for all rows,
-            # collapsing every org into one null-null partition -> all get row_num=1.
-            # Breaking into two steps forces the columns to be fully resolved first.
             stateSizedDF = (
                 stateStatsDF
                 .withColumn("size", self.build_bucket_expr(state_bucket_config))
@@ -391,7 +390,7 @@ class NationalLearningWeekLeaderboardModel:
                     F.col("user_count").alias("total_users"),
                     "size",
                     "total_points",
-                    "per_capita_kp",
+                    F.col("per_capita_kp").cast("int").alias("per_capita_kp"),  # cast after ranking
                     "is_state",
                     "row_num",
                     F.lit(None).cast("string").alias("last_credit_date")
@@ -403,10 +402,14 @@ class NationalLearningWeekLeaderboardModel:
             # -----------------------------------------------------------
 
             state_ids_list = [r["state_id"] for r in stateOrgMapDF.collect()]
-
+            state_all_mdo_ids = [r["mdo_id"] for r in stateMdoDF.collect()]
+            #centreUsersDF = (
+            #    userDF.select("user_id", "mdo_id")
+            #    .filter(~F.col("mdo_id").isin(state_ids_list))
+            #)
             centreUsersDF = (
                 userDF.select("user_id", "mdo_id")
-                .filter(~F.col("mdo_id").isin(state_ids_list))
+                .filter(~F.col("mdo_id").isin(state_all_mdo_ids))  # excludes state + children
             )
 
             centreStatsDF = (
@@ -472,7 +475,7 @@ class NationalLearningWeekLeaderboardModel:
                     F.col("user_count").alias("total_users"),
                     "size",
                     "total_points",
-                    "per_capita_kp",
+                    F.col("per_capita_kp").cast("int").alias("per_capita_kp"),  # cast after ranking
                     "is_state",
                     "row_num",
                     F.lit(None).cast("string").alias("last_credit_date")
@@ -521,46 +524,21 @@ class NationalLearningWeekLeaderboardModel:
             # -----------------------------------------------------------
             finalLeaderboardDF.show(15, truncate=False)
             userStatsFinalDF.show(20, truncate=False)
+            BqLeaderboardDF = finalLeaderboardDF.select("size", "org_id", "org_name", "total_users", "total_points", "per_capita_kp", "row_num", "is_state")
+            BqLeaderboardDF.coalesce(1).write.mode("overwrite").option("compression", "snappy").parquet(f"{config.warehouseReportDir}/nlw_mdo_leaderboard")
 
-            # utils.writeToCassandra(finalLeaderboardDF, config.cassandraUserKeyspace, "nlw_mdo_leaderboard")
-            '''self.write_postgres_table(
+            utils.writeToCassandra(finalLeaderboardDF, config.cassandraUserKeyspace, "nlw_mdo_leaderboard")
+            self.write_postgres_table(
                 userStatsFinalDF,
                 app_postgres_url,
                 "nlw_user_leaderboard",
                 config.appPostgresUsername,
                 config.appPostgresCredential
-            )'''
+            )
 
             # -----------------------------------------------------------
             # 8. LAST-24-HOUR STATS
             # -----------------------------------------------------------
-            '''cert_count_str, learning_hours_str, org_learning_hoursDF = (
-                self.get_last_24h_stats(
-                    spark,
-                    contentEnrolDF,
-                    contentMasterDF,
-                    eventEnrolDF,
-                    eventMasterDF,
-                    userDF,
-                )
-            )
-
-            certificates_yesterday_df = spark.createDataFrame([("across:yesterday", cert_count_str)], ["across:yesterday", "cert_count_str"])
-            Redis.dispatchDataFrame("lhp_certifications", certificates_yesterday_df, "across:yesterday", "cert_count_str", conf=config)
-
-            # Learning hours yesterday
-            learning_hours_yesterday_df = spark.createDataFrame([("across:yesterday", learning_hours_str)], ["across:yesterday", "learning_hours_str"])
-            Redis.dispatchDataFrame("lhp_learningHours", learning_hours_yesterday_df, "across:yesterday", "learning_hours_str", conf=config)
-
-            # Org-wise learning hours yesterday
-            # org_learning_hoursDF already has org_id and learning_hours columns
-            org_learning_hoursDF = org_learning_hoursDF.withColumn("redis_key", F.concat(F.col("org_id"), F.lit(":yesterday")))
-            Redis.dispatchDataFrame("lhp_learningHours", org_learning_hoursDF, "redis_key", "learning_hours", conf=config)
-            print("\n📊 24-Hour Stats:")
-            print(f"  {cert_count_str}")
-            print(f"  {learning_hours_str}")
-            print("\n  Org-wise learning hours (last 24h):")
-            org_learning_hoursDF.show(truncate=False)'''
             yesterday_cert_str, yesterday_hours_str, today_cert_str, today_hours_str = (
                 self.get_last_24h_stats(
                     spark=spark,
@@ -592,10 +570,6 @@ class NationalLearningWeekLeaderboardModel:
 
     # ------------------------------------------------------------------
     # HELPER: last-24-hour stats
-    #   Returns:
-    #     cert_count_str       : str  e.g. "Total certificates in last 24h: 142"
-    #     learning_hours_str   : str  e.g. "Total learning hours in last 24h: 318.75"
-    #     org_learning_hoursDF : DataFrame[org_id, learning_hours]
     # ------------------------------------------------------------------
     def get_last_24h_stats(self,
                            spark,
@@ -605,17 +579,12 @@ class NationalLearningWeekLeaderboardModel:
                            eventMasterDF,
                            userDF,
                            config,
-                           redis_client  # pass your redis connection
+                           redis_client
                            ):
         from datetime import datetime, timedelta, timezone
 
         now = datetime.now(timezone.utc)
 
-        # ----------------------------------------------------------
-        # Define time windows
-        # today window:     yesterday 00:00 UTC → today 00:00 UTC
-        # yesterday window: day-before 00:00 UTC → yesterday 00:00 UTC
-        # ----------------------------------------------------------
         today_start = now.replace(hour=0, minute=0, second=0, microsecond=0)
         yesterday_start = today_start - timedelta(days=1)
         day_before_start = today_start - timedelta(days=2)
@@ -627,16 +596,10 @@ class NationalLearningWeekLeaderboardModel:
         print(f"[Stats] yesterday window : {day_before_start_str} -> {yesterday_start_str}")
         print(f"[Stats] today window     : {yesterday_start_str} -> {today_start_str}")
 
-        # ----------------------------------------------------------
-        # Check if across:today already exists in Redis
-        # If yes  → promote it to yesterday, calculate fresh today
-        # If no   → first run, calculate both fresh
-        # ----------------------------------------------------------
         existing_today_certs = redis_client.getMapField("lhp_certifications", "across:today", conf=config)
         existing_today_hours = redis_client.getMapField("lhp_learningHours", "across:today", conf=config)
 
         def compute_stats(start_str, end_str):
-            """Returns (cert_count_str, learning_hours_str, org_learning_hoursDF)"""
             content_cert = (
                 contentEnrolDF
                 .filter(
@@ -713,13 +676,11 @@ class NationalLearningWeekLeaderboardModel:
         # Yesterday: promote from Redis if exists, else compute fresh
         # ----------------------------------------------------------
         if existing_today_certs and existing_today_hours:
-            print("[Stats] Promoting across:today → across:yesterday from Redis")
-            yesterday_cert_str = existing_today_certs.decode("utf-8")
-            yesterday_hours_str = existing_today_hours.decode("utf-8")
+            print("[Stats] Promoting across:today -> across:yesterday from Redis")
+            yesterday_cert_str = existing_today_certs.decode("utf-8") if isinstance(existing_today_certs, bytes) else existing_today_certs
+            yesterday_hours_str = existing_today_hours.decode("utf-8") if isinstance(existing_today_hours, bytes) else existing_today_hours
 
-            # For org-wise yesterday, read from Redis hgetall and rebuild df
-            org_yesterday_raw = Redis.getMap("lhp_learningHours",
-                                             conf=config)  # returns Dict[str, str], already decoded
+            org_yesterday_raw = redis_client.getMap("lhp_learningHours", conf=config)
             org_yesterday_rows = [
                 (k.replace(":today", ""), v)
                 for k, v in org_yesterday_raw.items()
@@ -754,8 +715,8 @@ class NationalLearningWeekLeaderboardModel:
                                 replace=False, conf=config)
 
         yesterday_org_df = yesterday_org_df.withColumn("redis_key", F.concat(F.col("org_id"), F.lit(":yesterday")))
-        Redis.dispatchDataFrame("lhp_learningHours", yesterday_org_df, "redis_key", "learning_hours", replace=False,
-                                conf=config)
+        Redis.dispatchDataFrame("lhp_learningHours", yesterday_org_df, "redis_key", "learning_hours",
+                                replace=False, conf=config)
 
         # ----------------------------------------------------------
         # Dispatch today (always fresh)
@@ -764,8 +725,8 @@ class NationalLearningWeekLeaderboardModel:
             [("across:today", today_cert_str)],
             ["across:today", "cert_count_str"]
         )
-        Redis.dispatchDataFrame("lhp_certifications", cert_today_df, "across:today", "cert_count_str", replace=False,
-                                conf=config)
+        Redis.dispatchDataFrame("lhp_certifications", cert_today_df, "across:today", "cert_count_str",
+                                replace=False, conf=config)
 
         hours_today_df = spark.createDataFrame(
             [("across:today", today_hours_str)],
@@ -775,8 +736,8 @@ class NationalLearningWeekLeaderboardModel:
                                 replace=False, conf=config)
 
         today_org_df = today_org_df.withColumn("redis_key", F.concat(F.col("org_id"), F.lit(":today")))
-        Redis.dispatchDataFrame("lhp_learningHours", today_org_df, "redis_key", "learning_hours", replace=False,
-                                conf=config)
+        Redis.dispatchDataFrame("lhp_learningHours", today_org_df, "redis_key", "learning_hours",
+                                replace=False, conf=config)
 
         print(f"\n📊 Stats dispatched to Redis:")
         print(f"  across:yesterday certs  = {yesterday_cert_str}")

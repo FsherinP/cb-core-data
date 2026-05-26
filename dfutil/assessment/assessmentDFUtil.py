@@ -1,18 +1,15 @@
 from typing import List
 import time
-
-from numpy import void
 from constants.ParquetFileConstants import ParquetFileConstants
 from dfutil.content import contentDFUtil
 from dfutil.user.userDFUtil import exportDFToParquet
-from pyspark.sql import SparkSession, DataFrame
+from pyspark.sql import SparkSession, DataFrame, Window
 from pyspark.sql.functions import (
     col, explode_outer, from_json,
     unix_timestamp, expr, lit, concat_ws, when, coalesce, row_number , first, count, sum
 )
 from pyspark.sql.types import FloatType, IntegerType
 from util import schemas
-from pyspark.sql.window import Window
 
 
 def print_dataframe_info(df: DataFrame, df_name: str, show_sample: bool = True, sample_rows: int = 5):
@@ -587,7 +584,7 @@ def parse_raw_assessment_data(spark: SparkSession, config):
         questionset_hierarchy_df = spark.read.parquet(ParquetFileConstants.QUESTIONSET_HIERARCHY_PARQUET_FILE)
         # Read raw data - userAssessmentRaw
         user_assessment_df = spark.read.parquet(ParquetFileConstants.ASSESSMENT_DATA_RAW_PARQUET_FILE)
-        
+
         # process JSON fields and select relevant columns
         user_assessment_with_json = user_assessment_df.withColumn(
             "readResponse", from_json(col("assessmentreadresponse"), schemas.assessment_read_response_schema)
@@ -603,7 +600,7 @@ def parse_raw_assessment_data(spark: SparkSession, config):
 
         # Extract main assessment fields (this is the base that keeps ALL records)
         final_assessment_df = user_assessment_with_json \
-            .select(
+        .select(
             col("assessChildID"),
             col("assessUserStatus"),
             col("userID"),
@@ -641,8 +638,8 @@ def parse_raw_assessment_data(spark: SparkSession, config):
 
         # Extract section data using explode_outer to preserve records without sections
         assessment_section_df = user_assessment_with_json \
-            .withColumn("assessSections", explode_outer(col("submitResponse.children"))) \
-            .select(
+       .withColumn("assessSections", explode_outer(col("submitResponse.children"))) \
+        .select(
             col("assessChildID"),
             col("userID"),
             col("submitResponse.totalPercentage").alias("assessTotalPercentage"),
@@ -787,10 +784,10 @@ def parse_raw_assessment_data(spark: SparkSession, config):
             (col("fa_main.assessChildID") == col("fa_data.assessChildID")) &
             (col("fa_main.userID") == col("fa_data.userID")) &
             (coalesce(col("fa_main.assessStartTimestamp").cast("string"), lit("__NULL__")) ==
-                coalesce(col("fa_data.assessStartTimestamp").cast("string"), lit("__NULL__"))),
+             coalesce(col("fa_data.assessStartTimestamp").cast("string"), lit("__NULL__"))),
             "left"  # LEFT JOIN - this is the key change!
         ) \
-            .select(
+        .select(
             col("fa_main.assessChildID"),
             col("fa_main.assessUserStatus"),
             col("fa_main.userID"),
@@ -823,8 +820,8 @@ def parse_raw_assessment_data(spark: SparkSession, config):
             col("fa_data.assessTotalPercentage"),
             # For assessPass: use new logic if available, otherwise use original
             when(col("fa_data.finalResult").isNotNull(),
-                    when(col("fa_data.finalResult") == "pass", lit(1)).otherwise(lit(0))
-                    ).otherwise(col("fa_main.assessPassOriginal")).alias("assessPass")
+                 when(col("fa_data.finalResult") == "pass", lit(1)).otherwise(lit(0))
+                 ).otherwise(col("fa_main.assessPassOriginal")).alias("assessPass")
         )
 
         # Validation logging
@@ -850,7 +847,9 @@ def parse_raw_assessment_data(spark: SparkSession, config):
 
     except Exception as e:
         print(f"❌ Error in parse_raw_assessment_data: {str(e)}")
-        raise
+    raise
+
+
 
 def write_parquet(df: "DataFrame", path: str, partition_cols: list = None, mode: str = "overwrite"):
         """Write DataFrame to Parquet with optimization"""
@@ -862,8 +861,9 @@ def write_parquet(df: "DataFrame", path: str, partition_cols: list = None, mode:
             writer = writer.write
 
         writer.mode(mode) \
-            .option("compression", "snappy") \
-            .parquet(path)
+        .option("compression", "snappy") \
+        .parquet(path)
+
 
 def print_execution_summary():
     """

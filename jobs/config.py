@@ -8,11 +8,11 @@ DATABASE_CONFIG = {
     'cassandraCourseKeyspace': '{{ course_keyspace }}',
     'cassandraUserKeyspace': '{{ user_table_keyspace }}',
     'cassandraHierarchyStoreKeyspace': '{{ hierarchy_store_keyspace }}',
-    
+
     # Cassandra Core Host
     'sparkCassandraConnectionHost': '{{ core_cassandra_host }}',
     'lpCassandraHost': '{{ lp_cassandra_host }}',
-    
+
     # Cassandra Table Names
     'cassandraUserEnrolmentsTable': '{{ dashboards_cassandra_user_enrolments_table }}',
     'cassandraCourseBatchTable': '{{ dashboards_cassandra_course_batch_table }}',
@@ -44,7 +44,7 @@ DATABASE_CONFIG = {
     'cassandraNLWMdoLeaderboardTable': '{{ dashboards_cassandra_nlw_mdo_table }}',
     'cassandraNLWUserLeaderboardTable': '{{ dashboards_cassandra_nlw_user_table }}',
     'cassandraGroupDesignationTable': '{{ dashboards_cassandra_group_designation_table }}',
-    
+
     # PostgreSQL Application Database
     'appPostgresHost': '{{ app_postgres_host }}',
     'appPostgresSchema': 'sunbird',
@@ -53,7 +53,7 @@ DATABASE_CONFIG = {
     'appPostgresCredential': 'sunbird',
     'postgresCompetencyTable': 'data_node',
     'postgresCompetencyHierarchyTable': 'node_mapping',
-    
+
     # PostgreSQL Data Warehouse
     'dwPostgresHost': '{{ dw_postgres_host }}',
     'dwPostgresSchema': 'warehouse',
@@ -76,14 +76,14 @@ DATABASE_CONFIG = {
     'dwSLWMdoTopLearnerTable': 'slw_mdo_top_learners',
     'dwNLWUserLeaderboardTable': 'nlw_user_leaderboard',
     'dwAparCBPEnrollmentTable': 'apar_cbp_enrollment',
-    
+
     # Elasticsearch Configuration
     'sparkElasticsearchConnectionHost': '{{ single_node_es_host }}',
     'sparkElasticsearchAuditConnectionHost': '{{ es_host_audit_logs }}',
     'sparkElasticsearchConnectionPort': '{{ single_node_es_port }}',
     'esFormDataIndex': '{{ es_form_data_index }}',
     'esFormDataIds': '{{ es_form_data_ids }}',
-    
+
     # MongoDB Configuration
     'mongoDatabase': '{{ dashboards_mongo_discussions_db }}',
     'mongoDBCollection': '{{ dashboards_mongo_discussions_db_collection }}',
@@ -91,7 +91,6 @@ DATABASE_CONFIG = {
     'mlMongoDatabase': '{{ dashboards_mongo_survey_observation_db }}',
     'surveyCollection': '{{ dashboards_mongo_survey_collection }}',
     'reportConfigCollection': '{{ dashboards_mongo_report_config_collection }}',
-
 }
 
 # Spark Configuration
@@ -134,7 +133,6 @@ REPORT_PATHS = {
     'courseReportPath': '{{ course_report_path }}',
     'cbaReportPath': '{{ cba_report_path }}',
     'standaloneAssessmentReportPath': '{{ standalone_assessment_report_path }}',
-    'gamificationReportPath': '{{ gamification_report_path }}',
     'taggedUsersPath': '{{ tagged_users_path }}',
     'blendedReportPath': '{{ blended_report_path }}',
     'orgHierarchyReportPath': '{{ org_hierarchy_report_path }}',
@@ -152,9 +150,9 @@ REPORT_PATHS = {
 KAFKA_CONFIG = {
     'brokerList': '{{ brokerlist }}',
     'topic': '{{ topic }}',
-    'peerValidationKafkaTopic' : '{{ peerValidationKafkaTopic }}',
     'compression': '{{ dashboards_broker_compression }}',
-    
+    'peerValidationKafkaTopic' : '{{ peerValidationKafkaTopic }}',
+
     # Side Output Topics
     'sideOutput': {
         'brokerList': '{{ brokerlist }}',
@@ -188,12 +186,12 @@ JOB_CONFIG = {
     'deviceMapping': False,
     'apiVersion': 'v2',
     'modelParamsParallelization': 200,
-    
+
     # Report Sync Configuration
     'reportSyncEnable': '{{ operational_report_sync_enable }}',
     'reportSyncEnableSL': '{{ operational_sl_report_sync_enable }}',
     'reportZipSyncEnable': '{{ operational_report_zip_sync_enable }}',
-    
+
     # Survey and Assessment Configuration
     'mdoIDs': '{{ report_mdo_ids }}',
     'solutionIDs': '{{ report_solution_ids }}',
@@ -203,20 +201,20 @@ JOB_CONFIG = {
     'gracePeriod': '{{ report_grace_period }}',
     'baseUrlForEvidences': '{{ report_base_url_for_evidences }}',
     'includeExpiredSolutionIDs': '{{ report_include_expired_solution_ids }}',
-    
+
     # Batch Size Configuration
     'SurveyQuestionReportBatchSize': '{{ survey_question_report_batch_size }}',
     'SurveyStatusReportBatchSize': '{{ survey_status_report_batch_size }}',
     'ObservationQuestionReportBatchSize': '{{ observation_question_report_batch_size }}',
     'ObservationStatusReportBatchSize': '{{ observation_status_report_batch_size }}',
-    
+
     # Learning Week Configuration
     'nationalLearningWeekStart': '{{ national_learning_week_start }}',
     'nationalLearningWeekEnd': '{{ national_learning_week_end }}',
     'stateLearningWeekStart': '{{ state_learning_week_start }}',
     'stateLearningWeekEnd': '{{ state_learning_week_end }}',
     'sizeBucketString': '{{ state_learning_week_bucket_size }}',
-    
+
     # Communications Console Configuration
     'commsConsolePrarambhEmailSuffix': '{{ comms_console_prarambh_email_suffix }}',
     'commsConsoleNumDaysToConsider': '{{ comms_console_num_days_to_consider }}',
@@ -224,7 +222,7 @@ JOB_CONFIG = {
     'commsConsolePrarambhTags': '{{ comms_console_prarambh_tags }}',
     'commsConsolePrarambhCbpIds': '{{ comms_console_prarambh_cbp_ids }}',
     'commsConsolePrarambhNCount': '{{ comms_console_prarambh_n_count }}',
-    
+
     # Zip Reports Configuration
     'prefixDirectoryPath': '{{ zip_reports_prefix_directory_path }}',
     'destinationDirectoryPath': '{{ zip_reports_destination_path }}',
@@ -288,7 +286,6 @@ def get_config():
     config.update(KAFKA_CONFIG)
     config.update(JOB_CONFIG)
     config.update(EXTERNAL_SERVICES)
-    config.update(API_CONFIG)
     return config
 
 # Environment-specific overrides

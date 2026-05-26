@@ -85,7 +85,7 @@ class WeeklyClapsModel:
             app_postgres_url = f"jdbc:postgresql://{config.appPostgresHost}/{config.appPostgresSchema}"
 
             existing_weekly_claps_df = spark.read.parquet(ParquetFileConstants.CLAPS_PARQUET_FILE)
-            platform_engagement_df = self.users_platform_engagement_dataframe(weekStart, weekEnd, spark, config)
+            platform_engagement_df = self.users_platform_engagement_dataframe(weekStart, weekEndTime, spark, config)
 
             joined_df = existing_weekly_claps_df.join(platform_engagement_df, ["userid"], "full_outer") \
                 .withColumn("w4", struct(

@@ -149,6 +149,7 @@ class NPSUpgradedModel:
         fifteen_days_ago_start_ms = int(
             (datetime.now().replace(hour=0, minute=0, second=0, microsecond=0) - timedelta(days=15)).timestamp() * 1000)
         ratings_df = spark.read.parquet(ParquetFileConstants.RATING_PARQUET_FILE)\
+            .filter(col("createdon").isNotNull())\
             .withColumn("rated_on", timeuuid_to_millis_udf(col("createdon")))\
             .where((col("rated_on") >= lit(fifteen_days_ago_start_ms)) & (col("rated_on") < lit(today_start_ms)))\
             .select("userid")\

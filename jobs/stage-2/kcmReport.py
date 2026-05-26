@@ -184,8 +184,8 @@ class KCMModel:
                 "termsExploded", 
                 F.explode(F.col("competencyAreaData.terms"))
             ).withColumn(
-                "associatedTheme", 
-                F.explode(F.col("termsExploded.associations"))
+                "associatedTheme",
+                F.explode_outer(F.col("termsExploded.associations"))
             ).select(
                 F.col("termsExploded.refId").alias("areaID"),
                 F.col("termsExploded.name").alias("areaName"),
@@ -202,8 +202,8 @@ class KCMModel:
                 "termsExploded", 
                 F.explode(F.col("competencyThemeData.terms"))
             ).withColumn(
-                "associatedSubTheme", 
-                F.explode(F.col("termsExploded.associations"))
+                "associatedSubTheme",
+                F.explode_outer(F.col("termsExploded.associations"))
             ).select(
                 F.col("termsExploded.refId").alias("themeID"),
                 F.col("termsExploded.name").alias("themeName"),
@@ -213,11 +213,36 @@ class KCMModel:
                 F.col("associatedSubTheme.description").alias("subThemeDescription")
             )
 
+            # Process All subthemes
+            kcm_subtheme_all = kcmv6.withColumn(
+                "competencySubThemeData",
+                F.col("hierarchy_parsed.categories")[2]
+            ).withColumn(
+                "termsExploded",
+                F.explode(F.col("competencySubThemeData.terms"))
+            ).select(
+                F.col("termsExploded.refId").alias("subThemeID"),
+                F.col("termsExploded.name").alias("subThemeName"),
+                F.col("termsExploded.description").alias("subThemeDescription")
+            ).distinct()
+
+            area_theme_subtheme = kcm_area.join(
+                kcm_theme,
+                ["themeID", "themeName"],
+                "outer"                          # outer keeps: themes with no area, areas with no theme
+            )
+
+            kcm_subtheme_renamed = kcm_subtheme_all.select(
+                F.col("subThemeID").alias("master_subThemeID"),
+                F.col("subThemeName").alias("master_subThemeName"),
+                F.col("subThemeDescription").alias("master_subThemeDescription")
+            )
+
             # Join and finalize
-            competency_details_df = kcm_area.join(
-                kcm_theme, 
-                ["themeID", "themeName"], 
-                "outer"
+            competency_details_df = kcm_subtheme_renamed.join(
+                area_theme_subtheme,
+                kcm_subtheme_renamed["master_subThemeID"] == area_theme_subtheme["subThemeID"],
+                "left"                           # left keeps every subtheme from the master list
             ).select(
                 F.col("areaID").alias("competency_area_id"),
                 F.col("areaName").alias("competency_area"),
@@ -225,16 +250,13 @@ class KCMModel:
                 F.col("themeID").alias("competency_theme_id"),
                 F.col("themeName").alias("competency_theme"),
                 F.col("themeDescription").alias("competency_theme_description"),
-                F.col("subThemeID").alias("competency_sub_theme_id"),
-                F.col("subThemeName").alias("competency_sub_theme"),
-                F.col("subThemeDescription").alias("competency_sub_theme_description")
-            ).withColumn(
-                "competency_theme_type", 
-                F.lit("Null")
-            ).withColumn(
-                "data_last_generated_on", 
-                F.lit(self.current_date_time())
-            )
+                F.col("master_subThemeID").alias("competency_sub_theme_id"),
+                F.col("master_subThemeName").alias("competency_sub_theme"),
+                F.col("master_subThemeDescription").alias("competency_sub_theme_description"),
+
+                F.lit("Null").alias("competency_theme_type"),
+                F.lit(self.current_date_time()).alias("data_last_generated_on")
+            ).distinct()
 
             competency_details_df.distinct().write.mode("overwrite").option("compression", "snappy").parquet(f"{config.warehouseReportDir}/{config.dwKcmDictionaryTable}")
 

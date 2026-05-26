@@ -4,6 +4,7 @@ import findspark
 
 findspark.init()
 import sys
+import os
 import time
 from pathlib import Path
 from pyspark.sql import SparkSession, functions as F
@@ -32,6 +33,18 @@ class L2AssessmentReport:
     @staticmethod
     def get_date():
         return datetime.now().strftime("%Y-%m-%d")
+
+    # ── Added from temp ───────────────────────────────────────────────────────
+    def write_postgres_table(self, df, url: str, table: str, username: str, password: str, mode: str = "overwrite"):
+        df.write \
+            .format("jdbc") \
+            .option("url", url) \
+            .option("dbtable", table) \
+            .option("user", username) \
+            .option("password", password) \
+            .option("driver", "org.postgresql.Driver") \
+            .mode(mode) \
+            .save()
 
     def process_report(self, spark, config):
         """
@@ -81,6 +94,11 @@ class L2AssessmentReport:
                 when(col("minimumPassPercentage").isNotNull(), col("minimumPassPercentage").cast("float"))
                 .otherwise(col("cut_off_percentage"))
             )
+
+            # ── Added from temp: dedup assessmentDetailDF ─────────────────────
+            print("before dropping count - ", assessmentDetailDF.count())
+            assessmentDetailDF = assessmentDetailDF.dropDuplicates(["user_id", "content_id", "assessment_id"])
+            print("after dropping count - ", assessmentDetailDF.count())
 
             kcmCourseDF = kcmDF.join(kcmMappingDF, kcmDF.competency_area_id == kcmMappingDF.competency_area_id, "inner") \
                 .select(
@@ -372,7 +390,7 @@ class L2AssessmentReport:
                 assessmentDetailDF,
                 (cap_with_enrolment.cap_user_id == assessmentDetailDF.user_id) &
                 (cap_with_enrolment.cap_content_id == assessmentDetailDF.content_id),
-                "left"  # Left join so in-progress records without assessment data are kept
+                "left"
             ) \
                 .select(
                 col("cap_content_id"),
@@ -401,12 +419,19 @@ class L2AssessmentReport:
 
             print(f"CAP with assessment count: {cap_with_assessment.count()}")
             print("\nStage 4: Joining with user data...")
+
+            # ── Added from temp: normalise assess_pass before select ───────────
             validL2AssessmentConsumptionDF = cap_with_assessment \
                 .join(
                 userDF,
                 cap_with_assessment.cap_user_id == userDF.user_id,
                 "inner"
             ) \
+                .withColumn("assess_pass",
+                            when(col("assess_pass").isin("Yes", "1", "true"), lit("Yes"))
+                            .when(col("assess_pass").isin("No", "0", "false"), lit("No"))
+                            .otherwise(col("assess_pass"))
+                            ) \
                 .select(
                 col("cap_user_id").alias("assess_user_id"),
                 col("cap_content_id").alias("assess_content_id"),
@@ -491,7 +516,7 @@ class L2AssessmentReport:
                 lit(None).cast("string").alias("comprehensive_level_assessment_status"),
                 col("cbplan_start_date").cast("timestamp").alias("cbp_plan_start_date"),
                 col("cbplan_due_by").cast("timestamp").alias("cbp_plan_end_date"),
-                lit(None).cast("string").alias("parichay_id"),  # Assuming parichay_id is same as external_system_id
+                lit(None).cast("string").alias("parichay_id"),
                 col("enrol_user_consumption_status").alias("consumption_status"),
                 lit(None).alias("assessment_date")
             )
@@ -539,6 +564,9 @@ class L2AssessmentReport:
                 lit(None).alias("cbp_plan_id"),
                 lit(None).alias("allocated_on"),
                 when(
+                    col("cap_enrol_certificate_id").isNotNull() & (F.length(trim(col("cap_enrol_certificate_id"))) > 0),
+                    lit("Pass")
+                ).when(
                     col("assess_pass") == 'Yes',
                     lit("Pass")
                 ).when(
@@ -554,15 +582,24 @@ class L2AssessmentReport:
 
             # Union both dataframes
             print("\nUnioning APAR and CAP dataframes...")
-            masterFinalDF = apar_unified.unionByName(cap_unified).dropDuplicates()
+            w = Window.partitionBy("user_id", "content_id", "assessment_id") \
+                .orderBy(
+                col("score_achieved").desc(),
+                when(col("comprehensive_level_assessment_status") == "Pass", 1)
+                .when(col("comprehensive_level_assessment_status") == "Fail", 2)
+                .otherwise(3).asc())
+
+            cap_unified_deduped = cap_unified \
+                .withColumn("rn", row_number().over(w)) \
+                .filter(col("rn") == 1) \
+                .drop("rn")
+
+            masterFinalDF = apar_unified.unionByName(cap_unified_deduped)
 
             # Print schema and sample data
             print("\nFinal Schema:")
             masterFinalDF.printSchema()
-
-            print("\nSample data (10 rows):")
-            # masterFinalDF.show(10, truncate=False)
-            # masterFinalDF.filter(col("user_id") == "b39b6202-1718-4a26-afa8-dcd141756efe").show(20, truncate=False)
+            masterFinalDF.groupBy("comprehensive_level_assessment_status").count().show()
 
             print("\nReport generation completed successfully!")
 
@@ -580,8 +617,8 @@ class L2AssessmentReport:
 def main():
     spark = SparkSession.builder \
         .appName("L2AssessmentReport") \
-        .config("spark.executor.memory", "12g") \
-        .config("spark.driver.memory", "10g") \
+        .config("spark.executor.memory", "30g") \
+        .config("spark.driver.memory", "128g") \
         .config("spark.sql.shuffle.partitions", "64") \
         .config("spark.sql.legacy.timeParserPolicy", "LEGACY") \
         .getOrCreate()
