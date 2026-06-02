@@ -105,6 +105,7 @@ SPARK_CONFIG = {
 # Redis Configuration
 REDIS_CONFIG = {
     'redisHost': '{{ dashboards_redis_host }}',
+    'redisKpHost': '{{ dashboards_kp_redis_host }}',
     'redisPort': '{{ dashboards_redis_port }}',
     'redisDB': '{{ dashboards_redis_db }}',
 }

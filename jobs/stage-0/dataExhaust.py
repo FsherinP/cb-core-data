@@ -677,7 +677,7 @@ class DataExhaustModel:
                 self.spark,
                 self.config.sparkIGotElasticsearchConnectionHost,
                 self.config.sparkElasticsearchConnectionPort,
-                "fs-forms-data-v3",
+                "fs-forms-data-alias-v2",
                 query,
                 fields,
                 array_fields

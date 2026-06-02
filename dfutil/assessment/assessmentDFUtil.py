@@ -847,7 +847,7 @@ def parse_raw_assessment_data(spark: SparkSession, config):
 
     except Exception as e:
         print(f"❌ Error in parse_raw_assessment_data: {str(e)}")
-    raise
+        raise
 
 
 
