@@ -57,7 +57,8 @@ class ACBPModel:
                                                                                                 "userOrgName",
                                                                                                 "designation", "group",
                                                                                                 "additionalProperties.externalSystem",
-                                                                                                "additionalProperties.externalSystemId")
+                                                                                                "additionalProperties.externalSystemId",
+                                                                                                col("employmentDetails.employeeCode").alias("Employee ID"))
 
             contentHierarchyDF = spark.read.parquet(ParquetFileConstants.CONTENT_HIERARCHY_SELECT_PARQUET_FILE)
             allCourseProgramESDF = spark.read.parquet(
@@ -150,11 +151,11 @@ class ACBPModel:
             dept_is_empty = (col("dept_name").isNull()) | (col("dept_name") == "")
 
             # Process all transformations in a single chain to minimize passes
-            enrolmentReportDF = acbpEnrolmentDF \
+            enrolmentReportDF = acbpEnrolmentDF.join(userOrgDF.select("userID","Employee ID"), on="userID", how="left") \
                 .filter(col("userStatus").cast("int") == 1) \
                 .select(
                 # Select only needed columns early to reduce data shuffling
-                "fullName", "userPrimaryEmail", "userMobile", "userOrgName", "group",
+                "fullName", "userPrimaryEmail", "userMobile", "userOrgName", "group", "Employee ID",
                 "designation", "ministry_name", "dept_name", "cadreName", "civilServiceType", "civilServiceName",
                 "cadreBatch", "organised_service", "courseName", "isapar",
                 "userOrgID", "dbCompletionStatus", "courseCompletedTimestamp",
@@ -204,6 +205,7 @@ class ACBPModel:
                 col("Ministry"),
                 col("Department"),
                 col("Organization"),
+                col("Employee ID"),
                 col("cadreName").alias("Cadre"),
                 col("civilServiceType").alias("Civil Service Type"),
                 col("civilServiceName").alias("Civil Services"),
@@ -377,7 +379,7 @@ class ACBPModel:
                         1
                     ).otherwise(0)
                 ).alias("completedBeforeDueDateCount")
-            ) \
+            ).join(userOrgDF.select("userID","Employee ID"), on="userID", how="left") \
                 .select(
                 col("fullName").alias("Name"),
                 col("userPrimaryEmail").alias("Email"),
@@ -385,6 +387,7 @@ class ACBPModel:
                 col("Ministry"),
                 col("Department"),
                 col("Organization"),
+                col("Employee ID"),
                 col("group").alias("Group"),
                 col("designation").alias("Designation"),
                 col("cadreName").alias("Cadre"),

@@ -322,7 +322,7 @@ def processGamificationJob(config):
         print("🔍 Step 8: Adding Gamification MDO report...")
         user_master_df = spark.read.parquet(ParquetFileConstants.USER_ORG_COMPUTED_FILE).select(
             "userID",col("fullName").alias("Learner Name"), col("ministry_name").alias("Ministry"),
-            col("dept_name").alias("Department"), col("userOrgID").alias("Organization ID"))
+            col("dept_name").alias("Department"), col("userOrgID").alias("Organization ID"), col("employmentDetails.employeeCode").alias("Employee_Id"))
         reporting_data = (enrolment_content_with_badge_data.filter(col("badge_id").isNotNull()).select(
             col("userID"),
             col("enrolment_badge_id").alias("Badge ID"),
@@ -342,7 +342,7 @@ def processGamificationJob(config):
         ).join(user_master_df, on="userID", how="inner")
                           )
         reporting_data = (reporting_data.filter(col("badge_id").isNotNull())
-                          .select("Learner Name","Content Name", "Content Completion Status", "Badge ID","Badge Title","Badge Subtitle","Rule/criteria ID", "Source", "Date and time of award", "Ministry", "Department", "Organization ID")
+                          .select("Learner Name",col("Employee_Id").alias("Employee Id"),"Content Name", "Content Completion Status", "Badge ID","Badge Title","Badge Subtitle","Rule/criteria ID", "Source", "Date and time of award", "Ministry", "Department", "Organization ID")
                           .withColumn("Report_Last_Generated_On", currentDateTime).withColumn("mdoid", col("Organization ID"))
                           .repartition(col("Organization ID")).cache())
         today = datetime.now().strftime("%Y-%m-%d")

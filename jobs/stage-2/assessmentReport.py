@@ -150,6 +150,7 @@ class UserAssessmentModel:
                 .select(
                 col("userID").alias("User_ID"),
                 col("fullName").alias("Full_Name"),
+                col("employmentDetails.employeeCode").alias("Employee_Id"),
                 col("assessName").alias("Assessment_Name"),
                 col("Overall_Status"),
                 col("Assessment_Status"),

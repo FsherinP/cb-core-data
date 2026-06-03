@@ -70,7 +70,7 @@ class BlendedModel:
                          .select("userID", "fullName", "userGender", "userCategory", "maskedPhone",
                                  "maskedEmail", "userPrimaryEmail", "userMobile", "userStatus",
                                  "designation", "group", "Tag", "ministry_name", "dept_name",
-                                 "userOrgID", "userOrgName")
+                                 "userOrgID", "userOrgName", col("employmentDetails.employeeCode").alias("Employee_Id"))
                          ).cache()
             
             bpWithOrgDF = (spark.read.parquet(ParquetFileConstants.CONTENT_COMPUTED_PARQUET_FILE)
@@ -261,6 +261,7 @@ class BlendedModel:
                     col("Ministry"),
                     col("Department"),
                     col("Organization"),
+                    col("Employee_Id"),
                     
                     col("bpOrgName").alias("Provider_Name"),
                     col("bpName").alias("Program_Name"),
@@ -295,7 +296,7 @@ class BlendedModel:
 
             mdo_report_columns = [
                 "Name", "Email", "Phone_Number", "MDO_Name", "Designation", "Group", "Gender",
-                "Category", "Tag", "Ministry", "Department", "Organization", "Provider_Name", 
+                "Category", "Tag", "Ministry", "Department", "Organization", "Employee_Id", "Provider_Name",
                 "Program_Name", "Batch_Name", "Batch_Location", "Batch_Start_Date", "Batch_End_Date", 
                 "Enrolled_On", "Component_Name", "Component_Type", "Component_Mode", "Status", 
                 "Component_Duration", "Component_Progress_Percentage", "Component_Completed_On",
@@ -331,6 +332,7 @@ class BlendedModel:
                 col("Ministry"),
                 col("Department"),
                 col("Organization"),
+                col("Employee_Id"),
                 col("Provider_Name"),
                 col("Program_Name"),
                 col("Batch_Name"),
