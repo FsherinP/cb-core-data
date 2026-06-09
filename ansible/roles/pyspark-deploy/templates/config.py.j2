@@ -124,7 +124,7 @@ STORAGE_CONFIG = {
 
 API_CONFIG = {
     'notificationAPIURL': 'http://{{ private_ingressgateway_ip }}/cb-notification/v1/notifications/bulk/create/peervalidation',
-    'gamificationNotificationEndpoint': '{{ gamification_notification_endpoint }}',
+    'gamificationNotificationEndpoint': 'http://{{ private_ingressgateway_ip }}/cb-notification/v1/notifications/bulk/create/peervalidation',
 }
 
 # Report Path Configuration
