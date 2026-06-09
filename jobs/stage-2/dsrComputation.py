@@ -169,11 +169,11 @@ class DSRComputationModel:
             Redis.update("dashboard_courses_published_live_count", str(liveCourseCount), conf=config)
 
             # set new variable for external content live count
-            liveCourseCount = contentDF \
+            liveExternalCourseCount = contentDF \
                 .filter(col("content_status").isin("Live", "LIVE")) \
                 .filter(col("content_sub_type").isin("External Content")) \
                 .count()
-            Redis.update("dashboard_external_courses_published_live_count", str(liveCourseCount), conf=config)
+            Redis.update("dashboard_external_courses_published_live_count", str(liveExternalCourseCount), conf=config)
 
             parts = split(col("content_duration"), ":")
             result = contentDF \
