@@ -151,7 +151,7 @@ KAFKA_CONFIG = {
     'brokerList': '{{ brokerlist }}',
     'topic': '{{ topic }}',
     'compression': '{{ dashboards_broker_compression }}',
-     'peerValidationKafkaTopic' : '{{ peerValidationKafkaTopic }}',
+     'peerValidationKafkaTopic' : '{{env}}.peer.survey.notification.sent',
     
     # Side Output Topics
     'sideOutput': {
