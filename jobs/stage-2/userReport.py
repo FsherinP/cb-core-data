@@ -74,6 +74,16 @@ def processUserReport(config):
                 col("category")
             )
         )
+        external_content_duration_df = (
+            spark.read.parquet(ParquetFileConstants.EXTERNAL_CONTENT_COMPUTED_PARQUET_FILE)
+            .filter(col("category") == "External Content")
+            .select(
+                col("content_id"),
+                col("courseDuration").alias("external_courseDuration").cast("double"),
+                col("category").alias("external_category")
+            )
+        )
+        external_content_duration_df.show(5, truncate=False)
         print("✅ Step 3 Complete")
 
         # Step 4: Add User Status Classification
@@ -83,9 +93,10 @@ def processUserReport(config):
         # Step 5: Join User and Content Data
         print("🔗 Step 5: Joining User and Content Data...")
         user_enrolment_master_df = userDFUtil.appendContentDurationCompletionForEachUser(
-            spark, user_master_df, user_enrolment_df, content_duration_df
+            spark, user_master_df, user_enrolment_df, external_content_duration_df, content_duration_df
         )
         print("✅ Step 5 Complete")
+        
 
         # Step 6: Add Event Metrics
         print("📊 Step 6: Adding Event Metrics...")
@@ -100,7 +111,9 @@ def processUserReport(config):
             .withColumn("Tag", concat_ws(", ", col("additionalProperties.tag"))) \
             .withColumn("Total_Learning_Hours",
                         coalesce(col("total_event_learning_hours_with_certificates"), lit(0)) +
-                        coalesce(col("total_content_duration"), lit(0))) \
+                        coalesce(col("total_content_duration"), lit(0)) +
+                        coalesce(col("total_external_content_duration"), lit(0))
+                        ) \
             .withColumn("weekly_claps_day_before_yesterday",
                         when(col("weekly_claps_day_before_yesterday").isNull() |
                              (col("weekly_claps_day_before_yesterday") == ""),
@@ -168,13 +181,13 @@ def processUserReport(config):
             coalesce(col("total_content_enrolments"), lit(0)).alias("Course_Enrolments"),
             coalesce(col("total_content_completions"), lit(0)).alias("Course_Completions"),
             coalesce(col("total_content_duration"), lit(0)).alias("Course_Learning_Hours"),
+            coalesce(col("total_external_content_duration"), lit(0)).alias("External_Content_Learning_Hours"),
             coalesce(col("Total_Enrolments"), lit(0)).alias("Total_Enrolments"),
             coalesce(col("Total_Completions"), lit(0)).alias("Total_Completions"),
             coalesce(col("Total_Learning_Hours"), lit(0)).alias("Total_Learning_Hours"),
             col("Report_Last_Generated_On"),
             col("userOrgID").alias("mdoid")
         )
-
         dfexportutil.write_csv_per_mdo_id(mdoWiseReportDF, f"{config.localReportDir}/{config.userReportPath}/{today}",
                                           'mdoid', csv_filename=config.userReport)
 
@@ -212,6 +225,7 @@ def processUserReport(config):
             col("weekly_claps_day_before_yesterday"),
             coalesce(col("total_event_learning_hours_with_certificates"), lit(0)).alias("total_event_learning_hours"),
             coalesce(col("total_content_duration"), lit(0)).alias("total_content_learning_hours"),
+            coalesce(col("total_external_content_duration"), lit(0)).alias("total_external_content_learning_hours"),
             coalesce(col("Total_Learning_Hours"), lit(0)).alias("total_learning_hours"),
             col("employmentDetails.employeeCode").alias("employee_id"),
             col("cadreName").alias("cadre"),
@@ -223,7 +237,6 @@ def processUserReport(config):
             col("data_last_generated_on")
         ).join(user_badges, on="user_id", how="left").fillna(0, subset=["total_badges_earned"])
         print("✅ Step 8 Complete")
-
         # Step 9: Export Data
         print("📁 Step 9: Exporting Warehouse Data...")
         warehouseDF.write.mode("overwrite").option("compression", "snappy").parquet(

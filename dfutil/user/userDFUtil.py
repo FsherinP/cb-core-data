@@ -162,10 +162,11 @@ def preComputeOrgHierarchyWithUser(spark: SparkSession):
 
 
 def appendContentDurationCompletionForEachUser(spark: SparkSession, user_master_df: DataFrame,
-                                               user_enrolment_df: DataFrame,
+                                               user_enrolment_df: DataFrame, external_content_duration_df: DataFrame,
                                                content_duration_df: DataFrame) -> DataFrame:
     userdf_with_enrolment_counts = user_enrolment_df \
         .join(content_duration_df, on="content_id", how="left") \
+        .join(external_content_duration_df, on="content_id", how="left") \
         .groupBy("userID") \
         .agg(
         countDistinct(
@@ -181,12 +182,27 @@ def appendContentDurationCompletionForEachUser(spark: SparkSession, user_master_
                 (col("category") == "Course"),
                 coalesce(col("courseDuration"), lit(0.0))
             )
-        ).alias("total_content_duration")
+        ).alias("total_content_duration"),
+        sum(
+        when(
+                (col("user_consumption_status") == "completed") &
+                col("certificateID").isNotNull() &
+                (col("external_category") == "External Content"),
+                coalesce(col("external_courseDuration"), lit(0.0))
+            )
+        
+    ).alias("total_external_content_duration")
     ) \
-        .withColumn("total_content_duration", bround(col("total_content_duration") / 3600.0, 2))
+        .withColumn("total_content_duration", bround(col("total_content_duration") / 3600.0, 2)) \
+        .withColumn("total_external_content_duration", bround(col("total_external_content_duration") / 3600.0, 2))
 
     user_enrolment_master_df = user_master_df.join(userdf_with_enrolment_counts, on="userID", how="left")
     return user_enrolment_master_df
+
+def appendExternalContentDurationCompletionForEachUser(spark: SparkSession, user_master_df: DataFrame,
+                                               user_enrolment_df: DataFrame,
+                                               external_content_duration_df: DataFrame) -> DataFrame:
+    userdf_with_external_content = user_enrolment_df \
 
 
 def appendEventDurationCompletionForEachUser(spark: SparkSession, user_enrolment_df: DataFrame) -> DataFrame:
