@@ -47,18 +47,17 @@ class ACBPModel:
 
             print("📥 Reading source data...")
             userOrgDF = spark.read.parquet(ParquetFileConstants.USER_ORG_COMPUTED_FILE).select("userID",
-                                                                                                "fullName",
-                                                                                                "userStatus",
-                                                                                                "userPrimaryEmail",
-                                                                                                "userMobile",
-                                                                                                "userOrgID",
-                                                                                                "ministry_name",
-                                                                                                "dept_name",
-                                                                                                "userOrgName",
-                                                                                                "designation", "group",
-                                                                                                "additionalProperties.externalSystem",
-                                                                                                "additionalProperties.externalSystemId",
-                                                                                                col("employmentDetails.employeeCode").alias("Employee ID"))
+                                                                                               "fullName",
+                                                                                               "userStatus",
+                                                                                               "userPrimaryEmail",
+                                                                                               "userMobile",
+                                                                                               "userOrgID",
+                                                                                               "ministry_name",
+                                                                                               "dept_name",
+                                                                                               "userOrgName",
+                                                                                               "designation", "group",
+                                                                                               "additionalProperties.externalSystem",
+                                                                                               "additionalProperties.externalSystemId")
 
             contentHierarchyDF = spark.read.parquet(ParquetFileConstants.CONTENT_HIERARCHY_SELECT_PARQUET_FILE)
             allCourseProgramESDF = spark.read.parquet(
@@ -74,14 +73,14 @@ class ACBPModel:
             acbpAllEnrolDF = spark.read.parquet(ParquetFileConstants.ACBP_COMPUTED_FILE)
             #acbpAllEnrolDF.printSchema()
 
-            acbpAllEnrolmentDF = (acbpAllEnrolDF\
-                .withColumn("courseID", explode(col("acbpCourseIDList")))\
-                .withColumn("courseID", regexp_replace(col("courseID"), r"^\s*\[|\]\s*$|\s+", ""))\
-                .join(allCourseProgramDetailsDF, ["courseID"], "left")\
-                .join(enrolmentDF, ["courseID", "userID"], "left")\
-                .na.drop(subset=["userID", "courseID"])\
-                .drop("acbpCourseIDList")\
-            )
+            acbpAllEnrolmentDF = (acbpAllEnrolDF \
+                                  .withColumn("courseID", explode(col("acbpCourseIDList"))) \
+                                  .withColumn("courseID", regexp_replace(col("courseID"), r"^\s*\[|\]\s*$|\s+", "")) \
+                                  .join(allCourseProgramDetailsDF, ["courseID"], "left") \
+                                  .join(enrolmentDF, ["courseID", "userID"], "left") \
+                                  .na.drop(subset=["userID", "courseID"]) \
+                                  .drop("acbpCourseIDList") \
+                                  )
 
             # Assignment type mapping
             assignment_type_mapping = {
@@ -102,7 +101,7 @@ class ACBPModel:
             mapping_expr = create_map([lit(x) for x in chain(*assignment_type_mapping.items())])
 
             # Read select file and process same as computed
-            acbpSelectEnrolmentDF = spark.read.parquet(ParquetFileConstants.ACBP_SELECT_FILE) \
+            '''acbpSelectEnrolmentDF = spark.read.parquet(ParquetFileConstants.ACBP_SELECT_FILE) \
              .withColumn("courseID", explode(col("acbpCourseIDList")))\
              .join(allCourseProgramDetailsDF, ["courseID"], "left") \
              .drop("acbpCourseIDList") \
@@ -110,7 +109,24 @@ class ACBPModel:
              ).otherwise(col("assignmentTypeInfo"))) \
              .withColumn("assignmentType", array_join(F.transform(
                 split(col("assignmentType"), "\\|"), 
-                lambda x: mapping_expr[trim(x)]),"|"))
+                lambda x: mapping_expr[trim(x)]),"|"))'''
+            acbpSelectEnrolmentDF = spark.read.parquet(ParquetFileConstants.ACBP_SELECT_FILE) \
+                .withColumn("courseID", explode(col("acbpCourseIDList"))) \
+                .join(allCourseProgramDetailsDF, ["courseID"], "left") \
+                .drop("acbpCourseIDList") \
+                .withColumn("assignmentTypeInfo",
+                            # Each pipe-segment is a JSON array string — parse and re-join with quoted values
+                            # e.g. ["deputy director (research, statistics and analysis)","deputy director"]
+                            # becomes "deputy director (research, statistics and analysis)", "deputy director"
+                            array_join(
+                                F.transform(
+                                    split(col("assignmentTypeInfo"), "\\|"),
+                                    lambda seg: array_join(
+                                        F.transform(
+                                            from_json(seg, ArrayType(StringType())),
+                                            lambda v: F.concat(lit('"'), v, lit('"'))),", ")), "|")) \
+                .withColumn("assignmentTypeInfo", when(col("assignmentType") == "alluser", lit("AllUser")).otherwise(col("assignmentTypeInfo"))) \
+                .withColumn("assignmentType", array_join(F.transform(split(col("assignmentType"), "\\|"), lambda x: mapping_expr[trim(x)]), "|"))
 
             # Write to warehouse with mapped names
             cbPlanWarehouseDF = acbpSelectEnrolmentDF \
@@ -151,11 +167,11 @@ class ACBPModel:
             dept_is_empty = (col("dept_name").isNull()) | (col("dept_name") == "")
 
             # Process all transformations in a single chain to minimize passes
-            enrolmentReportDF = acbpEnrolmentDF.join(userOrgDF.select("userID","Employee ID"), on="userID", how="left") \
+            enrolmentReportDF = acbpEnrolmentDF \
                 .filter(col("userStatus").cast("int") == 1) \
                 .select(
                 # Select only needed columns early to reduce data shuffling
-                "fullName", "userPrimaryEmail", "userMobile", "userOrgName", "group", "Employee ID",
+                "fullName", "userPrimaryEmail", "userMobile", "userOrgName", "group",
                 "designation", "ministry_name", "dept_name", "cadreName", "civilServiceType", "civilServiceName",
                 "cadreBatch", "organised_service", "courseName", "isapar",
                 "userOrgID", "dbCompletionStatus", "courseCompletedTimestamp",
@@ -205,7 +221,6 @@ class ACBPModel:
                 col("Ministry"),
                 col("Department"),
                 col("Organization"),
-                col("Employee ID"),
                 col("cadreName").alias("Cadre"),
                 col("civilServiceType").alias("Civil Service Type"),
                 col("civilServiceName").alias("Civil Services"),
@@ -230,16 +245,15 @@ class ACBPModel:
                 partition_column='mdoid',
                 parquet_tmp_path=f"{config.localReportDir}/temp/cbp-enrolment-report/{today}",
                 csv_filename=config.cbpEnrolmentReport)
-            
             enrolmentReportDF.write.mode("overwrite").option("compression", "snappy").parquet(
                 f"{config.warehouseReportDir}/cbp_enrollments")
-            
+
             ######################################################
             # creating data for apar enrollment report for sahil
             #######################################################
 
             print("📝 Start Apar enrollment report data...")
-            
+
             #getting KCM dataframes
             kcmDF = spark.read.parquet(f"{config.warehouseReportDir}/{config.dwKcmDictionaryTable}")
             kcmMappingDF = spark.read.parquet(f"{config.warehouseReportDir}/{config.dwKcmContentTable}")
@@ -273,55 +287,55 @@ class ACBPModel:
             )
 
             resultDF.show(5, truncate=False)
-            
+
             print("📝 Preparing Apar enrollment report data...")
-            
+
             # joining user additional properties to get external system details
             userAdditionalProperties = userOrgDF.select("userID", "externalSystem","externalSystemId")
-    
+
             # preparing apar enrollment data
             aparEnrolmentData = acbpAllEnrolmentDF.where((col("acbpStatus") == "Live") & (col("isapar") == True)) \
                 .join(userAdditionalProperties, "userID", "left") \
                 .join(resultDF, acbpAllEnrolmentDF.courseID == resultDF.course_id, "left") \
                 .withColumn(
-                    "content_duration",
-                    F.when(F.col("courseDuration").isNull(), None)
-                    .when(F.col("courseDuration") == 0, "00:00:00")
-                    .otherwise(
-                        F.format_string(
-                            "%02d:%02d:%02d",
-                            (F.col("courseDuration") / 3600).cast("int"),
-                            ((F.col("courseDuration") % 3600) / 60).cast("int"),
-                            (F.col("courseDuration") % 60).cast("int")
-                        )
+                "content_duration",
+                F.when(F.col("courseDuration").isNull(), None)
+                .when(F.col("courseDuration") == 0, "00:00:00")
+                .otherwise(
+                    F.format_string(
+                        "%02d:%02d:%02d",
+                        (F.col("courseDuration") / 3600).cast("int"),
+                        ((F.col("courseDuration") % 3600) / 60).cast("int"),
+                        (F.col("courseDuration") % 60).cast("int")
                     )
-                ) \
+                )
+            ) \
                 .filter((col("userStatus").cast("int") == 1) & (col("isApar") == True)) \
                 .select(
-                    col("userID").alias("user_id"),
-                    col("fullName").alias("name"),
-                    col("userOrgID").alias("mdo_id"),
-                    col("userOrgName").alias("mdo_name"),
-                    col("courseID").alias("content_id"),
-                    col("courseName").alias("content_name"),
-                    col("courseStatus").alias("content_status"),
-                    col("content_duration"),
-                    col("courseCategory").alias("content_type"),
-                    col("userMobile").alias("phone"),
-                    col("userPrimaryEmail").alias("email"),
-                    col('isApar').alias("is_apar"),
-                    when(((col("courseProgress").isNotNull()) & (col("courseProgress") > 0)), col("courseProgress")).otherwise(0).alias("content_progress_percentage"),
-                    col("externalSystem").alias("external_system"),
-                    col("externalSystemId").alias("external_system_id"),
-                    col("competency_areas").alias("competency_type"),
-                    lit(None).cast("string").alias("parichay_id"),
-                    col("allocatedOn").cast("timestamp").alias("assigned_on")).dropDuplicates(["user_id", "content_id"])
+                col("userID").alias("user_id"),
+                col("fullName").alias("name"),
+                col("userOrgID").alias("mdo_id"),
+                col("userOrgName").alias("mdo_name"),
+                col("courseID").alias("content_id"),
+                col("courseName").alias("content_name"),
+                col("courseStatus").alias("content_status"),
+                col("content_duration"),
+                col("courseCategory").alias("content_type"),
+                col("userMobile").alias("phone"),
+                col("userPrimaryEmail").alias("email"),
+                col('isApar').alias("is_apar"),
+                when(((col("courseProgress").isNotNull()) & (col("courseProgress") > 0)), col("courseProgress")).otherwise(0).alias("content_progress_percentage"),
+                col("externalSystem").alias("external_system"),
+                col("externalSystemId").alias("external_system_id"),
+                col("competency_areas").alias("competency_type"),
+                lit(None).cast("string").alias("parichay_id"),
+                col("allocatedOn").cast("timestamp").alias("assigned_on")).dropDuplicates(["user_id", "content_id"])
 
             resultDF.unpersist()
             kcmMappingDF.unpersist()
             kcmDF.unpersist()
             print("✅ Apar enrollment report data prepared successfully!")
-            
+
             ######################################################
             # end of apar enrollment report for sahil
             ######################################################
@@ -379,7 +393,7 @@ class ACBPModel:
                         1
                     ).otherwise(0)
                 ).alias("completedBeforeDueDateCount")
-            ).join(userOrgDF.select("userID","Employee ID"), on="userID", how="left") \
+            ) \
                 .select(
                 col("fullName").alias("Name"),
                 col("userPrimaryEmail").alias("Email"),
@@ -387,7 +401,6 @@ class ACBPModel:
                 col("Ministry"),
                 col("Department"),
                 col("Organization"),
-                col("Employee ID"),
                 col("group").alias("Group"),
                 col("designation").alias("Designation"),
                 col("cadreName").alias("Cadre"),
