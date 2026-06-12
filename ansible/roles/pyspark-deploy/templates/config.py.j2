@@ -105,6 +105,7 @@ SPARK_CONFIG = {
 # Redis Configuration
 REDIS_CONFIG = {
     'redisHost': '{{ dashboards_redis_host }}',
+    'redisKpHost': '{{ dashboards_kp_redis_host }}',
     'redisPort': '{{ dashboards_redis_port }}',
     'redisDB': '{{ dashboards_redis_db }}',
 }
@@ -119,6 +120,11 @@ STORAGE_CONFIG = {
     'storageSecretConfig': 'storage.secret.config',
     'store': '{{ report_storage_type }}',
     'dpRawTelemetryBackupLocation': '{{ dp_raw_telemetry_backup_location }}',
+}
+
+API_CONFIG = {
+    'notificationAPIURL': 'http://{{ private_ingressgateway_ip }}/cb-notification/v1/notifications/bulk/create/peervalidation',
+    'gamificationNotificationEndpoint': 'http://{{ private_ingressgateway_ip }}/cb-notification/v1/notifications/bulk/create/peervalidation',
 }
 
 # Report Path Configuration
@@ -145,6 +151,7 @@ KAFKA_CONFIG = {
     'brokerList': '{{ brokerlist }}',
     'topic': '{{ topic }}',
     'compression': '{{ dashboards_broker_compression }}',
+     'peerValidationKafkaTopic' : '{{env}}.peer.survey.notification.sent',
     
     # Side Output Topics
     'sideOutput': {
@@ -221,6 +228,7 @@ JOB_CONFIG = {
     'destinationDirectoryPath': '{{ zip_reports_destination_path }}',
     'directoriesToSelect': '{{ directories_to_select }}',
     'password': '{{ zip_reports_password }}',
+    'pysparkCBPDirectoriesToSelect': ["blended-program-report-cbp","user-assessment-report-cbp"],
 }
 
 # External Service Configuration

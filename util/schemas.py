@@ -38,7 +38,9 @@ additionalPropertiesSchema = StructType([
 
 profile_schema = StructType([
     StructField("professionaldetails", professionalDetailsSchema),
-    StructField("personaldetails", personal_details_schema)
+    StructField("personaldetails", personal_details_schema),
+    StructField("ministryOrStateId", StringType(), True),
+    StructField("ministryOrStateOrgName", StringType(), True)
 ])
 
 cadre_details_schema = StructType([
@@ -85,7 +87,9 @@ def makeProfileDetailsSchema(
         StructField("profileImageUrl", StringType(), True),
         StructField("personalDetails", personal_details_schema, True),
         StructField("employmentDetails", employment_details_schema, True),
-        StructField("profileStatus", StringType(), True)
+        StructField("profileStatus", StringType(), True),
+        StructField("ministryOrStateId", StringType(), True),
+        StructField("ministryOrStateOrgName", StringType(), True)
     ]
 
     if competencies:
