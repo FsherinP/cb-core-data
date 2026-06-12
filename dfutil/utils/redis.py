@@ -361,5 +361,62 @@ class Redis:
         else:
             raise ValueError("Either conf or host/port/db must be provided")
 
+    def bulk_update(self, key_value_map: dict, conf=None, db: int = None, host: str = None, port: int = None):
+        """
+        Bulk update key-value pairs in Redis using pipeline.
+        Follows same signature pattern as update().
+        All keys set in a single network round trip.
+
+        Args:
+            key_value_map : dict of {redis_key: value}
+            conf          : config object with redisHost, redisPort, redisDB (optional)
+            db            : Redis DB index (optional)
+            host          : Redis host (optional)
+            port          : Redis port (optional)
+        """
+        if conf is not None and db is not None:
+            self.bulk_update_with_params(conf.redisHost, conf.redisPort, db, key_value_map)
+        elif conf is not None:
+            self.bulk_update_with_params(conf.redisHost, conf.redisPort, conf.redisDB, key_value_map)
+        elif all(param is not None for param in [host, port, db]):
+            self.bulk_update_with_params(host, port, db, key_value_map)
+        else:
+            raise ValueError("Either conf or host/port/db must be provided")
+
+    def bulk_update_with_params(self, host: str, port: int, db: int, key_value_map: dict):
+        """Bulk update with retry logic — mirrors updateWithParams"""
+        try:
+            self.bulk_update_without_retry(host, port, db, key_value_map)
+        except redis.RedisError:
+            self.redisConnect = self.createRedisConnect(host, port)
+            self.bulk_update_without_retry(host, port, db, key_value_map)
+
+    def bulk_update_without_retry(self, host: str, port: int, db: int, key_value_map: dict):
+        """Bulk update without retry — mirrors updateWithoutRetry"""
+        jedis = self.getOrCreateRedisConnect(host, port)
+        if jedis is None:
+            print(f"WARNING: jedis=None means host is not set, skipping bulk redis push")
+            return
+
+        # Select database if different — same logic as updateWithoutRetry
+        current_db = jedis.connection_pool.connection_kwargs.get('db', 0)
+        if current_db != db:
+            jedis = redis.Redis(
+                host=host,
+                port=port,
+                db=db,
+                socket_timeout=self.redisTimeout / 1000,
+                decode_responses=True
+            )
+
+        pipeline = jedis.pipeline()
+        for key, value in key_value_map.items():
+            cleaned_value = "" if value is None or value == "" else value
+            if value is None or value == "":
+                print(f"WARNING: data is empty, setting data='' for redis key={key}")
+            pipeline.set(key, cleaned_value)
+        pipeline.execute()
+        print(f"✅ Bulk pushed {len(key_value_map)} keys to Redis via pipeline.")
+
 # Create global instance (similar to Scala object)
 Redis = Redis()
