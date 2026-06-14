@@ -83,7 +83,7 @@ def processUserReport(config):
                 col("category").alias("external_category")
             )
         )
-        external_content_duration_df.show(5, truncate=False)
+        
         print("✅ Step 3 Complete")
 
         # Step 4: Add User Status Classification
