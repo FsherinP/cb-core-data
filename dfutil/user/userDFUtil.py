@@ -262,7 +262,7 @@ def preComputeUserWarehouseData(spark):
         user_enrolment_df = spark.read.parquet(ParquetFileConstants.ENROLMENT_WAREHOUSE_COMPUTED_PARQUET_FILE)
         content_duration_df = (
             spark.read.parquet(ParquetFileConstants.CONTENT_COMPUTED_PARQUET_FILE)
-            .filter(col("category") == "Course")
+            .filter(col("courseCategory").isin(["Course", "Moderated Course", "Multilingual Course"]))
             .select(col("courseID").alias("content_id"), col("courseDuration").cast("double"), col("category"))
         )
 

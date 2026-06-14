@@ -175,7 +175,7 @@ class ACBPModel:
                 "designation", "ministry_name", "dept_name", "cadreName", "civilServiceType", "civilServiceName",
                 "cadreBatch", "organised_service", "courseName", "isapar",
                 "userOrgID", "dbCompletionStatus", "courseCompletedTimestamp",
-                "allocatedOn", "completionDueDate"
+                "allocatedOn", "completionDueDate", "employeeCode"
             ) \
                 .withColumn(
                 "currentProgress",
@@ -215,6 +215,7 @@ class ACBPModel:
                 col("fullName").alias("Name"),
                 col("userPrimaryEmail").alias("Email"),
                 col("userMobile").alias("Phone"),
+                col("employeeCode").alias("EmployeeId"),
                 col("MDO_Name"),
                 col("group").alias("Group"),
                 col("designation").alias("Designation"),
@@ -314,6 +315,7 @@ class ACBPModel:
                 .select(
                 col("userID").alias("user_id"),
                 col("fullName").alias("name"),
+                col("employeeCode").alias("EmployeeId"),
                 col("userOrgID").alias("mdo_id"),
                 col("userOrgName").alias("mdo_name"),
                 col("courseID").alias("content_id"),
@@ -380,7 +382,7 @@ class ACBPModel:
                 "userID", "fullName", "userPrimaryEmail", "userMobile",
                 "designation", "cadreName", "civilServiceType", "civilServiceName",
                 "cadreBatch", "organised_service", "group", "userOrgID",
-                "Ministry", "Department", "Organization"
+                "Ministry", "Department", "Organization", "employeeCode"
             ) \
                 .agg(
                 countDistinct("courseID").alias("allocatedCount"),
@@ -398,6 +400,7 @@ class ACBPModel:
                 col("fullName").alias("Name"),
                 col("userPrimaryEmail").alias("Email"),
                 col("userMobile").alias("Phone"),
+                col("employeeCode").alias("EmployeeId"),
                 col("Ministry"),
                 col("Department"),
                 col("Organization"),
