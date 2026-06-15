@@ -293,7 +293,7 @@ class ZipUploadModel:
             base_dir                  = os.path.join(config.localReportDir, config.prefixDirectoryPath)
             directories_to_select     = config.pysparkDirectoriesToSelect
             cbp_directories_to_select = config.pysparkCBPDirectoriesToSelect
-            today_date                = '2026-05-05'
+            today_date                = datetime.today().strftime('%Y-%m-%d')
             merged_dir                = os.path.join(config.localReportDir, config.destinationDirectoryPath)
             kcm_dir                   = os.path.join(base_dir, "kcm-report", today_date, "ContentCompetencyMapping")
 
@@ -382,7 +382,7 @@ class ZipUploadModel:
             }
             Redis.bulk_update(
                 key_value_map=key_value_map,
-                host=config.redisKPHost,
+                host=config.redisKpHost,
                 port=config.redisPort,
                 db='0'
             )
