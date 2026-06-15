@@ -230,6 +230,7 @@ JOB_CONFIG = {
     'directoriesToSelect': '{{ directories_to_select }}',
     'password': '{{ zip_reports_password }}',
     'pysparkCBPDirectoriesToSelect': ["blended-program-report-cbp","user-assessment-report-cbp"],
+    'pysparkDirectoriesToSelect': ["blended-program-report-mdo","cbp-report-mdo-summary","gamification-report","course-report","cba-report","cbp-report-mdo-enrolment","user-report","user-enrollment-report"],
 }
 
 # External Service Configuration
