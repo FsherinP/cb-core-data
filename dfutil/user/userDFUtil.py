@@ -162,11 +162,10 @@ def preComputeOrgHierarchyWithUser(spark: SparkSession):
 
 
 def appendContentDurationCompletionForEachUser(spark: SparkSession, user_master_df: DataFrame,
-                                               user_enrolment_df: DataFrame, external_content_duration_df: DataFrame,
+                                               user_enrolment_df: DataFrame,
                                                content_duration_df: DataFrame) -> DataFrame:
     userdf_with_enrolment_counts = user_enrolment_df \
         .join(content_duration_df, on="content_id", how="left") \
-        .join(external_content_duration_df, on="content_id", how="left") \
         .groupBy("userID") \
         .agg(
         countDistinct(
@@ -183,18 +182,9 @@ def appendContentDurationCompletionForEachUser(spark: SparkSession, user_master_
                 coalesce(col("courseDuration"), lit(0.0))
             )
         ).alias("total_content_duration"),
-        sum(
-        when(
-                (col("user_consumption_status") == "completed") &
-                col("certificateID").isNotNull() &
-                (col("external_category") == "External Content"),
-                coalesce(col("external_courseDuration"), lit(0.0))
-            )
-        
-    ).alias("total_external_content_duration")
+       
     ) \
-        .withColumn("total_content_duration", bround(col("total_content_duration") / 3600.0, 2)) \
-        .withColumn("total_external_content_duration", bround(col("total_external_content_duration") / 3600.0, 2))
+        .withColumn("total_content_duration", bround(col("total_content_duration") / 3600.0, 2))
 
     user_enrolment_master_df = user_master_df.join(userdf_with_enrolment_counts, on="userID", how="left")
     return user_enrolment_master_df
@@ -262,23 +252,13 @@ def preComputeUserWarehouseData(spark):
         user_enrolment_df = spark.read.parquet(ParquetFileConstants.ENROLMENT_WAREHOUSE_COMPUTED_PARQUET_FILE)
         content_duration_df = (
             spark.read.parquet(ParquetFileConstants.CONTENT_COMPUTED_PARQUET_FILE)
-            .filter(col("courseCategory").isin(["Course", "Moderated Course", "Multilingual Course"]))
+            .filter((col("courseCategory") == "Course"))
             .select(col("courseID").alias("content_id"), col("courseDuration").cast("double"), col("category"))
-        )
-
-        external_content_duration_df = (
-            spark.read.parquet(ParquetFileConstants.EXTERNAL_CONTENT_COMPUTED_PARQUET_FILE)
-            .filter(col("category") == "External Content")
-            .select(
-                col("content_id"),
-                col("courseDuration").alias("external_courseDuration").cast("double"),
-                col("category").alias("external_category")
-            )
         )
 
         # Process data pipeline
         user_complete_data = (
-            appendContentDurationCompletionForEachUser(spark, user_master_df, user_enrolment_df, external_content_duration_df, content_duration_df)
+            appendContentDurationCompletionForEachUser(spark, user_master_df, user_enrolment_df, content_duration_df)
             .transform(lambda df: appendEventDurationCompletionForEachUser(spark, df))
             .withColumn("Tag", concat_ws(", ", col("additionalProperties.tag")))
             .withColumn("Total_Learning_Hours",

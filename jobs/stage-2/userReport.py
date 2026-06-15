@@ -67,23 +67,13 @@ def processUserReport(config):
         print("📖 Step 3: Loading Content Duration Data...")
         content_duration_df = (
             spark.read.parquet(ParquetFileConstants.CONTENT_COMPUTED_PARQUET_FILE)
-            .filter(col("courseCategory").isin(["Course", "Moderated Course", "Multilingual Course"]))
+            .filter((col("courseCategory") == "Course"))
             .select(
                 col("courseID").alias("content_id"),
                 col("courseDuration").cast("double"),
                 col("category")
             )
         )
-        external_content_duration_df = (
-            spark.read.parquet(ParquetFileConstants.EXTERNAL_CONTENT_COMPUTED_PARQUET_FILE)
-            .filter(col("category") == "External Content")
-            .select(
-                col("content_id"),
-                col("courseDuration").alias("external_courseDuration").cast("double"),
-                col("category").alias("external_category")
-            )
-        )
-        
         print("✅ Step 3 Complete")
 
         # Step 4: Add User Status Classification
@@ -93,7 +83,7 @@ def processUserReport(config):
         # Step 5: Join User and Content Data
         print("🔗 Step 5: Joining User and Content Data...")
         user_enrolment_master_df = userDFUtil.appendContentDurationCompletionForEachUser(
-            spark, user_master_df, user_enrolment_df, external_content_duration_df, content_duration_df
+            spark, user_master_df, user_enrolment_df, content_duration_df
         )
         print("✅ Step 5 Complete")
         
@@ -111,8 +101,7 @@ def processUserReport(config):
             .withColumn("Tag", concat_ws(", ", col("additionalProperties.tag"))) \
             .withColumn("Total_Learning_Hours",
                         coalesce(col("total_event_learning_hours_with_certificates"), lit(0)) +
-                        coalesce(col("total_content_duration"), lit(0)) +
-                        coalesce(col("total_external_content_duration"), lit(0))
+                        coalesce(col("total_content_duration"), lit(0))
                         ) \
             .withColumn("weekly_claps_day_before_yesterday",
                         when(col("weekly_claps_day_before_yesterday").isNull() |
