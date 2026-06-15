@@ -224,6 +224,7 @@ DEFAULT_CONFIG = {
     'password': '123456',
     'createFullReport': False,
     'warehouseUserCustomReportDir': 'user_custom_report',
+    'password_length': '6',
 
     # Job Configuration
     'parallelization': '16',
