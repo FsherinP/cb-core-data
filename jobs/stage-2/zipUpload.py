@@ -3,7 +3,10 @@ import findspark
 findspark.init()
 
 import time
-from pyspark.sql import SparkSession
+import secrets
+import string
+from pyspark.sql import SparkSession, Row
+from pyspark.sql.types import StructType, StructField, StringType
 from datetime import datetime
 from pathlib import Path
 from pyspark.sql.types import StructType, StructField, StringType, IntegerType, BooleanType, ArrayType
@@ -15,10 +18,11 @@ import sys
 import glob
 import os
 import pandas as pd
+import pyzipper
+import pyminizip
 
 sys.path.append(str(Path(__file__).resolve().parents[2]))
 
-# Reusable imports from userReport structure
 from constants.ParquetFileConstants import ParquetFileConstants
 from dfutil.user import userDFUtil
 from dfutil.enrolment import enrolmentDFUtil
@@ -27,6 +31,7 @@ from dfutil.dfexport import dfexportutil
 from dfutil.utils.utils import sync_reports
 from jobs.config import get_environment_config
 from jobs.default_config import create_config
+from dfutil.utils.redis import Redis
 
 
 class ZipUploadModel:
@@ -40,18 +45,133 @@ class ZipUploadModel:
     def get_date():
         return datetime.now().strftime("%Y-%m-%d")
 
+    @staticmethod
+    def generate_alphanumeric_password(length):
+        """
+        Generates a cryptographically secure alphanumeric password.
+        Uses Python's secrets module — equivalent to Java's SecureRandom.
+        """
+        ALPHANUMERIC_CHARACTERS = string.ascii_letters + string.digits
+        return ''.join(secrets.choice(ALPHANUMERIC_CHARACTERS) for _ in range(length))
+
+    @staticmethod
+    def generate_mdoid_passwords(spark, config, mdoid_folders, org_hierarchy_df):
+        """
+        Generate passwords grouped by effective L0 organisation.
+
+        Priority:
+          1. ministry_id present      → group by ministry_id (true L0)
+          2. ministry_id null but
+             department_id present    → treat department_id as L0 (fallback)
+             All mdo_ids under that
+             orphan dept share its
+             password, including the
+             dept folder itself.
+          3. Both null               → individual password (true orphan)
+
+        Returns:
+            - mdoid_password_map : dict  {mdoid_folder: password}
+            - password_df        : Spark DataFrame [mdo_id, password]
+        """
+        from pyspark.sql import functions as F
+
+        # ── Step 1: one password per unique non-null ministry_id (true L0) ─
+        ministry_ids = [
+            row["ministry_id"]
+            for row in org_hierarchy_df
+                .select("ministry_id")
+                .filter(F.col("ministry_id").isNotNull() & (F.col("ministry_id") != ""))
+                .distinct()
+                .collect()
+        ]
+        ministry_password_map = {
+            mid: ZipUploadModel.generate_alphanumeric_password(config.password_length)
+            for mid in ministry_ids
+        }
+        print(f"  Generated {len(ministry_password_map)} unique L0 (ministry) passwords")
+
+        # ── Step 2: one password per orphan department_id (fallback L0) ───
+        # Orphan dept = has no ministry_id but has a department_id
+        orphan_dept_ids = [
+            row["department_id"]
+            for row in org_hierarchy_df
+                .select("department_id")
+                .filter(
+                    (F.col("ministry_id").isNull() | (F.col("ministry_id") == "")) &
+                    F.col("department_id").isNotNull() &
+                    (F.col("department_id") != "")
+                )
+                .distinct()
+                .collect()
+        ]
+        dept_password_map = {
+            did: ZipUploadModel.generate_alphanumeric_password(config.password_length)
+            for did in orphan_dept_ids
+        }
+        print(f"  Generated {len(dept_password_map)} unique orphan-dept (fallback L0) passwords")
+
+        # ── Step 3: map every mdo_id → effective L0 password ──────────────
+        mdo_rows = org_hierarchy_df \
+            .select("mdo_id", "ministry_id", "department_id") \
+            .filter(F.col("mdo_id").isNotNull()) \
+            .distinct() \
+            .collect()
+
+        hierarchy_mdo_password = {}
+        for row in mdo_rows:
+            mdo = row["mdo_id"]
+            mid = row["ministry_id"]
+            did = row["department_id"]
+
+            if mid and mid in ministry_password_map:
+                # has ministry → true L0 password
+                hierarchy_mdo_password[mdo] = ministry_password_map[mid]
+            elif did and did in dept_password_map:
+                # no ministry, has orphan dept → dept acts as L0
+                hierarchy_mdo_password[mdo] = dept_password_map[did]
+            # else: both null → individual password assigned in step 4
+
+        # ── Step 4: assign password to every filesystem mdoid folder ──────
+        mdoid_password_map = {}
+        for folder in mdoid_folders:
+            raw_id = folder.replace("mdoid=", "")
+
+            if raw_id in hierarchy_mdo_password:
+                # mapped in hierarchy → inherited password
+                mdoid_password_map[folder] = hierarchy_mdo_password[raw_id]
+            elif raw_id in ministry_password_map:
+                # folder itself IS a ministry (L0) → its own password
+                mdoid_password_map[folder] = ministry_password_map[raw_id]
+            elif raw_id in dept_password_map:
+                # folder itself IS an orphan dept (fallback L0) → its own password
+                mdoid_password_map[folder] = dept_password_map[raw_id]
+            else:
+                # true orphan — no ministry, no dept → individual password
+                mdoid_password_map[folder] = ZipUploadModel.generate_alphanumeric_password(
+                    config.password_length
+                )
+
+        # ── Step 5: Spark DataFrame for audit / Redis write ────────────────
+        schema = StructType([
+            StructField("mdo_id",   StringType(), False),
+            StructField("password", StringType(), False),
+        ])
+        rows = [Row(mdo_id=folder, password=pwd) for folder, pwd in mdoid_password_map.items()]
+        password_df = spark.createDataFrame(rows, schema=schema)
+
+        return mdoid_password_map, password_df
+
     def upload_parquet_files(self, config):
         try:
             print("Starting upload of Parquet files to GCP bucket")
 
             base_path = config.unifiedParquetLocalPath
-            user_details_file = os.path.join(base_path, "unified_user_details.parquet")
-            enrolments_file = os.path.join(base_path, "unified_enrolments.parquet")
+            user_details_file  = os.path.join(base_path, "unified_user_details.parquet")
+            enrolments_file    = os.path.join(base_path, "unified_enrolments.parquet")
             org_hierarchy_file = os.path.join(base_path, "org_hierarchy.parquet")
 
-            # Check existence
-            user_details_exists = os.path.isfile(user_details_file)
-            enrolments_exists = os.path.isfile(enrolments_file)
+            user_details_exists  = os.path.isfile(user_details_file)
+            enrolments_exists    = os.path.isfile(enrolments_file)
             org_hierarchy_exists = os.path.isfile(org_hierarchy_file)
 
             if not user_details_exists:
@@ -61,7 +181,6 @@ class ZipUploadModel:
             if not org_hierarchy_exists:
                 print(f"WARNING: File not found: {org_hierarchy_file}")
 
-            # Proceed only if all exist
             if user_details_exists and enrolments_exists and org_hierarchy_exists:
                 sync_reports(base_path, config.unifiedParquetPath, config)
                 print("Completed uploading Parquet files to GCP bucket.")
@@ -74,33 +193,37 @@ class ZipUploadModel:
 
     @staticmethod
     def zip_mdoid_folder(args):
-        """
-        Zip a single MDOID folder with password protection.
-        Uses ZIP_DEFLATED for compression.
-        """
+        import pyminizip
+
         mdoid_folder, merged_dir, password = args
         mdoid_path = os.path.join(merged_dir, mdoid_folder)
         if not os.path.isdir(mdoid_path):
             return None
-        zip_path = os.path.join(mdoid_path, "reports.zip")
+        zip_path  = str(os.path.join(mdoid_path, "reports.zip"))
         csv_files = [f for f in os.listdir(mdoid_path) if f.endswith(".csv")]
         if csv_files:
             try:
-                with ZipFile(zip_path, 'w', ZIP_DEFLATED) as zipf:
-                    zipf.setpassword(password.encode())
-                    for csv_file in csv_files:
-                        file_path = os.path.join(mdoid_path, csv_file)
-                        zipf.write(file_path, arcname=csv_file)
-                        os.remove(file_path)  # Delete after adding to zip
+                file_paths   = [str(os.path.join(mdoid_path, f)) for f in csv_files]
+                prefix_paths = [""] * len(file_paths)
+                pyminizip.compress_multiple(
+                    file_paths,
+                    prefix_paths,
+                    zip_path,
+                    str(password),
+                    5
+                )
+                for f in file_paths:
+                    os.remove(f)
                 return f"✓ Zipped {mdoid_folder} ({len(csv_files)} files)"
             except Exception as e:
+                print(f"❌ EXCEPTION during zipping {mdoid_folder}: {str(e)}")
                 return f"✗ Failed {mdoid_folder}: {str(e)}"
         return None
 
     @staticmethod
     def convert_parquet_to_csv(args):
         """
-        Convert a parquet *folder* to a single CSV using pandas,
+        Convert a parquet folder to a single CSV using pandas,
         reading one parquet file at a time to avoid OOM.
         """
         folder, warehouse_base, warehouse_output_dir = args
@@ -119,7 +242,7 @@ class ZipUploadModel:
             first = True
             for pf in parquet_files:
                 full_path = os.path.join(folder_path, pf)
-                df = pd.read_parquet(full_path)  # only one file in memory at a time
+                df = pd.read_parquet(full_path)
                 df.to_csv(
                     csv_output,
                     index=False,
@@ -128,17 +251,12 @@ class ZipUploadModel:
                 )
                 del df
                 first = False
-
             return f"✓ Converted {folder}"
         except Exception as e:
             return f"✗ Error processing {folder}: {str(e)}"
 
     @staticmethod
     def copy_file_to_mdoid(args):
-        """
-        Copy a single CSV file to its destination MDOID folder.
-        Used for parallel file copying.
-        """
         source_file, dest_dir, dest_filename = args
         try:
             os.makedirs(dest_dir, exist_ok=True)
@@ -159,34 +277,37 @@ class ZipUploadModel:
             spark.conf.set("spark.sql.adaptive.coalescePartitions.enabled", "true")
             spark.conf.set("spark.sql.adaptive.skewJoin.enabled", "true")
 
-            # ------------------ Part 1: Merge & Zip MDOID Reports ------------------ #
+            # ── Read org hierarchy for L0-based password grouping ──────────────
+            print("📥 Reading org hierarchy...")
+            org_hierarchy_df = spark.read.parquet(
+                f"{config.warehouseReportDir}/{config.dwOrgTable}"
+            ).select("mdo_id", "ministry_id", "department_id").cache()
+            print(f"  Org hierarchy rows: {org_hierarchy_df.count()}")
+
+            # ------------------ Part 1: Merge & Zip MDOID Reports ------------- #
             part1_start = time.time()
             print("\n" + "=" * 70)
             print("PART 1: MDOID REPORTS PROCESSING")
             print("=" * 70)
-            base_dir = os.path.join(config.localReportDir, config.prefixDirectoryPath)
-            directories_to_select = config.pysparkDirectoriesToSelect
-            cbp_directories_to_select = config.pysparkCBPDirectoriesToSelect
-            today_date = datetime.today().strftime('%Y-%m-%d')
-            merged_dir = os.path.join(config.localReportDir, config.destinationDirectoryPath)
-            kcm_dir = os.path.join(base_dir, "kcm-report", today_date, "ContentCompetencyMapping")
 
-            # Better KCM file detection
+            base_dir                  = os.path.join(config.localReportDir, config.prefixDirectoryPath)
+            directories_to_select     = config.pysparkDirectoriesToSelect
+            cbp_directories_to_select = config.pysparkCBPDirectoriesToSelect
+            today_date                = datetime.today().strftime('%Y-%m-%d')
+            merged_dir                = os.path.join(config.localReportDir, config.destinationDirectoryPath)
+            kcm_dir                   = os.path.join(base_dir, "kcm-report", today_date, "ContentCompetencyMapping")
+
             kcm_file = None
             if os.path.exists(kcm_dir):
                 kcm_files = glob.glob(os.path.join(kcm_dir, "*.csv"))
-                kcm_file = kcm_files[0] if kcm_files else None
+                kcm_file  = kcm_files[0] if kcm_files else None
 
-            password = config.password
-
-            # Clean and recreate merged directory
             if os.path.exists(merged_dir):
                 shutil.rmtree(merged_dir)
             os.makedirs(merged_dir)
 
             print("\n📤 Syncing CBP report folders to cloud...")
             cbp_sync_start = time.time()
-
             for subfolder in cbp_directories_to_select:
                 cbp_dir = os.path.join(base_dir, subfolder, today_date)
                 if os.path.exists(cbp_dir):
@@ -199,15 +320,12 @@ class ZipUploadModel:
                     print(f"⚠️ CBP directory not found: {cbp_dir}")
             print(f"⏱️  CBP sync completed in {time.time() - cbp_sync_start:.2f}s")
 
-            # Track all MDOID values for KCM distribution
             all_mdoids = set()
             print("\n📁 Collecting CSV files from report directories...")
             collection_start = time.time()
-            # Prepare file copy tasks for parallel execution
             copy_tasks = []
             print(f"Copying of mdoid folders started at: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
 
-            # Collect CSVs for each mdoid from all specified directories
             for subfolder in directories_to_select:
                 report_dir = os.path.join(base_dir, subfolder, today_date)
                 if os.path.exists(report_dir):
@@ -220,24 +338,19 @@ class ZipUploadModel:
                             else:
                                 mdoid_value = item
 
-                            # Track this MDOID for KCM distribution
                             all_mdoids.add(mdoid_value)
-
                             dest_dir = os.path.join(merged_dir, mdoid_value)
 
                             if os.path.isdir(item_path):
-                                # Directory with CSVs inside
                                 for f in os.listdir(item_path):
                                     if f.endswith(".csv"):
                                         source = os.path.join(item_path, f)
                                         copy_tasks.append((source, dest_dir, f))
                             elif item_path.endswith(".csv"):
-                                # Single CSV file
                                 copy_tasks.append((item_path, dest_dir, f"{subfolder}.csv"))
 
             print(f"  Found {len(copy_tasks)} files to copy across {len(all_mdoids)} MDOID folders")
 
-            # Parallel file copying
             if copy_tasks:
                 print(f"  Copying files in parallel (max_workers=16)...")
                 copy_start = time.time()
@@ -247,14 +360,45 @@ class ZipUploadModel:
 
             print(f"Copying of mdoid folders completed at: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
 
-            # Password-protected ZIP creation per mdoid folder (PARALLEL)
-            print(f"\n🗜️  Creating password-protected ZIP files for {len(all_mdoids)} MDOID folders...")
+            # ── Generate L0-grouped passwords ──────────────────────────────────
+            mdoid_folders = [
+                f for f in os.listdir(merged_dir)
+                if os.path.isdir(os.path.join(merged_dir, f))
+            ]
+
+            print(f"\n🔑 Generating L0-grouped passwords for {len(mdoid_folders)} MDOID folders...")
+            mdoid_password_map, password_df = self.generate_mdoid_passwords(
+                spark, config, mdoid_folders, org_hierarchy_df
+            )
+
+            print("\n📋 MDO ID → Password mapping (sample):")
+            password_df.show(10, truncate=False)
+
+            # Store in Redis — all children of same L0 will have identical password
+            rows = password_df.collect()
+            key_value_map = {
+                f"CB_EXT_{row['mdo_id'].replace('mdoid=', '')}_password": row['password']
+                for row in rows
+            }
+            Redis.bulk_update(
+                key_value_map=key_value_map,
+                host=config.redisKpHost,
+                port=config.redisPort,
+                db='0'
+            )
+            print(f"✅ L0-grouped password mapping saved to Redis ({len(key_value_map)} keys)")
+
+            # ── Password-protected ZIP per mdoid folder ────────────────────────
+            print(f"\n🗜️  Creating password-protected ZIP files for {len(mdoid_folders)} MDOID folders...")
             print(f"Operational reports zipping started at: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
             zip_start = time.time()
-            mdoid_folders = [f for f in os.listdir(merged_dir) if os.path.isdir(os.path.join(merged_dir, f))]
-            zip_tasks = [(folder, merged_dir, password) for folder in mdoid_folders]
 
-            # Use ThreadPoolExecutor for I/O-bound zipping
+            zip_tasks = [
+                (folder, merged_dir, mdoid_password_map[folder])
+                for folder in mdoid_folders
+                if folder in mdoid_password_map
+            ]
+
             with ThreadPoolExecutor(max_workers=12) as executor:
                 futures = [executor.submit(self.zip_mdoid_folder, task) for task in zip_tasks]
                 for future in as_completed(futures):
@@ -262,7 +406,7 @@ class ZipUploadModel:
                     if result:
                         print(f"  {result}")
 
-            print(f"✅ All MDOID folders zipped with password at: {merged_dir}")
+            print(f"✅ All MDOID folders zipped with L0-grouped passwords at: {merged_dir}")
             print(f"⏱️  Zipping completed in {time.time() - zip_start:.2f}s")
             print(f"Zipping of operational reports completed at: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
 
@@ -271,7 +415,6 @@ class ZipUploadModel:
             sync_reports(merged_dir, config.mdoReportSyncPath, config)
             print(f"⏱️  MDOID sync completed in {time.time() - mdoid_sync_start:.2f}s")
 
-            # Separate KCM sync (existing functionality)
             print(f"\n📤 Syncing KCM file separately to: {config.kcmSyncPath}")
             try:
                 kcm_sync_start = time.time()
@@ -282,36 +425,33 @@ class ZipUploadModel:
 
             print(f"\n⏱️  Part 1 completed in {time.time() - part1_start:.2f}s")
 
-            # Upload unified parquet files
             print("\n📤 Uploading unified Parquet files...")
             parquet_upload_start = time.time()
             self.upload_parquet_files(config)
             print(f"⏱️  Parquet upload completed in {time.time() - parquet_upload_start:.2f}s")
 
-            # ------------------ Part 2: Convert Parquet to CSV & Zip for full reports ------------------ #
-            # Only execute if createFullReport flag is enabled
-            if config.createFullReport:
-                warehouse_base = config.warehouseReportDir
-                warehouse_output_dir = config.warehouseOutputDir
-                warehouse_zip_path = os.path.join(warehouse_output_dir, "reports.zip")
+            # ── Unpersist ──────────────────────────────────────────────────────
+            org_hierarchy_df.unpersist()
 
-                # Clean and recreate output directory
+            # ------------------ Part 2: Convert Parquet to CSV & Zip ---------- #
+            if config.createFullReport:
+                warehouse_base       = config.warehouseReportDir
+                warehouse_output_dir = config.warehouseOutputDir
+                warehouse_zip_path   = os.path.join(warehouse_output_dir, "reports.zip")
+
                 if os.path.exists(warehouse_output_dir):
                     shutil.rmtree(warehouse_output_dir)
                 os.makedirs(warehouse_output_dir)
 
-                # Get list of folders to convert
-                folders = [f for f in os.listdir(warehouse_base)
-                           if os.path.isdir(os.path.join(warehouse_base, f))]
+                folders = [
+                    f for f in os.listdir(warehouse_base)
+                    if os.path.isdir(os.path.join(warehouse_base, f))
+                ]
 
                 print(f"\n📦 Converting {len(folders)} Parquet folders to CSV...")
-                conversion_start = time.time()
+                conversion_start  = time.time()
+                conversion_tasks  = [(folder, warehouse_base, warehouse_output_dir) for folder in folders]
 
-                # Prepare conversion tasks
-                conversion_tasks = [(folder, warehouse_base, warehouse_output_dir) for folder in folders]
-
-                # Parallel Parquet to CSV conversion using pandas
-                # Use fewer workers for memory-intensive operations
                 with ThreadPoolExecutor(max_workers=1) as executor:
                     futures = [executor.submit(self.convert_parquet_to_csv, task) for task in conversion_tasks]
                     for future in as_completed(futures):
@@ -321,12 +461,13 @@ class ZipUploadModel:
 
                 print(f"⏱️  Conversion completed in {time.time() - conversion_start:.2f}s")
 
-                # Password-protected ZIP of all warehouse CSVs
                 print("\n🗜️  Creating password-protected ZIP for warehouse reports...")
                 zip_start = time.time()
 
-                warehouse_csvs = [os.path.join(warehouse_output_dir, f)
-                                  for f in os.listdir(warehouse_output_dir) if f.endswith(".csv")]
+                warehouse_csvs = [
+                    os.path.join(warehouse_output_dir, f)
+                    for f in os.listdir(warehouse_output_dir) if f.endswith(".csv")
+                ]
 
                 if warehouse_csvs:
                     with ZipFile(warehouse_zip_path, 'w', ZIP_DEFLATED) as zipf:
@@ -348,30 +489,29 @@ class ZipUploadModel:
                 print("\n" + "=" * 70)
                 print("PART 2: SKIPPED (createFullReport flag is disabled)")
                 print("=" * 70)
+
         except Exception as e:
             print(f"✗ Error: {str(e)}")
             raise
 
 
 def main():
-    # Initialize Spark Session with optimized settings
     spark = SparkSession.builder \
         .appName("Zip Upload Model") \
-        .config("spark.executor.memory", "42g") \
-        .config("spark.driver.memory", "10g") \
-        .config("spark.sql.shuffle.partitions", "64") \
-        .config("spark.driver.bindAddress", "127.0.0.1") \
+        .config("spark.master", "local[28]") \
+        .config("spark.driver.memory", "180g") \
+        .config("spark.driver.memoryOverhead", "24g") \
+        .config("spark.driver.maxResultSize", "12g") \
+        .config("spark.sql.shuffle.partitions", "224") \
+        .config("spark.sql.files.maxPartitionBytes", "256MB") \
+        .config("spark.sql.adaptive.enabled", "true") \
+        .config("spark.sql.adaptive.coalescePartitions.enabled", "true") \
+        .config("spark.sql.adaptive.skewJoin.enabled", "true") \
         .config("spark.sql.legacy.timeParserPolicy", "LEGACY") \
-        .config("spark.network.timeout", "600s") \
-        .config("spark.executor.heartbeatInterval", "60s") \
-        .config("spark.shuffle.io.connectionTimeout", "300s") \
-        .config("spark.shuffle.io.maxRetries", "20") \
-        .config("spark.shuffle.io.retryWait", "10s") \
         .getOrCreate()
 
-    # Create model instance
     config_dict = get_environment_config()
-    config = create_config(config_dict)
+    config      = create_config(config_dict)
 
     start_time = datetime.now()
     print(f"[START] ZipUpload processing started at: {start_time.strftime('%Y-%m-%d %H:%M:%S')}")
@@ -381,12 +521,11 @@ def main():
     model.process_data(spark, config)
 
     end_time = datetime.now()
-    duration = end_time - start_time
     print(f"\n[END] ZipUpload completed at: {end_time.strftime('%Y-%m-%d %H:%M:%S')}")
-    print(f"[INFO] Total duration: {duration}")
-
+    print(f"[INFO] Total duration: {end_time - start_time}")
     spark.stop()
 
 
 if __name__ == "__main__":
     main()
+ 

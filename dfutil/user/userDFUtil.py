@@ -189,11 +189,6 @@ def appendContentDurationCompletionForEachUser(spark: SparkSession, user_master_
     user_enrolment_master_df = user_master_df.join(userdf_with_enrolment_counts, on="userID", how="left")
     return user_enrolment_master_df
 
-def appendExternalContentDurationCompletionForEachUser(spark: SparkSession, user_master_df: DataFrame,
-                                               user_enrolment_df: DataFrame,
-                                               external_content_duration_df: DataFrame) -> DataFrame:
-    userdf_with_external_content = user_enrolment_df \
-
 
 def appendEventDurationCompletionForEachUser(spark: SparkSession, user_enrolment_df: DataFrame) -> DataFrame:
     """

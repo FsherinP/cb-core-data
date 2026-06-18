@@ -218,12 +218,13 @@ DEFAULT_CONFIG = {
     'unifiedParquetLocalPath': '/home/analytics/pyspark/warehouse/unified/',
     'directoriesToSelect': ["blended-program-report-mdo","cbp-report-mdo-summary","course-report","cba-report","cbp-report-mdo-enrolment","user-report","user-enrollment-report"],
     'pysparkDirectoriesToSelect': ["blended-program-report-mdo","cbp-report-mdo-summary","gamification-report","course-report","cba-report","cbp-report-mdo-enrolment","user-report","user-enrollment-report"],
-    'pysparkCBPDirectoriesToSelect': ["blended-program-report-cbp","user-assessment-report-cbp", "course-completion-survey-report"],
+    'pysparkCBPDirectoriesToSelect': ["user-custom-report","blended-program-report-cbp","user-assessment-report-cbp", "course-completion-survey-report"],
     'googleServiceAccountFilePath': '/home/analytics/pyspark/jobs/gcp_service_account.json',
     'gcpBucket': 'igotproddp',
     'password': '123456',
     'createFullReport': False,
     'warehouseUserCustomReportDir': 'user_custom_report',
+    'password_length': 6,
 
     # Job Configuration
     'parallelization': '16',
