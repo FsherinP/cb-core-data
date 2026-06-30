@@ -81,6 +81,7 @@ DEFAULT_CONFIG = {
     'dwNLWUserLeaderboardTable': 'nlw_user_leaderboard',
     'dwAparCBPEnrollmentTable': 'apar_cbp_enrollment',
     'dwCourseCompletionSurveryTable': 'course_completion_survey_details',
+    'dwBharatKalpTable': 'bharat_kalp',
 
     # Cassandra Keyspaces
     'cassandraUserKeyspace': 'sunbird',
@@ -248,6 +249,9 @@ DEFAULT_CONFIG = {
     'notificationAPIURL': 'http://10.175.5.200/cb-notification/v1/notifications/bulk/create/peervalidation',
     'peerValidationKafkaTopic':'prod.peer.survey.notification.sent',
     'peerValidationFormIndex': 'fs-forms-alias-v2',
+
+    # Bharat Kalp Configuration
+    'bharat_kalp_event_tags': ['Bharat Kalp - Talks', 'Bharat Kalp - Podcast']
 
 }
 
