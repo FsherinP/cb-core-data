@@ -5,7 +5,7 @@ import os
 import sys
 from datetime import datetime
 from pathlib import Path
-from pyspark.sql import SparkSession
+from pyspark.sql import SparkSession, Row
 from pyspark.sql.functions import col, explode, broadcast
 
 
@@ -13,6 +13,7 @@ sys.path.append(str(Path(__file__).resolve().parents[2]))
 
 from jobs.config import get_environment_config
 from jobs.default_config import create_config
+from constants.ParquetFileConstants import ParquetFileConstants
 
 
 class BharatKalpReport:
@@ -31,6 +32,7 @@ class BharatKalpReport:
             .select(explode(col("week_value.doIds")).alias("content_id"))
             .distinct()
             )
+
         if df.limit(1).count() == 0:
             raise ValueError("No Bharat Kalp Courses found in the provided path. Please check the configuration.")
         return df
@@ -38,11 +40,13 @@ class BharatKalpReport:
     def read_warehouse_data(self, table_name):
         return self.spark.read.parquet(f"{self.config.warehouseReportDir}/{table_name}")
         
-    def build_event_report(self, eventsDF, eventEnrolmentsDF):
+    def build_event_report(self, eventsDF, eventEnrolmentsDF, userDF):
+        eventEnrolmentsDF = eventEnrolmentsDF.join(broadcast(userDF), eventEnrolmentsDF.user_id == userDF.user_id, "inner").select(eventEnrolmentsDF["*"])
         eventWarehouseDF = eventsDF.join(eventEnrolmentsDF, eventsDF.event_id == eventEnrolmentsDF.event_id, "inner").select(eventEnrolmentsDF["*"])
         return eventWarehouseDF
     
-    def build_course_report(self, enrolmentDF, bharatKalpCoursesDF):
+    def build_course_report(self, enrolmentDF, bharatKalpCoursesDF, userDF):
+        enrolmentDF = enrolmentDF.join(broadcast(userDF), enrolmentDF.user_id == userDF.user_id, "inner").select(enrolmentDF["*"])
         courseWarehouseDF = enrolmentDF.join(broadcast(bharatKalpCoursesDF), enrolmentDF.content_id == bharatKalpCoursesDF.content_id, "inner").select(enrolmentDF["*"])
         return courseWarehouseDF
     
@@ -51,22 +55,21 @@ class BharatKalpReport:
         bharatKalpCoursesDF = self.read_bharat_kalp_courses()
         enrolmentDF = self.read_warehouse_data(self.config.dwEnrollmentsTable)
         eventsDF = self.read_warehouse_data("event_details").filter(col("event_tag").isin(self.config.bharat_kalp_event_tags))
-        eventEnrolmentsDF = self.read_warehouse_data("event_enrolments")
-        
-        """Bharat Kalp Users data is still missing """
-        
+        eventEnrolmentsDF = self.read_warehouse_data("event_enrolment_details")
+        userDF = self.spark.read.parquet(ParquetFileConstants.USER_COMPUTED_PARQUET_FILE).filter(col("isBharatKalpMember") == True).select(col("userID").alias("user_id")).distinct()
+
         print("Step 1: Complete")
         print("Step 2: Processing Bharat Kalp Events with Event Enrolments")
-        eventWarehouseDF = self.build_event_report(eventsDF, eventEnrolmentsDF)
+        eventWarehouseDF = self.build_event_report(eventsDF, eventEnrolmentsDF, userDF)
         print("Step 2: Complete")
         print("Step 3: Processing Bharat Kalp Courses with Enrolments")
-        courseWarehouseDF = self.build_course_report(enrolmentDF, bharatKalpCoursesDF)
+        courseWarehouseDF = self.build_course_report(enrolmentDF, bharatKalpCoursesDF, userDF)
         print("Step 3: Complete")
 
         print("Step 4: Writing Bharat Kalp Report to Warehouse")
-        """We would be getting two different dataframe with two different schema's"""
-        # warehouseDF.coalesce(1).write.mode("overwrite").option("compression", "snappy").parquet(f"{self.config.warehouseReportDir}/{self.config.dwBharatKalpTable}")
-
+    
+        courseWarehouseDF.coalesce(1).write.mode("overwrite").option("compression", "snappy").parquet(f"{self.config.warehouseReportDir}/bharat_kalp_courses")
+        eventWarehouseDF.coalesce(1).write.mode("overwrite").option("compression", "snappy").parquet(f"{self.config.warehouseReportDir}/bharat_kalp_events")
         
 def main():
     os.environ[

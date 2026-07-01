@@ -72,7 +72,8 @@ def preComputeUser(spark: SparkSession) -> DataFrame:
         when(col("profileDetails.additionalProperties").isNotNull(), col("profileDetails.additionalProperties"))
         .otherwise(col("profileDetails.additionalPropertis"))
     ) \
-        .withColumn("Tag", concat_ws(", ", col("additionalProperties.tag")))
+        .withColumn("Tag", concat_ws(", ", col("additionalProperties.tag"))) \
+        .withColumn("isBharatKalpMember", col("additionalProperties.isBharatKalpMember")) \
 
     # Drop now-unnecessary JSON fields
     userDF = userDF.drop("profileDetails", "userProfileDetails")
