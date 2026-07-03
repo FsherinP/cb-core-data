@@ -121,7 +121,7 @@ acbp_mdo_enrolment_report_path: "standalone-reports/cbp-report-mdo-enrolment"
 acbp_mdo_summary_report_path: "standalone-reports/cbp-report-mdo-summary"
 kcm_report_path: "standalone-reports/kcm-report"
 ml_report_path: "standalone-reports/ml-report"
-igot_elasticsearch_connection_host: '{{ igot_elasticsearch_connection_host }}',
+igot_elasticsearch_connection_host: '{{ igot_elasticsearch_connection_host }}'
 
 report_solution_ids: ""
 report_grace_period: "2"
