@@ -219,7 +219,7 @@ class DashboardSyncModel:
             print(f"Final dataset: {allCourseProgramCompletionWithDetailsDF.count()} records")
             allCourseProgramCompletionWithDetailsDF.show(5)
             df_with_ts = allCourseProgramCompletionWithDetailsDF.withColumn("timestamp", lit(timestamp))
-            dispatch_df_to_kafka(df_with_ts, config.sideOutput['topics']['userCourseProgramProgress'], broker_list=config.dpBrokerList)
+            dispatch_df_to_kafka(df_with_ts, config.userCourseProgramProgress, broker_list=config.dpBrokerList)
             print("✅ COMPLETE Dashboard Sync finished successfully")
             # Redis.closeRedisConnect(config)
             print("📝 Redis connection close called")

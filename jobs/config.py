@@ -83,6 +83,7 @@ DATABASE_CONFIG = {
     'sparkElasticsearchConnectionPort': '{{ single_node_es_port }}',
     'esFormDataIndex': '{{ es_form_data_index }}',
     'esFormDataIds': '{{ es_form_data_ids }}',
+    'sparkIGotElasticsearchConnectionHost': '{{ igot_elasticsearch_connection_host }}',
 
     # MongoDB Configuration
     'mongoDatabase': '{{ dashboards_mongo_discussions_db }}',
@@ -224,7 +225,7 @@ JOB_CONFIG = {
     'password': '{{ zip_reports_password }}',
     'pysparkCBPDirectoriesToSelect': ["blended-program-report-cbp","user-assessment-report-cbp"],
     'pysparkDirectoriesToSelect': ["blended-program-report-mdo","cbp-report-mdo-summary","gamification-report","course-report","cba-report","cbp-report-mdo-enrolment","user-report","user-enrollment-report"],
-    
+
     # Course category configuration
     'courseCategoriesToSelect': '{{ course_categories_to_select_standalone_reports }}',
 }
