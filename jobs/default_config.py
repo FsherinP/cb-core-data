@@ -160,7 +160,6 @@ DEFAULT_CONFIG = {
     'acbpMdoEnrolmentReportPath': 'standalone-reports/cbp-report-mdo-enrolment',
     'acbpMdoSummaryReportPath': 'standalone-reports/cbp-report-mdo-summary',
     'kcmReportPath': 'standalone-reports/kcm-report',
-    'commsConsoleReportPath': 'standalone-reports/comms-console',
     'validationReportPath': 'standalone-reports/validation-report',
     'courseCompletionSurveyPath': 'standalone-reports/course-completion-survey-report',
     'gamificationReportPath' : 'standalone-reports/gamification-report',
@@ -175,15 +174,6 @@ DEFAULT_CONFIG = {
     'userEnrollmentReport' : 'ConsumptionReport.csv',
     'userReport' : 'UserReport.csv',
     'completionSurveyReport':'completionSurvey.csv',
-
-
-    # Communications Console Configuration
-    'commsConsolePrarambhEmailSuffix': '.kb@karmayogi.in',
-    'commsConsoleNumDaysToConsider': '15',
-    'commsConsoleNumTopLearnersToConsider': '60',
-    'commsConsolePrarambhTags': 'rojgaar,rozgaar,rozgar',
-    'commsConsolePrarambhCbpIds': 'do_113882965067743232154,do_1137468666262241281756,do_1139032976499261441156',
-    'commsConsolePrarambhNCount': '2',
 
     # Elasticsearch Configuration
     'esFormDataIds': '1718964921012,1720793361489',
@@ -247,6 +237,11 @@ DEFAULT_CONFIG = {
     'notificationAPIURL': 'http://10.175.5.200/cb-notification/v1/notifications/bulk/create/peervalidation',
     'peerValidationKafkaTopic':'prod.peer.survey.notification.sent',
     'peerValidationFormIndex': 'fs-forms-alias-v2',
+
+    # Course category configuration
+    'courseCategoriesToSelect': ["Multilingual Course", "Moderated Course", "Case Study", "Moderated Assessment", "Standalone Assessment", "Pre Enrolment Assessment",
+                                 "Curated Program", "Invite-Only Assessment", "Comprehensive Assessment Program", "Blended Program", "Course", "Moderated Program",
+                                 "Invite-Only Program", "Learning Pathway"],
 
 }
 
