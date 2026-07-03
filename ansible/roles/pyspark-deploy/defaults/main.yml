@@ -81,6 +81,7 @@ dashboards_cassandra_group_designation_table: "kb_group_designation_content_data
 dashboards_cassandra_slw_mdo_leaderboard_table: "slw_mdo_leaderboard"
 dashboards_cassandra_slw_mdo_top_learners_table: "slw_mdo_top_learners"
 dashboards_cassandra_framework_hierarchy_table: "framework_hierarchy"
+peerValidationKafkaTopic: "{{env}}.peer.survey.notification.sent"
 
   ##app_postgres_host: "{{groups['app-postgres'][0]}}:5432"
 dw_postgres_host: "{{groups['dw-postgres'][0]}}:5432"
