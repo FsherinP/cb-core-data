@@ -249,6 +249,9 @@ DEFAULT_CONFIG = {
     'peerValidationKafkaTopic':'prod.peer.survey.notification.sent',
     'peerValidationFormIndex': 'fs-forms-alias-v2',
 
+    # Bharat Kalp Configuration
+    'bharat_kalp_event_tags': ['Bharat Kalp - Talks', 'Bharat Kalp - Podcast'],
+    'bharatKalpCoursesPath' : '/home/analytics/pyspark/warehouse/bharatKalpCourses.json'
 }
 
 # Side Output Configuration (from Scala sideOutput map)
