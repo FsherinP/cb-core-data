@@ -26,6 +26,8 @@ kafka_broker_host: "{{groups['processing-cluster-kafka'][0]}}:9092"
 ingestion_kafka_broker_host: "{{groups['ingestion-cluster-kafka'][0]}}:9092"
 brokerlist: "{{groups['processing-cluster-kafka']|join(':9092,')}}:9092"
 zookeeper: "{{groups['processing-cluster-zookeepers']|join(':2181,')}}:2181"
+dpBrokerList: "{{groups['processing-cluster-kafka']|join(':9092,')}}:9092"
+kpBrokerList: "{{groups['kafka']|join(':9092,')}}:9092"
 dp_username: dp-monitor
 analytics_job_queue_topic: "{{ env }}.analytics.job_queue"
 topic: "{{ env }}.telemetry.derived"
@@ -79,6 +81,7 @@ dashboards_cassandra_group_designation_table: "kb_group_designation_content_data
 dashboards_cassandra_slw_mdo_leaderboard_table: "slw_mdo_leaderboard"
 dashboards_cassandra_slw_mdo_top_learners_table: "slw_mdo_top_learners"
 dashboards_cassandra_framework_hierarchy_table: "framework_hierarchy"
+peerValidationKafkaTopic: "{{env}}.peer.survey.notification.sent"
 
   ##app_postgres_host: "{{groups['app-postgres'][0]}}:5432"
 dw_postgres_host: "{{groups['dw-postgres'][0]}}:5432"
@@ -112,7 +115,6 @@ cba_report_path: "standalone-reports/cba-report"
 standalone_assessment_report_path: "standalone-reports/user-assessment-report-cbp"
 tagged_users_path: "tagged-users/"
 blended_report_path: "standalone-reports/blended-program-report"
-comms_console_report_path: "standalone-reports/comms-console"
 org_hierarchy_report_path: "standalone-reports/org-hierarchy-report"
 acbp_report_path: "standalone-reports/cbp-report"
 acbp_mdo_enrolment_report_path: "standalone-reports/cbp-report-mdo-enrolment"
@@ -127,13 +129,6 @@ report_include_expired_solution_ids: true
 
 anonymous_assessment_loggedIn_user_content_ids: "{{ anonymous_assessment_loggedIn_user_content_ids }}"
 anonymous_assessment_non_loggedIn_user_assessment_ids: "{{ anonymous_assessment_non_loggedIn_user_assessment_ids }}"
-
-comms_console_prarambh_email_suffix: ".kb@karmayogi.in"
-comms_console_num_days_to_consider: "15"
-comms_console_num_top_learners_to_consider: "100000"
-comms_console_prarambh_tags: "rojgaar,rozgaar,rozgar"
-comms_console_prarambh_cbp_ids: "{{ comms_console_prarambh_cbp_ids_for_envs }}"
-comms_console_prarambh_n_count: "4"
 
 report_mdo_ids: ""
 job_manager_tmp_dir: "transient-data"
@@ -158,6 +153,7 @@ zip_reports_prefix_directory_path: "standalone-reports"
 zip_reports_destination_path: "standalone-reports/merged"
 zip_reports_password: "123456"
 directories_to_select: "blended-program-report-mdo,gamification-report,cbp-report-mdo-summary,course-report,cba-report,cbp-report-mdo-enrolment,user-report,user-enrollment-report"
+course_categories_to_select_standalone_reports: ["Course", "Moderated Course", "Invite-Only Program", "Moderated Program", "Blended Program", "Curated Program", "Standalone Assessment", "Moderated Assessment", "Invite-Only Assessment", "External Redirect", "Case Study", "Comprehensive Assessment Program", "Multilingual Course", "Pre Enrolment Assessment", "Learning Pathway"]
 
 bq_script_path: /home/analytics/pyspark/bq-scripts.sh
 es_form_data_ids: "{{ es_form_data_ids }}"
@@ -304,10 +300,6 @@ run_zip_upload_job:
   zip-upload:
     hour: 09
     minute: 20
-run_comms_console_job:
-  comms-console:
-    hour: 10
-    minute: 05
 run_survey_question_report_job:
   survey-question-report:
     hour: 10
