@@ -27,13 +27,15 @@ def preComputeEnrolment(
         "dbCompletionStatus", "courseCompletedTimestamp",
         "courseEnrolledTimestamp", "lastContentAccessTimestamp", 
         "issuedCertificateCount", "issuedCertificateCountPerContent", 
-        "firstCompletedOn", "certificateGeneratedOn", "certificateID", "langCourseContentStatus", "issued_badges"
+        "firstCompletedOn", "certificateGeneratedOn", "certificateID", "langCourseContentStatus", "issued_badges", "enrolment_status"
     ]
     
     select_cols = base_cols + extra_cols
         
     enrolmentRawDF=spark.read.parquet(ParquetFileConstants.ENROLMENT_PARQUET_FILE)
-    enrolmentDF=enrolmentRawDF.where(expr("active=true")).withColumn("courseCompletedTimestamp", col("completedon")) \
+    # all records
+    # when active is true then user is enrolled else user has unenrolled
+    enrolmentDF=enrolmentRawDF.withColumn("courseCompletedTimestamp", col("completedon")) \
         .withColumn("courseEnrolledTimestamp", col("enrolled_date")) \
         .withColumn("lastContentAccessTimestamp", col("lastcontentaccesstime")) \
         .withColumn("cert_array_size", coalesce(size(col("issued_certificates")), lit(0))) \
@@ -62,6 +64,16 @@ def preComputeEnrolment(
                 col("cert_array_size") > 0,
                 element_at(col("issued_certificates"), -1)["identifier"],
             ).otherwise(lit("")),
+        ) \
+        .withColumn(
+            "enrolment_status",
+            when(
+                col("active").isNotNull() & (col("active") == "true"),
+                lit("enrolled"),
+            ).when(
+                col("active").isNotNull() & (col("active") == "false"),
+                lit("unenrolled"),
+            ).otherwise(None)
         ) \
         .withColumnRenamed("userid", "userID") \
         .withColumnRenamed("courseid", "courseID") \
