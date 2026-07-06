@@ -105,7 +105,12 @@ def preComputeEnrolment(
         for date_col in date_columns:
             enrolmentDF = enrolmentDF.withColumn(date_col, col(date_col).cast("long"))
 
-    exportDFToParquet(enrolmentDF,ParquetFileConstants.ENROLMENT_SELECT_PARQUET_FILE)
+    # separate parquet file for enrolled and unenrolled records
+    unenrolledDF = enrolmentDF.filter(col("enrolment_status") == "unenrolled")
+    exportDFToParquet(unenrolledDF,ParquetFileConstants.ENROLMENT_UNENROLLED_PARQUET_FILE)
+    enrolledDF = enrolmentDF.filter(col("enrolment_status") == "enrolled")
+    exportDFToParquet(enrolledDF,ParquetFileConstants.ENROLMENT_SELECT_PARQUET_FILE)
+    
 
     batchDF= spark.read.parquet(ParquetFileConstants.BATCH_PARQUET_FILE) \
             .select(

@@ -46,6 +46,15 @@ class Redis:
     def createRedisConnectFromConf(self, conf) -> Optional[redis.Redis]:
         """Create Redis connection from config"""
         return self.createRedisConnect(conf.redisHost, conf.redisPort)
+
+    def normalize_db(self, db):
+        """Normalize Redis DB index to an integer."""
+        if db is None:
+            raise ValueError("Redis db index must be provided")
+        try:
+            return int(db)
+        except (TypeError, ValueError):
+            raise ValueError(f"Invalid Redis db index: {db}")
     
     # Get key value
     def get(self, key: str, conf=None, host: str = None, port: int = None, db: int = None) -> str:
@@ -371,9 +380,12 @@ class Redis:
             key_value_map : dict of {redis_key: value}
             conf          : config object with redisHost, redisPort, redisDB (optional)
             db            : Redis DB index (optional)
-            host          : Redis host (optional)
+            host          : Redis host (optional) 
             port          : Redis port (optional)
         """
+        src_host = host if host is not None else getattr(conf, 'redisHost', None)
+        src_port = port if port is not None else getattr(conf, 'redisPort', None)
+        print(f"[Redis] bulk_update called; host={src_host}, port={src_port}, db={db}, keys={len(key_value_map)}")
         if conf is not None and db is not None:
             self.bulk_update_with_params(conf.redisHost, conf.redisPort, db, key_value_map)
         elif conf is not None:
@@ -383,24 +395,119 @@ class Redis:
         else:
             raise ValueError("Either conf or host/port/db must be provided")
 
+    def bulk_update_in_batches(self, key_value_map: dict, batch_size: int = 1000, conf=None, db: int = None, host: str = None, port: int = None):
+        """
+        Bulk update key-value pairs in Redis in batches using pipeline.
+
+        Args:
+            key_value_map : dict of {redis_key: value}
+            batch_size    : maximum number of keys per pipeline execution
+            conf          : config object with redisHost, redisPort, redisDB (optional)
+            db            : Redis DB index (optional)
+            host          : Redis host (optional)
+            port          : Redis port (optional)
+        """
+        src_host = host if host is not None else getattr(conf, 'redisHost', None)
+        src_port = port if port is not None else getattr(conf, 'redisPort', None)
+        print(f"[Redis] bulk_update_in_batches called; host={src_host}, port={src_port}, db={db}, batch_size={batch_size}, keys={len(key_value_map)}")
+        if batch_size is None or batch_size <= 0:
+            raise ValueError("batch_size must be a positive integer")
+
+        if conf is not None and db is not None:
+            self.bulk_update_in_batches_with_params(conf.redisHost, conf.redisPort, db, key_value_map, batch_size)
+        elif conf is not None:
+            self.bulk_update_in_batches_with_params(conf.redisHost, conf.redisPort, conf.redisDB, key_value_map, batch_size)
+        elif all(param is not None for param in [host, port, db]):
+            self.bulk_update_in_batches_with_params(host, port, db, key_value_map, batch_size)
+        else:
+            raise ValueError("Either conf or host/port/db must be provided")
+
+    def bulk_update_in_batches_with_params(self, host: str, port: int, db: int, key_value_map: dict, batch_size: int = 1000):
+        """Bulk update in batches with retry logic."""
+        db = self.normalize_db(db)
+        print(f"[Redis] bulk_update_in_batches_with_params host={host}, port={port}, db={db}, keys={len(key_value_map)}, batch_size={batch_size}")
+        try:
+            self.bulk_update_in_batches_without_retry(host, port, db, key_value_map, batch_size)
+        except redis.RedisError as ex:
+            print(f"[Redis] retrying bulk_update_in_batches after RedisError: {ex}")
+            self.redisConnect = self.createRedisConnect(host, port)
+            self.bulk_update_in_batches_without_retry(host, port, db, key_value_map, batch_size)
+
+    def bulk_update_in_batches_without_retry(self, host: str, port: int, db: int, key_value_map: dict, batch_size: int = 1000):
+        """Bulk update in batches without retry."""
+        db = self.normalize_db(db)
+        if not key_value_map:
+            print("[Redis] WARNING: key_value_map is empty, nothing to push to Redis")
+            return
+
+        jedis = self.getOrCreateRedisConnect(host, port)
+        if jedis is None:
+            print(f"[Redis] WARNING: jedis=None means host is not set, skipping bulk redis push")
+            return
+
+        current_db = jedis.connection_pool.connection_kwargs.get('db', 0)
+        print(f"[Redis] current connection db={current_db}, target db={db}")
+        if current_db != db:
+            print(f"[Redis] switching connection to db={db}")
+            jedis = redis.Redis(
+                host=host,
+                port=port,
+                db=db,
+                socket_timeout=self.redisTimeout / 1000,
+                decode_responses=True
+            )
+
+        pipeline = jedis.pipeline()
+        batch_count = 0
+        item_count = 0
+
+        for key, value in key_value_map.items():
+            cleaned_value = "" if value is None or value == "" else value
+            if value is None or value == "":
+                print(f"[Redis] WARNING: data is empty, setting data='' for redis key={key}")
+            pipeline.set(key, cleaned_value)
+            item_count += 1
+
+            if item_count % batch_size == 0:
+                print(f"[Redis] executing batch {batch_count + 1} at {item_count} items")
+                pipeline.execute()
+                batch_count += 1
+                pipeline = jedis.pipeline()
+
+        if item_count % batch_size != 0:
+            print(f"[Redis] executing final batch {batch_count + 1} at {item_count} items")
+            pipeline.execute()
+            batch_count += 1
+
+        print(f"✅ Bulk pushed {item_count} keys to Redis in {batch_count} batch(es) via pipeline.")
+
     def bulk_update_with_params(self, host: str, port: int, db: int, key_value_map: dict):
         """Bulk update with retry logic — mirrors updateWithParams"""
+        db = self.normalize_db(db)
+        print(f"[Redis] bulk_update_with_params host={host}, port={port}, db={db}, keys={len(key_value_map)}")
         try:
             self.bulk_update_without_retry(host, port, db, key_value_map)
-        except redis.RedisError:
+        except redis.RedisError as ex:
+            print(f"[Redis] retrying bulk_update after RedisError: {ex}")
             self.redisConnect = self.createRedisConnect(host, port)
             self.bulk_update_without_retry(host, port, db, key_value_map)
 
     def bulk_update_without_retry(self, host: str, port: int, db: int, key_value_map: dict):
         """Bulk update without retry — mirrors updateWithoutRetry"""
-        jedis = self.getOrCreateRedisConnect(host, port)
-        if jedis is None:
-            print(f"WARNING: jedis=None means host is not set, skipping bulk redis push")
+        db = self.normalize_db(db)
+        if not key_value_map:
+            print("[Redis] WARNING: key_value_map is empty, nothing to push to Redis")
             return
 
-        # Select database if different — same logic as updateWithoutRetry
+        jedis = self.getOrCreateRedisConnect(host, port)
+        if jedis is None:
+            print(f"[Redis] WARNING: jedis=None means host is not set, skipping bulk redis push")
+            return
+
         current_db = jedis.connection_pool.connection_kwargs.get('db', 0)
+        print(f"[Redis] current connection db={current_db}, target db={db}")
         if current_db != db:
+            print(f"[Redis] switching connection to db={db}")
             jedis = redis.Redis(
                 host=host,
                 port=port,
@@ -413,7 +520,7 @@ class Redis:
         for key, value in key_value_map.items():
             cleaned_value = "" if value is None or value == "" else value
             if value is None or value == "":
-                print(f"WARNING: data is empty, setting data='' for redis key={key}")
+                print(f"[Redis] WARNING: data is empty, setting data='' for redis key={key}")
             pipeline.set(key, cleaned_value)
         pipeline.execute()
         print(f"✅ Bulk pushed {len(key_value_map)} keys to Redis via pipeline.")
