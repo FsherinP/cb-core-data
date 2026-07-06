@@ -76,6 +76,11 @@ DATABASE_CONFIG = {
     'dwSLWMdoTopLearnerTable': 'slw_mdo_top_learners',
     'dwNLWUserLeaderboardTable': 'nlw_user_leaderboard',
     'dwAparCBPEnrollmentTable': 'apar_cbp_enrollment',
+    'dwCourseCompletionSurveryTable': 'course_completion_survey_details',
+    'dwBharatKalpCoursesTable': 'bk_course_enrolments',
+    'dwBharatkalpEventsTable': 'bk_event_enrolments',
+    'dwpeerValidationNotificationQueue': 'peer_validation_notification_queue',
+    'dwpeerValidationFormStateTable': 'peer_validation_form_state',
 
     # Elasticsearch Configuration
     'sparkElasticsearchConnectionHost': '{{ single_node_es_host }}',
@@ -228,6 +233,15 @@ JOB_CONFIG = {
 
     # Course category configuration
     'courseCategoriesToSelect': '{{ course_categories_to_select_standalone_reports }}',
+
+    # Bharat kalp Configuration
+    'bharat_kalp_event_tags': ['Bharat Kalp - Talks', 'Bharat Kalp - Podcast'],
+    'bharatKalpCoursesPath' : '/home/analytics/pyspark/warehouse/bharatKalpCourses.json',
+    
+    # Peer validation configuration
+    'peerValidationFormIndex': 'fs-forms-alias-v2',
+    'apiBasedNotificationEnabled': True,
+    'notificationBatchSize': 100,
 }
 
 # External Service Configuration
@@ -285,6 +299,7 @@ def get_config():
     config.update(KAFKA_CONFIG)
     config.update(JOB_CONFIG)
     config.update(EXTERNAL_SERVICES)
+    config.update(API_CONFIG)
     return config
 
 # Environment-specific overrides

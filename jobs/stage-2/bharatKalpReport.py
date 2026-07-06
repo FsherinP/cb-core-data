@@ -6,7 +6,7 @@ import sys
 from datetime import datetime
 from pathlib import Path
 from pyspark.sql import SparkSession, Row
-from pyspark.sql.functions import col, explode, broadcast
+from pyspark.sql.functions import col, explode, broadcast, date_format, current_timestamp
 
 
 sys.path.append(str(Path(__file__).resolve().parents[2]))
@@ -51,6 +51,7 @@ class BharatKalpReport:
         return courseWarehouseDF
     
     def process_data(self):
+        currentDateTime = date_format(current_timestamp(), ParquetFileConstants.DATE_TIME_WITH_AMPM_FORMAT)
         print("Step 1: Loading Data ")
         bharatKalpCoursesDF = self.read_bharat_kalp_courses()
         enrolmentDF = self.read_warehouse_data(self.config.dwEnrollmentsTable)
@@ -66,8 +67,10 @@ class BharatKalpReport:
         courseWarehouseDF = self.build_course_report(enrolmentDF, bharatKalpCoursesDF, userDF)
         print("Step 3: Complete")
         print("Step 4: Writing Bharat Kalp Report to Warehouse")
-        courseWarehouseDF.coalesce(1).write.mode("overwrite").option("compression", "snappy").parquet(f"{self.config.warehouseReportDir}/bharat_kalp_courses")
-        eventWarehouseDF.coalesce(1).write.mode("overwrite").option("compression", "snappy").parquet(f"{self.config.warehouseReportDir}/bharat_kalp_events")
+        courseWarehouseDF = courseWarehouseDF.withColumn("data_last_generated_on", currentDateTime)
+        eventEnrolmentsDF = eventEnrolmentsDF.withColumn("data_last_generated_on", currentDateTime)
+        courseWarehouseDF.coalesce(1).write.mode("overwrite").option("compression", "snappy").parquet(f"{self.config.warehouseReportDir}/{self.config.dwBharatKalpCoursesTable}")
+        eventWarehouseDF.coalesce(1).write.mode("overwrite").option("compression", "snappy").parquet(f"{self.config.warehouseReportDir}/{self.config.dwBharatKalpEventsTable}")
         print("Step 4: Complete")
 def main():
     os.environ[
