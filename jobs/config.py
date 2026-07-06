@@ -83,6 +83,7 @@ DATABASE_CONFIG = {
     'sparkElasticsearchConnectionPort': '{{ single_node_es_port }}',
     'esFormDataIndex': '{{ es_form_data_index }}',
     'esFormDataIds': '{{ es_form_data_ids }}',
+    'sparkIGotElasticsearchConnectionHost': '{{ igot_elasticsearch_connection_host }}',
 
     # MongoDB Configuration
     'mongoDatabase': '{{ dashboards_mongo_discussions_db }}',
@@ -137,7 +138,6 @@ REPORT_PATHS = {
     'taggedUsersPath': '{{ tagged_users_path }}',
     'blendedReportPath': '{{ blended_report_path }}',
     'orgHierarchyReportPath': '{{ org_hierarchy_report_path }}',
-    'commsConsoleReportPath': '{{ comms_console_report_path }}',
     'acbpReportPath': '{{ acbp_report_path }}',
     'acbpMdoEnrolmentReportPath': '{{ acbp_mdo_enrolment_report_path }}',
     'acbpMdoSummaryReportPath': '{{ acbp_mdo_summary_report_path }}',
@@ -150,9 +150,12 @@ REPORT_PATHS = {
 # Kafka/Messaging Configuration
 KAFKA_CONFIG = {
     'brokerList': '{{ brokerlist }}',
+    'dpBrokerList': '{{ dpBrokerList }}',
+    'kpBrokerList': '{{ kpBrokerList }}',
     'topic': '{{ topic }}',
     'compression': '{{ dashboards_broker_compression }}',
     'peerValidationKafkaTopic' : '{{ peerValidationKafkaTopic }}',
+    'userCourseProgramProgress': '{{ dashboards_user_course_program_progress_topic }}',
 
     # Side Output Topics
     'sideOutput': {
@@ -162,7 +165,6 @@ KAFKA_CONFIG = {
             'roleUserCount': '{{ dashboards_role_count_topic }}',
             'orgRoleUserCount': '{{ dashboards_org_role_count_topic }}',
             'allCourses': '{{ dashboards_courses_topic }}',
-            'userCourseProgramProgress': '{{ dashboards_user_course_program_progress_topic }}',
             'fracCompetency': '{{ dashboards_frac_competency_topic }}',
             'courseCompetency': '{{ dashboards_course_competency_topic }}',
             'expectedCompetency': '{{ dashboards_expected_competency_topic }}',
@@ -216,14 +218,6 @@ JOB_CONFIG = {
     'stateLearningWeekEnd': '{{ state_learning_week_end }}',
     'sizeBucketString': '{{ state_learning_week_bucket_size }}',
 
-    # Communications Console Configuration
-    'commsConsolePrarambhEmailSuffix': '{{ comms_console_prarambh_email_suffix }}',
-    'commsConsoleNumDaysToConsider': '{{ comms_console_num_days_to_consider }}',
-    'commsConsoleNumTopLearnersToConsider': '{{ comms_console_num_top_learners_to_consider }}',
-    'commsConsolePrarambhTags': '{{ comms_console_prarambh_tags }}',
-    'commsConsolePrarambhCbpIds': '{{ comms_console_prarambh_cbp_ids }}',
-    'commsConsolePrarambhNCount': '{{ comms_console_prarambh_n_count }}',
-
     # Zip Reports Configuration
     'prefixDirectoryPath': '{{ zip_reports_prefix_directory_path }}',
     'destinationDirectoryPath': '{{ zip_reports_destination_path }}',
@@ -231,6 +225,9 @@ JOB_CONFIG = {
     'password': '{{ zip_reports_password }}',
     'pysparkCBPDirectoriesToSelect': ["blended-program-report-cbp","user-assessment-report-cbp"],
     'pysparkDirectoriesToSelect': ["blended-program-report-mdo","cbp-report-mdo-summary","gamification-report","course-report","cba-report","cbp-report-mdo-enrolment","user-report","user-enrollment-report"],
+
+    # Course category configuration
+    'courseCategoriesToSelect': '{{ course_categories_to_select_standalone_reports }}',
 }
 
 # External Service Configuration
