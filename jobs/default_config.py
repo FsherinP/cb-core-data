@@ -240,9 +240,7 @@ DEFAULT_CONFIG = {
     'peerValidationFormIndex': 'fs-forms-alias-v2',
 
     # Course category configuration
-    'courseCategoriesToSelect': ["Multilingual Course", "Moderated Course", "Case Study", "Moderated Assessment", "Standalone Assessment", "Pre Enrolment Assessment",
-                                 "Curated Program", "Invite-Only Assessment", "Comprehensive Assessment Program", "Blended Program", "Course", "Moderated Program",
-                                 "Invite-Only Program", "Learning Pathway"],
+    'courseCategoriesToSelect': ["Multilingual Course", "Moderated Course", "Case Study", "Moderated Assessment", "Standalone Assessment", "Pre Enrolment Assessment","Curated Program", "Invite-Only Assessment", "Comprehensive Assessment Program", "Blended Program", "Course", "Moderated Program","Invite-Only Program", "Learning Pathway"],
 
 }
 
