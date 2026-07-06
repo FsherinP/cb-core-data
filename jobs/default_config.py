@@ -81,6 +81,11 @@ DEFAULT_CONFIG = {
     'dwNLWUserLeaderboardTable': 'nlw_user_leaderboard',
     'dwAparCBPEnrollmentTable': 'apar_cbp_enrollment',
     'dwCourseCompletionSurveryTable': 'course_completion_survey_details',
+    'dwBharatKalpCoursesTable': 'bharat_kalp_courses',
+    'dwBharatkalpEventsTable': 'bharat_kalp_events',
+    'dwpeerValidationNotificationQueue': 'peer_validation_notification_queue',
+    'dwpeerValidationFormStateTable': 'peer_validation_form_state',
+
 
     # Cassandra Keyspaces
     'cassandraUserKeyspace': 'sunbird',
@@ -231,8 +236,6 @@ DEFAULT_CONFIG = {
     'compression': 'none',
 
     # Peer validation configuration
-    'dwpeerValidationNotificationQueue': 'peer_validation_notification_queue',
-    'dwpeerValidationFormStateTable': 'peer_validation_form_state',
     'notificationBatchSize': 100,
     'apiBasedNotificationEnabled': True,
     'notificationAPIURL': 'http://10.175.5.200/cb-notification/v1/notifications/bulk/create/peervalidation',
@@ -241,6 +244,8 @@ DEFAULT_CONFIG = {
 
     # Course category configuration
     'courseCategoriesToSelect': ["Multilingual Course", "Moderated Course", "Case Study", "Moderated Assessment", "Standalone Assessment", "Pre Enrolment Assessment","Curated Program", "Invite-Only Assessment", "Comprehensive Assessment Program", "Blended Program", "Course", "Moderated Program","Invite-Only Program", "Learning Pathway"],
+    'bharat_kalp_event_tags': ['Bharat Kalp - Talks', 'Bharat Kalp - Podcast'],
+    'bharatKalpCoursesPath' : '/home/analytics/pyspark/warehouse/bharatKalpCourses.json'
 
 }
 
