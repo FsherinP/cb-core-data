@@ -105,11 +105,11 @@ def preComputeEnrolment(
         for date_col in date_columns:
             enrolmentDF = enrolmentDF.withColumn(date_col, col(date_col).cast("long"))
 
-    # separate parquet file for enrolled and unenrolled records
-    unenrolledDF = enrolmentDF.filter(col("enrolment_status") == "unenrolled")
-    exportDFToParquet(unenrolledDF,ParquetFileConstants.ENROLMENT_UNENROLLED_PARQUET_FILE)
-    enrolledDF = enrolmentDF.filter(col("enrolment_status") == "enrolled")
-    exportDFToParquet(enrolledDF,ParquetFileConstants.ENROLMENT_SELECT_PARQUET_FILE)
+    # parquet file for enrolled and unenrolled records
+    #unenrolledDF = enrolmentDF.filter(col("enrolment_status") == "unenrolled")
+    #exportDFToParquet(unenrolledDF,ParquetFileConstants.ENROLMENT_UNENROLLED_PARQUET_FILE)
+    #enrolledDF = enrolmentDF.filter(col("enrolment_status") == "enrolled")
+    exportDFToParquet(enrolmentDF,ParquetFileConstants.ENROLMENT_SELECT_PARQUET_FILE)
     
 
     batchDF= spark.read.parquet(ParquetFileConstants.BATCH_PARQUET_FILE) \
@@ -285,7 +285,8 @@ def preComputeUserEnrolmentWarehouseData(spark):
                 col("certificateID"),
                 col("enrolledOn").alias("enrolled_on"),
                 col("batchID"),
-                col("completionPercentage").alias("content_progress_percentage")
+                col("completionPercentage").alias("content_progress_percentage"),
+                col("enrolment_status")
             )
             .dropDuplicates(["userID", "content_id", "batchID"])
         )
@@ -297,6 +298,7 @@ def preComputeUserEnrolmentWarehouseData(spark):
         externalContentOrgDF
             .join(externalEnrolmentDF, "content_id", "inner")
             .withColumn("courseEnrolledTimestamp", date_format(col("enrolled_date"), ParquetFileConstants.DATE_TIME_FORMAT))
+            .withColumn("enrolment_status", lit("enrolled"))
             .withColumn("firstCompletedOn", 
                 when(col("issued_certificates").isNull(), "")
                 .otherwise(
@@ -319,7 +321,8 @@ def preComputeUserEnrolmentWarehouseData(spark):
                 col("certificateID"),
                 col("courseEnrolledTimestamp").alias("enrolled_on"),
                 lit("Not Available").alias("batchID"),
-                col("completionPercentage").alias("content_progress_percentage")
+                col("completionPercentage").alias("content_progress_percentage"),
+                col("enrolment_status")
             )
             .dropDuplicates(["userID", "content_id", "batchID"])
         )
