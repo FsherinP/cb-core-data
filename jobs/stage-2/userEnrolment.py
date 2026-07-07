@@ -185,6 +185,9 @@ class UserEnrolmentModel:
                              col("userOrgName"))
                         .otherwise(lit("")))
             .filter(col("userStatus").cast("int") == 1)
+            .withColumn("enrolment_status",
+                        when(col("dbCompletionStatus").isNull(), "unenrolled")
+                        .otherwise("enrolled"))
             .select(
                 col("fullName").alias("Full_Name"),
                 col("professionalDetails.designation").alias("Designation"),
@@ -229,7 +232,8 @@ class UserEnrolmentModel:
                 col("userOrgID").alias("mdoid"),
                 col("certificateID").alias("Certificate_ID"),
                 col("Report_Last_Generated_On"),
-                col("live_cbp_plan_mandate").alias("Live_CBP_Plan_Mandate")
+                col("live_cbp_plan_mandate").alias("Live_CBP_Plan_Mandate"),
+                col("enrolment_status")
             )
             )
 
@@ -295,6 +299,11 @@ class UserEnrolmentModel:
                                                   col("userOrgName"))
                                              .otherwise(lit("")))
                                  .filter(col("userStatus").cast("int") == 1)
+                                 .withColumn("enrolment_status",
+                                             when((col("userCourseCompletionStatus").isNull()) |
+                                                  (col("userCourseCompletionStatus") == "not-enrolled"),
+                                                  "unenrolled")
+                                             .otherwise("enrolled"))
                                  .select(
                 col("fullName").alias("Full_Name"),
                 col("professionalDetails.designation").alias("Designation"),
@@ -337,7 +346,8 @@ class UserEnrolmentModel:
                 col("Report_Last_Generated_On"),
                 col("live_cbp_plan_mandate").alias("Live_CBP_Plan_Mandate"),
                 col("userID"),
-                col("courseID")
+                col("courseID"),
+                col("enrolment_status")
             )
                                  .dropDuplicates(["userID", "Batch_Id", "courseID"])
                                  .drop("userID", "courseID")
@@ -389,6 +399,17 @@ class UserEnrolmentModel:
                 mdoPlatformReport
                 .union(mdoMarketplaceReport)
             )
+
+            platform_enrolments_df = mdoPlatformReport
+            marketplace_enrolments_df = mdoMarketplaceReport
+
+            print("===== igot and marketplace enrolments summary =====")
+            print(f"----- igot enrolled count: {platform_enrolments_df.filter(col('enrolment_status') == 'enrolled').count()} ---")
+            print(f"----- igot unenrolled count: {platform_enrolments_df.filter(col('enrolment_status') == 'unenrolled').count()} ---")
+            print(f"----- igot count: {platform_enrolments_df.count()} ---")
+            print(f"----- marketplace count: {marketplace_enrolments_df.count()} ---")
+            print(f"----- combined count: {platform_enrolments_df.count() + marketplace_enrolments_df.count()} ---")
+            print("===== end of summary =====")
 
             print("📝 Writing CSV reports...")
             dfexportutil.write_csv_per_mdo_id_duckdb(
