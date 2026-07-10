@@ -73,7 +73,7 @@ def processGamificationJob(config):
 
         # Step 1: Load Enrolment Data
         print("📚 Step 1: Loading Enrolment Data...")
-        enrolment_df = spark.read.parquet(ParquetFileConstants.ENROLMENT_COMPUTED_PARQUET_FILE)
+        enrolment_df = spark.read.parquet(ParquetFileConstants.ENROLMENT_COMPUTED_PARQUET_FILE).filter(col('enrolment_status') == 'enrolled')
 
         user_enrolment_df = (enrolment_df
                              .withColumn("badge_details", explode_outer("issued_badges"))
