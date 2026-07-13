@@ -236,7 +236,7 @@ JOB_CONFIG = {
 
     # Bharat kalp Configuration
     'bharat_kalp_event_tags': ['Bharat Kalp - Talks', 'Bharat Kalp - Podcast'],
-    'bharatKalpCoursesPath' : '/home/analytics/pyspark/warehouse/bharatKalpCourses.json',
+    'bharatKalpCoursesApiUrl' : '{{ bharat_kalp_courses_api_url }}',
     
     # Peer validation configuration
     'peerValidationFormIndex': 'fs-forms-alias-v2',

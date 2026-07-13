@@ -229,14 +229,14 @@ JOB_CONFIG = {
     'password': '{{ zip_reports_password }}',
     'pysparkCBPDirectoriesToSelect': ["blended-program-report-cbp","user-assessment-report-cbp"],
     'pysparkDirectoriesToSelect': ["user-custom-report","blended-program-report-mdo","cbp-report-mdo-summary","gamification-report","course-report","cba-report","cbp-report-mdo-enrolment","user-report","user-enrollment-report"],
-    'password_length': '6'
+    'password_length': '6',
 
     # Course category configuration
     'courseCategoriesToSelect': '{{ course_categories_to_select_standalone_reports }}',
 
     # Bharat Kalp Configuration
     'bharat_kalp_event_tags': ['Bharat Kalp - Talks', 'Bharat Kalp - Podcast'],
-    'bharatKalpCoursesPath' : '/home/analytics/pyspark/warehouse/bharatKalpCourses.json',
+    'bharatKalpCoursesApiUrl' : '{{ bharat_kalp_courses_api_url }}',
 
     # Peer validation configuration
     'peerValidationFormIndex': 'fs-forms-alias-v2',

@@ -244,8 +244,10 @@ DEFAULT_CONFIG = {
 
     # Course category configuration
     'courseCategoriesToSelect': ["Multilingual Course", "Moderated Course", "Case Study", "Moderated Assessment", "Standalone Assessment", "Pre Enrolment Assessment","Curated Program", "Invite-Only Assessment", "Comprehensive Assessment Program", "Blended Program", "Course", "Moderated Program","Invite-Only Program", "Learning Pathway"],
+
+    # Bharat Kalp Configuration
     'bharat_kalp_event_tags': ['Bharat Kalp - Talks', 'Bharat Kalp - Podcast'],
-    'bharatKalpCoursesPath' : '/home/analytics/pyspark/warehouse/bharatKalpCourses.json'
+    'bharatKalpCoursesApiUrl' : "https://portal.dev.karmayogibharat.net/apis/static/form/v1/read"
 
 }
 
