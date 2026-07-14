@@ -3,10 +3,15 @@ findspark.init()
 
 import os
 import sys
+import requests
+import json
+from requests.adapters import HTTPAdapter
+from urllib3.util.retry import Retry
 from datetime import datetime
 from pathlib import Path
 from pyspark.sql import SparkSession, Row
-from pyspark.sql.functions import col, explode, broadcast, date_format, current_timestamp
+from pyspark.sql.functions import col, explode, broadcast, date_format, current_timestamp, lit
+from pyspark.sql.types import StructType, StructField, StringType
 
 
 sys.path.append(str(Path(__file__).resolve().parents[2]))
@@ -25,14 +30,74 @@ class BharatKalpReport:
     def name(self):
         return "BharatKalpReport"
     
+    def get_http_session(self):
+        session = requests.Session()
+        retries = Retry(
+            total= 5,
+            backoff_factor= 1,
+            status_forcelist= [429, 500, 502, 503, 504],
+            allowed_methods= ['GET']
+        )
+        session.mount("https://", HTTPAdapter(max_retries= retries))
+        session.mount("http://", HTTPAdapter(max_retries= retries))
+        return session
+    
+    def fetch_bharat_kalp_courses(self):
+        session = self.get_http_session()
+        payload = {
+        "request": {
+            "type": "bharat-kalp",
+            "subType": "microsite",
+            "action": "page-configuration",
+            "component": "portal",
+            "rootOrgId": "*"
+        }
+        }
+        headers = {
+        "Content-Type": "application/json",
+        "Accept": "application/json, text/plain, */*",
+        "rootOrg": "igot",
+        "org": "dopt",
+        "hostPath": "portal.igotkarmayogi.gov.in",
+        "locale": "en"
+    }
+        try:
+            response = session.post(self.config.bharatKalpCoursesApiUrl, json= payload, headers= headers ,timeout = 30)
+            response.raise_for_status()
+        except requests.exceptions.RequestException as e:
+            raise RuntimeError(f"Failed to fetch Bharat Kalp Courses from API : {e}") from e
+        
+        try:
+            return response.json()
+        except ValueError as e:
+            raise RuntimeError(f"Bharat Kalp Courses API did not return valid JSON : {e}") from e
+
     def read_bharat_kalp_courses(self):
+        api_response = self.fetch_bharat_kalp_courses()
 
-        df = (self.spark.read.json(self.config.bharatKalpCoursesPath)
-            .select(explode(col("individualSection.weekProgress.weeks")).alias("week_key", "week_value"))
-            .select(explode(col("week_value.doIds")).alias("content_id"))
-            .distinct()
-            )
+        weeks = (
+        api_response.get("result", {})
+                    .get("form", {})
+                    .get("data", {})
+                    .get("individualSection", {})
+                    .get("weekProgress", {})
+                    .get("Weeks", [])
+        )
 
+        rows = []
+        for week in weeks:
+            for tab in week.get("tabs", []):
+                content_ids = tab.get("content_ids", {})
+                for content_type in ("course", "program", "event", "assessment"):
+                    for content_id in content_ids.get(content_type, []):
+                        rows.append(Row(content_id=content_id, content_type=content_type))
+
+        schema = StructType([
+            StructField("content_id", StringType(), True),
+            StructField("content_type", StringType(), True)
+        ])
+
+        df = self.spark.createDataFrame(rows, schema=schema).distinct()
         if df.limit(1).count() == 0:
             raise ValueError("No Bharat Kalp Courses found in the provided path. Please check the configuration.")
         return df
@@ -58,7 +123,6 @@ class BharatKalpReport:
         eventsDF = self.read_warehouse_data("event_details").filter(col("event_tag").isin(self.config.bharat_kalp_event_tags))
         eventEnrolmentsDF = self.read_warehouse_data("event_enrolment_details")
         userDF = self.spark.read.parquet(ParquetFileConstants.USER_COMPUTED_PARQUET_FILE).filter(col("isBharatKalpMember") == True).select(col("userID").alias("user_id")).distinct()
-
         print("Step 1: Complete")
         print("Step 2: Processing Bharat Kalp Events with Event Enrolments")
         eventWarehouseDF = self.build_event_report(eventsDF, eventEnrolmentsDF, userDF)
@@ -68,7 +132,7 @@ class BharatKalpReport:
         print("Step 3: Complete")
         print("Step 4: Writing Bharat Kalp Report to Warehouse")
         courseWarehouseDF = courseWarehouseDF.withColumn("data_last_generated_on", currentDateTime)
-        eventEnrolmentsDF = eventEnrolmentsDF.withColumn("data_last_generated_on", currentDateTime)
+        eventWarehouseDF = eventWarehouseDF.withColumn("data_last_generated_on", currentDateTime)
         courseWarehouseDF.coalesce(1).write.mode("overwrite").option("compression", "snappy").parquet(f"{self.config.warehouseReportDir}/{self.config.dwBharatKalpCoursesTable}")
         eventWarehouseDF.coalesce(1).write.mode("overwrite").option("compression", "snappy").parquet(f"{self.config.warehouseReportDir}/{self.config.dwBharatKalpEventsTable}")
         print("Step 4: Complete")
