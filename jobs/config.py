@@ -236,7 +236,7 @@ JOB_CONFIG = {
 
     # Bharat kalp Configuration
     'bharat_kalp_event_tags': ['Bharat Kalp - Talks', 'Bharat Kalp - Podcast'],
-    'bharatKalpCoursesApiUrl' : '{{ bharat_kalp_courses_api_url }}',
+    'bharatKalpCoursesApiUrl' : "https:// {{ domain_name }}/apis/static/form/v1/read",
     
     # Peer validation configuration
     'peerValidationFormIndex': 'fs-forms-alias-v2',
