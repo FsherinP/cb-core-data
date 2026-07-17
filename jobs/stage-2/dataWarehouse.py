@@ -172,6 +172,12 @@ class DataWarehouseModel:
             #self.write_postgres_table(course_completion_survey_details_df, postgres_url, config.dwCourseCompletionSurveryTable,
             #                          config.dwPostgresUsername, config.dwPostgresCredential)
 
+            bharat_kalp_courses = spark.read.parquet(f"{warehouse_path}/{config.dwBharatKalpCoursesTable}")
+            self.write_postgres_table(bharat_kalp_courses, postgres_url, config.dwBharatKalpCoursesTable, config.dwPostgresUsername, config.dwPostgresCredential)
+
+            bharat_kalp_events = spark.read.parquet(f"{warehouse_path}/{config.dwBharatKalpEventsTable}")
+            self.write_postgres_table(bharat_kalp_events, postgres_url, config.dwBharatKalpEventsTable, config.dwPostgresUsername, config.dwPostgresCredential)
+
             print("✅ Processing completed successfully!")
 
 

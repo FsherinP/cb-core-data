@@ -73,7 +73,7 @@ def preComputeUser(spark: SparkSession) -> DataFrame:
         .otherwise(col("profileDetails.additionalPropertis"))
     ) \
         .withColumn("Tag", concat_ws(", ", col("additionalProperties.tag"))) \
-        .withColumn("isBharatKalpMember", col("additionalProperties.isBharatKalpMember")) \
+        .withColumn("isBharatKalpMember", col("additionalProperties.isBharatKalpMember"))
 
     # Drop now-unnecessary JSON fields
     userDF = userDF.drop("profileDetails", "userProfileDetails")

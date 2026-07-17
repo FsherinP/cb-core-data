@@ -81,6 +81,11 @@ DEFAULT_CONFIG = {
     'dwNLWUserLeaderboardTable': 'nlw_user_leaderboard',
     'dwAparCBPEnrollmentTable': 'apar_cbp_enrollment',
     'dwCourseCompletionSurveryTable': 'course_completion_survey_details',
+    'dwBharatKalpCoursesTable': 'bk_course_enrolments',
+    'dwBharatkalpEventsTable': 'bk_event_enrolments',
+    'dwpeerValidationNotificationQueue': 'peer_validation_notification_queue',
+    'dwpeerValidationFormStateTable': 'peer_validation_form_state',
+
 
     # Cassandra Keyspaces
     'cassandraUserKeyspace': 'sunbird',
@@ -160,7 +165,6 @@ DEFAULT_CONFIG = {
     'acbpMdoEnrolmentReportPath': 'standalone-reports/cbp-report-mdo-enrolment',
     'acbpMdoSummaryReportPath': 'standalone-reports/cbp-report-mdo-summary',
     'kcmReportPath': 'standalone-reports/kcm-report',
-    'commsConsoleReportPath': 'standalone-reports/comms-console',
     'validationReportPath': 'standalone-reports/validation-report',
     'courseCompletionSurveyPath': 'standalone-reports/course-completion-survey-report',
     'gamificationReportPath' : 'standalone-reports/gamification-report',
@@ -175,15 +179,6 @@ DEFAULT_CONFIG = {
     'userEnrollmentReport' : 'ConsumptionReport.csv',
     'userReport' : 'UserReport.csv',
     'completionSurveyReport':'completionSurvey.csv',
-
-
-    # Communications Console Configuration
-    'commsConsolePrarambhEmailSuffix': '.kb@karmayogi.in',
-    'commsConsoleNumDaysToConsider': '15',
-    'commsConsoleNumTopLearnersToConsider': '60',
-    'commsConsolePrarambhTags': 'rojgaar,rozgaar,rozgar',
-    'commsConsolePrarambhCbpIds': 'do_113882965067743232154,do_1137468666262241281756,do_1139032976499261441156',
-    'commsConsolePrarambhNCount': '2',
 
     # Elasticsearch Configuration
     'esFormDataIds': '1718964921012,1720793361489',
@@ -241,17 +236,19 @@ DEFAULT_CONFIG = {
     'compression': 'none',
 
     # Peer validation configuration
-    'dwpeerValidationNotificationQueue': 'peer_validation_notification_queue',
-    'dwpeerValidationFormStateTable': 'peer_validation_form_state',
     'notificationBatchSize': 100,
     'apiBasedNotificationEnabled': True,
     'notificationAPIURL': 'http://10.175.5.200/cb-notification/v1/notifications/bulk/create/peervalidation',
     'peerValidationKafkaTopic':'prod.peer.survey.notification.sent',
     'peerValidationFormIndex': 'fs-forms-alias-v2',
 
+    # Course category configuration
+    'courseCategoriesToSelect': ["Multilingual Course", "Moderated Course", "Case Study", "Moderated Assessment", "Standalone Assessment", "Pre Enrolment Assessment","Curated Program", "Invite-Only Assessment", "Comprehensive Assessment Program", "Blended Program", "Course", "Moderated Program","Invite-Only Program", "Learning Pathway"],
+
     # Bharat Kalp Configuration
     'bharat_kalp_event_tags': ['Bharat Kalp - Talks', 'Bharat Kalp - Podcast'],
-    'bharatKalpCoursesPath' : '/home/analytics/pyspark/warehouse/bharatKalpCourses.json'
+    'bharatKalpCoursesApiUrl' : "https://portal.dev.karmayogibharat.net/apis/static/form/v1/read"
+
 }
 
 # Side Output Configuration (from Scala sideOutput map)
