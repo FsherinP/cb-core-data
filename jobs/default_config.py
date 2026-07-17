@@ -66,6 +66,7 @@ DEFAULT_CONFIG = {
     'dwUserTable': 'user_detail',
     'dwCourseTable': 'content',
     'dwEnrollmentsTable': 'user_enrolments',
+    'dwUnenrollmentsTable': 'unenrolled_user_audit',
     'dwOrgTable': 'org_hierarchy',
     'dwAssessmentTable': 'assessment_detail',
     'dwBPEnrollmentsTable': 'bp_enrolments',
@@ -150,6 +151,7 @@ DEFAULT_CONFIG = {
     # Report Paths
     'userReportPath': 'standalone-reports/user-report',
     'userEnrolmentReportPath': 'standalone-reports/user-enrollment-report',
+    'userUnenrolmentReportPath': 'standalone-reports/user-unenrollment-report',
     'courseReportPath': 'standalone-reports/course-report',
     'cbaReportPath': 'standalone-reports/cba-report',
     'taggedUsersPath': 'tagged-users/',
@@ -173,6 +175,7 @@ DEFAULT_CONFIG = {
     'kcmReport' : 'ContentCompetencyMapping.csv',
     'userAssessmentReport' : 'StandaloneAssessmentReport.csv',
     'userEnrollmentReport' : 'ConsumptionReport.csv',
+    'userUnenrolmentReport' : 'UnenrollmentReport.csv',
     'userReport' : 'UserReport.csv',
     'completionSurveyReport':'completionSurvey.csv',
 

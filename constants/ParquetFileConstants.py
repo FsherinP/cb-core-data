@@ -41,6 +41,7 @@ class ParquetFileConstants:
     PEER_VALIDATION_ELIGIBLE_USERS_PARQUET_FILE = str(INPUT_DIR / "peerValidationEligibleUsers/**.parquet")
     QUESTIONSET_HIERARCHY_PARQUET_FILE = str(INPUT_DIR / "questionsetHierarchy/**.parquet")
     ASSESSMENT_DATA_RAW_PARQUET_FILE = str(INPUT_DIR / "userAssessmentRaw/**.parquet")
+    UNENROLMENT_AUDIT_PARQUET_FILE = str(INPUT_DIR / "unenrolledUserAudit/**.parquet")
     ###
     ###  Computed Parquet File
     ###

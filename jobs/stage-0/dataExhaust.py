@@ -420,6 +420,15 @@ class DataExhaustModel:
             self.write_parquet(marketplace_enrolments_df, f"{output_base_path}/externalCourseEnrolments")
             marketplace_enrolments_df.unpersist()
 
+            # audit table for unenrolled users
+            unenrolled_user_audit_df = self.read_cassandra_table(
+                "sunbird_courses",
+                "enrollment_history_by_action"
+            )
+
+            self.write_parquet(unenrolled_user_audit_df, f"{output_base_path}/unenrolledUserAudit")
+            unenrolled_user_audit_df.unpersist()
+
             self.logger.info("Processing old assessments...")
             old_assessments_df = self.read_cassandra_safe_columns(
                 self.config.cassandraUserKeyspace,
