@@ -154,7 +154,7 @@ zip_reports_prefix_directory_path: "standalone-reports"
 zip_reports_destination_path: "standalone-reports/merged"
 zip_reports_password: "123456"
 directories_to_select: "blended-program-report-mdo,gamification-report,cbp-report-mdo-summary,course-report,cba-report,cbp-report-mdo-enrolment,user-report,user-enrollment-report"
-course_categories_to_select_standalone_reports: ["Course", "Moderated Course", "Invite-Only Program", "Moderated Program", "Blended Program", "Curated Program", "Standalone Assessment", "Moderated Assessment", "Invite-Only Assessment", "External Redirect", "Case Study", "Comprehensive Assessment Program", "Multilingual Course", "Pre Enrolment Assessment", "Learning Pathway"]
+courseCategoriesToSelect: ['Course', 'Moderated Course', 'Invite-Only Program', 'Moderated Program', 'Blended Program', 'Curated Program', 'Standalone Assessment', 'Moderated Assessment', 'Invite-Only Assessment', 'External Redirect', 'Case Study', 'Comprehensive Assessment Program', 'Multilingual Course', 'Pre Enrolment Assessment', 'Learning Pathway'],
 'peerValidationFormIndex': 'fs-forms-alias-v2'
 'apiBasedNotificationEnabled': True
 'notificationBatchSize': 100

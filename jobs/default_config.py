@@ -243,7 +243,7 @@ DEFAULT_CONFIG = {
     'peerValidationFormIndex': 'fs-forms-alias-v2',
 
     # Course category configuration
-    'courseCategoriesToSelect': ["Multilingual Course", "Moderated Course", "Case Study", "Moderated Assessment", "Standalone Assessment", "Pre Enrolment Assessment","Curated Program", "Invite-Only Assessment", "Comprehensive Assessment Program", "Blended Program", "Course", "Moderated Program","Invite-Only Program", "Learning Pathway"],
+    'courseCategoriesToSelect': ['Course', 'Moderated Course', 'Invite-Only Program', 'Moderated Program', 'Blended Program', 'Curated Program', 'Standalone Assessment', 'Moderated Assessment', 'Invite-Only Assessment', 'External Redirect', 'Case Study', 'Comprehensive Assessment Program', 'Multilingual Course', 'Pre Enrolment Assessment', 'Learning Pathway'],
 
     # Bharat Kalp Configuration
     'bharat_kalp_event_tags': ['Bharat Kalp - Talks', 'Bharat Kalp - Podcast'],

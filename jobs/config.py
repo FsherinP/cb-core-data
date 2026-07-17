@@ -232,7 +232,7 @@ JOB_CONFIG = {
     'pysparkDirectoriesToSelect': ["blended-program-report-mdo","cbp-report-mdo-summary","gamification-report","course-report","cba-report","cbp-report-mdo-enrolment","user-report","user-enrollment-report"],
 
     # Course category configuration
-    'courseCategoriesToSelect': '{{ course_categories_to_select_standalone_reports }}',
+    'courseCategoriesToSelect': ['Course', 'Moderated Course', 'Invite-Only Program', 'Moderated Program', 'Blended Program', 'Curated Program', 'Standalone Assessment', 'Moderated Assessment', 'Invite-Only Assessment', 'External Redirect', 'Case Study', 'Comprehensive Assessment Program', 'Multilingual Course', 'Pre Enrolment Assessment', 'Learning Pathway'],
 
     # Bharat kalp Configuration
     'bharat_kalp_event_tags': ['Bharat Kalp - Talks', 'Bharat Kalp - Podcast'],
