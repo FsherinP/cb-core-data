@@ -107,7 +107,7 @@ class BlendedModel:
                 .join(batchCreatedByDF, on=["bpBatchCreatedBy"], how="left")
             
 
-            userEnrolmentDF = spark.read.parquet(ParquetFileConstants.ENROLMENT_COMPUTED_PARQUET_FILE).cache()
+            userEnrolmentDF = spark.read.parquet(ParquetFileConstants.ENROLMENT_COMPUTED_PARQUET_FILE).filter(col('enrolment_status') == 'enrolled').cache()
 
             bpUserEnrolmentDF = userEnrolmentDF \
                            .select(
