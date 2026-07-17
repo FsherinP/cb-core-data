@@ -225,7 +225,7 @@ class PeerValidationNotificationSender:
                         col("timestamp")
                     )
                     from dfutil.utils.utils import dispatch_df_to_kafka
-                    dispatch_df_to_kafka(kafkaDF, self.config.peerValidationKafkaTopic, broker_list=self.config.brokerList)
+                    dispatch_df_to_kafka(kafkaDF, self.config.peerValidationKafkaTopic, broker_list=self.config.kpBrokerList)
 
                     print(f"[INFO] {sent_count} notifications sent successfully")
 

@@ -51,6 +51,7 @@ class ZipUploadModel:
         Generates a cryptographically secure alphanumeric password.
         Uses Python's secrets module — equivalent to Java's SecureRandom.
         """
+        length = int(length)
         ALPHANUMERIC_CHARACTERS = string.ascii_letters + string.digits
         return ''.join(secrets.choice(ALPHANUMERIC_CHARACTERS) for _ in range(length))
 
