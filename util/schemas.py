@@ -33,7 +33,8 @@ personal_details_schema = StructType([
 additionalPropertiesSchema = StructType([
     StructField("tag", ArrayType(StringType()), True),
     StructField("externalSystemId", StringType(), True),
-    StructField("externalSystem", StringType(), True)
+    StructField("externalSystem", StringType(), True),
+    StructField("isBharatKalpMember", BooleanType(), True)
 ])
 
 profile_schema = StructType([
