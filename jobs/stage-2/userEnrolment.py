@@ -11,7 +11,9 @@ from pyspark.sql.functions import col, from_json, explode_outer, coalesce, lit, 
 from pyspark.sql.types import StructType, ArrayType, StringType, BooleanType, StructField
 from pyspark.sql.types import MapType, StringType, StructType, StructField, FloatType, LongType, DateType, IntegerType
 from pyspark.sql.functions import col, when, size, lit, expr, unix_timestamp, date_format, from_json, current_timestamp, \
-    to_date, round, explode, to_utc_timestamp, from_utc_timestamp, to_timestamp, sum as spark_sum
+    to_date, round, explode, to_utc_timestamp, from_utc_timestamp, to_timestamp, sum as spark_sum, upper, concat, \
+    row_number
+from pyspark.sql.window import Window
 
 from datetime import datetime
 import sys
@@ -66,6 +68,31 @@ class UserEnrolmentModel:
             primary_categories = ["Course", "Program", "Blended Program", "CuratedCollections", "Curated Program"]
 
             # Load and cache base DataFrames that are used multiple times
+            unenrolmentAuditDF = spark.read.parquet(ParquetFileConstants.UNENROLMENT_AUDIT_PARQUET_FILE) \
+                .filter(col('action') == 'UNENROLL') \
+                .select(
+                col("userid").alias("userID"),
+                col("courseid").alias("courseID"),
+                col("batchid").alias("batchID"),
+                col("actiondate").alias("unenrolledOn"),
+                col("action")
+            ).cache()
+
+            # A user/course/batch can have more than one unenrol record (e.g. unenrolled,
+            # re-enrolled, unenrolled again). Keep only the most recent one so the join
+            # below can't fan out and duplicate rows in the enrolment report.
+            unenrolmentAuditLatestDF = (
+                unenrolmentAuditDF
+                .withColumn(
+                    "rn",
+                    row_number().over(
+                        Window.partitionBy("userID", "courseID", "batchID").orderBy(col("unenrolledOn").desc())
+                    )
+                )
+                .filter(col("rn") == 1)
+                .drop("rn")
+            )
+
             enrolmentDF = spark.read.parquet(ParquetFileConstants.ENROLMENT_COMPUTED_PARQUET_FILE)
             userOrgDF = spark.read.parquet(ParquetFileConstants.USER_ORG_COMPUTED_FILE)
             contentOrgDF = spark.read.parquet(ParquetFileConstants.CONTENT_COMPUTED_PARQUET_FILE).filter(
@@ -153,17 +180,27 @@ class UserEnrolmentModel:
 
             # Load and process ACBP data
             acbpAllEnrolmentDF = (spark.read.parquet(ParquetFileConstants.ACBP_COMPUTED_FILE)
-                                  .withColumn("courseID", explode(col("acbpCourseIDList")))\
-                                  .withColumn("courseID", regexp_replace(col("courseID"), r"^\s*\[|\]\s*$|\s+", ""))\
+                                  .withColumn("courseID", explode(col("acbpCourseIDList"))) \
+                                  .withColumn("courseID", regexp_replace(col("courseID"), r"^\s*\[|\]\s*$|\s+", "")) \
                                   .withColumn("liveCBPlan", lit(True))
                                   .select(col("userOrgID"), col("courseID"), col("userID"),
                                           col("designation"), col("liveCBPlan")))
 
-            # Join platform data with ACBP and cache result
-            enrolmentWithACBP = (df.join(acbpAllEnrolmentDF, ["userID", "userOrgID", "courseID"], "left")
-                                 .withColumn("live_cbp_plan_mandate",
-                                             when(col("liveCBPlan").isNull(), False)
-                                             .otherwise(col("liveCBPlan"))))
+            # Join platform data with ACBP, then with the (de-duplicated) unenrolment audit
+            # data, in a single chain so neither join gets thrown away.
+            enrolmentWithACBP = (
+                df.join(acbpAllEnrolmentDF, ["userID", "userOrgID", "courseID"], "left")
+                .withColumn("live_cbp_plan_mandate",
+                            when(col("liveCBPlan").isNull(), False)
+                            .otherwise(col("liveCBPlan")))
+                .join(unenrolmentAuditLatestDF, ["userID", "courseID", "batchID"], "left")
+                .withColumn("unenrolled_on",
+                            when(col("unenrolledOn").isNotNull(),
+                                 date_format(col("unenrolledOn"), ParquetFileConstants.DATE_TIME_FORMAT))
+                            .otherwise(lit(None).cast(StringType())))
+                .drop("action", "unenrolledOn")
+            )
+
 
             print("🔄 Generating reports...")
 
@@ -188,6 +225,7 @@ class UserEnrolmentModel:
             .withColumn("enrolment_status",
                         when(col("dbCompletionStatus").isNull(), "unenrolled")
                         .otherwise("enrolled"))
+            .withColumn("unenrolled_on", lit(None).cast(StringType()))
             .select(
                 col("fullName").alias("Full_Name"),
                 col("professionalDetails.designation").alias("Designation"),
@@ -233,7 +271,9 @@ class UserEnrolmentModel:
                 col("certificateID").alias("Certificate_ID"),
                 col("Report_Last_Generated_On"),
                 col("live_cbp_plan_mandate").alias("Live_CBP_Plan_Mandate"),
-                col("enrolment_status")
+                col("enrolment_status"),
+                col("unenrolled_on"),
+                col("role").alias("Roles")  # used only to classify Govt / Non-Govt users, dropped before write
             )
             )
 
@@ -347,7 +387,9 @@ class UserEnrolmentModel:
                 col("live_cbp_plan_mandate").alias("Live_CBP_Plan_Mandate"),
                 col("userID"),
                 col("courseID"),
-                col("enrolment_status")
+                col("enrolment_status"),
+                col("unenrolled_on"),
+                col("role").alias("Roles")  # used only to classify Govt / Non-Govt users, dropped before write
             )
                                  .dropDuplicates(["userID", "Batch_Id", "courseID"])
                                  .drop("userID", "courseID")
@@ -411,12 +453,62 @@ class UserEnrolmentModel:
             print(f"----- combined count: {platform_enrolments_df.count() + marketplace_enrolments_df.count()} ---")
             print("===== end of summary =====")
 
+            # ---- Govt / Non-Govt classification ----
+            # Designation or Roles containing "VOLUNTEER" => Non-Govt user, everything else => Govt user
+            mdoReportDF = mdoReportDF.withColumn(
+                "is_non_govt_user",
+                when(
+                    upper(coalesce(col("Designation"), lit(""))).contains("VOLUNTEER") |
+                    upper(coalesce(col("Roles").cast("string"), lit(""))).contains("VOLUNTEER"),
+                    lit(True)
+                ).otherwise(lit(False))
+            ).cache()
+
+            govt_part_df = mdoReportDF.filter(~col("is_non_govt_user")).drop("is_non_govt_user", "Roles")
+            non_govt_part_df = mdoReportDF.filter(col("is_non_govt_user")).drop("is_non_govt_user", "Roles")
+
+            # Determine, per org, whether it has govt users, non-govt users, or both.
+            govt_org_ids = set(
+                row.mdoid for row in govt_part_df.select("mdoid").distinct().collect() if row.mdoid is not None
+            )
+            non_govt_org_ids = set(
+                row.mdoid for row in non_govt_part_df.select("mdoid").distinct().collect() if row.mdoid is not None
+            )
+            both_org_ids = govt_org_ids & non_govt_org_ids
+
+            print(f"Orgs with only Govt users: {len(govt_org_ids - both_org_ids)}")
+            print(f"Orgs with only Non-Govt users: {len(non_govt_org_ids - both_org_ids)}")
+            print(f"Orgs with BOTH Govt and Non-Govt users (2 reports each): {len(both_org_ids)}")
+
+            # Govt subset keeps its mdoid unchanged (mdoid=<org_id>).
+            # Non-Govt subset keeps its mdoid unchanged too UNLESS the same org also has
+            # Govt users, in which case its folder becomes mdoid=<org_id>_non_govt so the
+            # two reports for that org don't collide.
+            both_org_ids_list = list(both_org_ids)
+            non_govt_part_df = non_govt_part_df.withColumn(
+                "mdoid",
+                when(col("mdoid").isin(both_org_ids_list), concat(col("mdoid"), lit("_non_govt")))
+                .otherwise(col("mdoid"))
+            )
+
+            enrolment_out_path = f"{config.localReportDir}/{config.userEnrolmentReportPath}/{today}"
+
             print("📝 Writing CSV reports...")
+            print(f"➡️  Writing GOVT user enrolment report -> {enrolment_out_path}")
             dfexportutil.write_csv_per_mdo_id_duckdb(
-                mdoReportDF,
-                f"{config.localReportDir}/{config.userEnrolmentReportPath}/{today}",
+                govt_part_df,
+                enrolment_out_path,
                 'mdoid',
                 f"{config.localReportDir}/temp/user_enrolment_report/{today}",
+                csv_filename=config.userEnrollmentReport
+            )
+
+            print(f"➡️  Writing NON-GOVT user enrolment report -> {enrolment_out_path}")
+            dfexportutil.write_csv_per_mdo_id_duckdb(
+                non_govt_part_df,
+                enrolment_out_path,
+                'mdoid',
+                f"{config.localReportDir}/temp/user_enrolment_report_non_govt/{today}",
                 csv_filename=config.userEnrollmentReport
             )
 
@@ -424,6 +516,8 @@ class UserEnrolmentModel:
             warehouseDF = platformWarehouseDF.unionByName(marketPlaceWarehouseDF)
             warehouseDF.coalesce(1).write.mode("overwrite").option("compression", "snappy").parquet(
                 f"{config.warehouseReportDir}/{config.dwEnrollmentsTable}")
+
+            mdoReportDF.unpersist()
 
             print("✅ Processing completed successfully!")
 

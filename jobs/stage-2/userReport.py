@@ -5,7 +5,7 @@ import sys
 from pathlib import Path
 from pyspark.sql import SparkSession
 from pyspark.sql.functions import (
-    col, when, coalesce, lit,
+    col, when, coalesce, lit, upper,
     current_timestamp, date_format, from_unixtime, concat_ws, from_json, explode, trim, length, first, expr
 )
 from concurrent.futures import ThreadPoolExecutor, as_completed
@@ -86,7 +86,7 @@ def processUserReport(config):
             spark, user_master_df, user_enrolment_df, content_duration_df
         )
         print("✅ Step 5 Complete")
-        
+
 
         # Step 6: Add Event Metrics
         print("📊 Step 6: Adding Event Metrics...")
@@ -109,75 +109,9 @@ def processUserReport(config):
                              lit(0)).otherwise(col("weekly_claps_day_before_yesterday")))
         print("✅ Step 7 Complete")
 
-        # Step 8: Final Column Selection
-        print("🎯 Step 8: Final Column Selection...")
-
-        mdoWiseReportDF = user_complete_data.filter(col("userStatus").cast("int") == 1) \
-            .withColumn("Report_Last_Generated_On", currentDateTime) \
-            .withColumn("Total_Enrolments",
-                        coalesce(col("total_event_enrolments"), lit(0)) +
-                        coalesce(col("total_content_enrolments"), lit(0))) \
-            .withColumn("Total_Completions",
-                        coalesce(col("total_event_completions"), lit(0)) +
-                        coalesce(col("total_content_completions"), lit(0))) \
-            .withColumn("MDO_Name", col("userOrgName")) \
-            .withColumn("Ministry",
-                        when(col("ministry_name").isNull(), col("userOrgName"))
-                        .otherwise(col("ministry_name"))) \
-            .withColumn("Department",
-                        when((col("Ministry").isNotNull()) &
-                             (col("Ministry") != col("userOrgName")) &
-                             ((col("dept_name").isNull()) | (col("dept_name") == "")),
-                             col("userOrgName"))
-                        .otherwise(col("dept_name"))) \
-            .withColumn("Organization",
-                        when((col("Ministry") != col("userOrgName")) &
-                             (col("Department") != col("userOrgName")),
-                             col("userOrgName"))
-                        .otherwise(lit(""))) \
-            .select(
-            col("fullName").alias("Full_Name"),
-            col("professionalDetails.designation").alias("Designation"),
-            col("personalDetails.primaryEmail").alias("Email"),
-            col("personalDetails.mobile").alias("Phone_Number"),
-            col("MDO_Name"),
-            col("professionalDetails.group").alias("Group"),
-            col("Tag"),
-            col("Ministry"),
-            col("Department"),
-            col("Organization"),
-            from_unixtime(col("userCreatedTimestamp") / 1000, ParquetFileConstants.DATE_FORMAT).alias(
-                "User_Registration_Date"),
-            col("cadreName").alias("Cadre"),
-            col("civilServiceType").alias("Civil Service Type"),
-            col("civilServiceName").alias("Civil Services"),
-            col("cadreBatch").alias("Cadre Batch"),
-            col("isOnCentralDeputation").alias("Is On Central Deputation"),
-            col("organised_service").alias("Is From Organised Service of Govt"),
-            col("role").alias("Roles"),
-            col("personalDetails.gender").alias("Gender"),
-            col("personalDetails.category").alias("Category"),
-            col("additionalProperties.externalSystem").alias("External_System"),
-            col("additionalProperties.externalSystemId").alias("External_System_Id"),
-            col("employmentDetails.employeeCode").alias("Employee_Id"),
-            from_unixtime(col("userOrgCreatedDate") / 1000, ParquetFileConstants.DATE_FORMAT).alias("MDO_Created_On"),
-            col("userProfileStatus").alias("Profile_Status"),
-            col("weekly_claps_day_before_yesterday"),
-            coalesce(col("total_points"), lit(0)).alias("Karma_Points"),
-            coalesce(col("total_event_enrolments"), lit(0)).alias("Event_Enrolments"),
-            coalesce(col("total_event_completions"), lit(0)).alias("Event_Completions"),
-            coalesce(col("total_event_learning_hours_with_certificates"), lit(0)).alias("Event_Learning_Hours"),
-            coalesce(col("total_content_enrolments"), lit(0)).alias("Course_Enrolments"),
-            coalesce(col("total_content_completions"), lit(0)).alias("Course_Completions"),
-            coalesce(col("total_content_duration"), lit(0)).alias("Course_Learning_Hours"),
-            coalesce(col("Total_Enrolments"), lit(0)).alias("Total_Enrolments"),
-            coalesce(col("Total_Completions"), lit(0)).alias("Total_Completions"),
-            coalesce(col("Total_Learning_Hours"), lit(0)).alias("Total_Learning_Hours"),
-            col("Report_Last_Generated_On"),
-            col("userOrgID").alias("mdoid")
-        )
-        dfexportutil.write_csv_per_mdo_id(mdoWiseReportDF, f"{config.localReportDir}/{config.userReportPath}/{today}",
-                                          'mdoid', csv_filename=config.userReport)
+        # Step 8: Build Warehouse Data (the mdo-wise CSV "user-report" now lives entirely in Step 11,
+        # merged with custom fields, and split into Govt/Non-Govt only where an org actually has both)
+        print("🎯 Step 8: Preparing Warehouse Data...")
 
         warehouseDF = user_complete_data \
             .withColumn("marked_as_not_my_user",
@@ -224,7 +158,8 @@ def processUserReport(config):
             col("data_last_generated_on")
         ).join(user_badges, on="user_id", how="left").fillna(0, subset=["total_badges_earned"])
         print("✅ Step 8 Complete")
-        # Step 9: Export Data
+
+        # Step 9: Export Warehouse Data
         print("📁 Step 9: Exporting Warehouse Data...")
         warehouseDF.write.mode("overwrite").option("compression", "snappy").parquet(
             f"{config.warehouseReportDir}/{config.dwUserTable}")
@@ -235,19 +170,19 @@ def processUserReport(config):
         print("🔍 Step 10: Processing User Extended Profile Data...")
         # Load user extended profile data
         user_extended_profile_df = (
-        spark.read.parquet(ParquetFileConstants.USER_EXTENDED_PROFILE)
-        .filter(col("contexttype") == "orgAdditionalProperties")
-        .withColumnRenamed("userid", "userID")
-        .withColumn("contextDataArray", from_json(col("contextdata"), ArrayType(schemas.context_data_schema)))
-        .withColumn("contextData", explode(col("contextDataArray")))
-        .select(
-            col("userID"),
-            col("contexttype").alias("contextType"),
-            col("contextData"),
-            col("contextData.organisationId").alias("mdo_id")
+            spark.read.parquet(ParquetFileConstants.USER_EXTENDED_PROFILE)
+            .filter(col("contexttype") == "orgAdditionalProperties")
+            .withColumnRenamed("userid", "userID")
+            .withColumn("contextDataArray", from_json(col("contextdata"), ArrayType(schemas.context_data_schema)))
+            .withColumn("contextData", explode(col("contextDataArray")))
+            .select(
+                col("userID"),
+                col("contexttype").alias("contextType"),
+                col("contextData"),
+                col("contextData.organisationId").alias("mdo_id")
+            )
         )
-        )
-        
+
         # Step 1: Explode customFieldValues and handle based on type
         exploded_df_base = (
             user_extended_profile_df
@@ -261,7 +196,7 @@ def processUserReport(config):
                 col("customField.values").alias("values_array")
             )
         )
-        
+
         # Handle direct values (where type is not "masterList" and direct_value is not null)
         direct_values_df = (
             exploded_df_base
@@ -276,7 +211,7 @@ def processUserReport(config):
                 col("direct_value").alias("attribute_value")
             )
         )
-        
+
         # Handle masterList values (where type is "masterList" and values_array is not null)
         master_list_values_df = (
             exploded_df_base
@@ -292,21 +227,21 @@ def processUserReport(config):
                 col("valueItem.value").alias("attribute_value")
             )
         )
-        
+
         # Combine both direct values and masterList values
         exploded_df = direct_values_df.union(master_list_values_df).filter(
             col("attribute_name").isNotNull() &
             col("attribute_value").isNotNull()
         )
-        
+
         # Write to warehouse tables
         exploded_df \
             .select(
-                col("userID").alias("user_id"),
-                col("mdo_id"),
-                col("attribute_name"),
-                col("attribute_value")
-            ) \
+            col("userID").alias("user_id"),
+            col("mdo_id"),
+            col("attribute_name"),
+            col("attribute_value")
+        ) \
             .coalesce(1) \
             .write \
             .mode("overwrite") \
@@ -314,14 +249,15 @@ def processUserReport(config):
             .parquet(
             f"{config.warehouseReportDir}/userCustomFields"
         )
-        
+
         # Cache the exploded data for reuse
         exploded_cached = exploded_df.cache()
         print("✅ Step 10 Complete")
-        
-        # Step 11: Create MDO-wise Slim Data for Custom Reports
-        print("📋 Step 11: Creating MDO-wise Custom Reports...")
-        
+
+        # Step 11: Create the single MDO-wise User Report (with Custom Fields),
+        # split into Govt / Non-Govt ONLY for orgs that actually have both kinds of users.
+        print("📋 Step 11: Creating MDO-wise User Report (with Custom Fields, Govt/Non-Govt aware)...")
+
         mdo_wise_slim = (
             user_complete_data
             .filter(col("userStatus").cast("int") == 1)
@@ -335,7 +271,7 @@ def processUserReport(config):
                 col("professionalDetails.group").alias("Group"),
                 col("Tag"),
                 when(col("ministry_name").isNull(), col("userOrgName"))
-                    .otherwise(col("ministry_name")).alias("Ministry"),
+                .otherwise(col("ministry_name")).alias("Ministry"),
                 when(
                     (col("ministry_name").isNotNull()) &
                     (col("ministry_name") != col("userOrgName")) &
@@ -365,16 +301,29 @@ def processUserReport(config):
                 coalesce(col("total_content_completions"), lit(0)).alias("Course_Completions"),
                 coalesce(col("total_content_duration"), lit(0)).alias("Course_Learning_Hours"),
                 (coalesce(col("total_event_enrolments"), lit(0)) +
-                coalesce(col("total_content_enrolments"), lit(0))).alias("Total_Enrolments"),
+                 coalesce(col("total_content_enrolments"), lit(0))).alias("Total_Enrolments"),
                 (coalesce(col("total_event_completions"), lit(0)) +
-                coalesce(col("total_content_completions"), lit(0))).alias("Total_Completions"),
+                 coalesce(col("total_content_completions"), lit(0))).alias("Total_Completions"),
                 coalesce(col("Total_Learning_Hours"), lit(0)).alias("Total_Learning_Hours"),
                 lit(currentDateTime).alias("Report_Last_Generated_On"),
                 col("userOrgID").alias("mdoid")
             )
-        ).repartition(col("mdoid")).cache()  # Repartition by org and cache
+            .withColumn(
+                # Designation or Roles containing "VOLUNTEER" => Non-Govt user, everything else => Govt user
+                "is_non_govt_user",
+                when(
+                    upper(coalesce(col("Designation"), lit(""))).contains("VOLUNTEER") |
+                    upper(coalesce(col("Roles").cast("string"), lit(""))).contains("VOLUNTEER"),
+                    lit(True)
+                ).otherwise(lit(False))
+            )
+        ).repartition(col("mdoid")).cache()
 
-        base_out = f"standalone-reports/user-custom-report/{today}"
+        govt_mdo_wise_slim = mdo_wise_slim.filter(~col("is_non_govt_user")).drop("is_non_govt_user").cache()
+        non_govt_mdo_wise_slim = mdo_wise_slim.filter(col("is_non_govt_user")).drop("is_non_govt_user").cache()
+
+        # Everything goes in ONE parent folder/date.
+        base_out = f"standalone-reports/user-report/{today}"
 
         print("📊 Pre-collecting organization metadata...")
         org_metadata = (
@@ -389,9 +338,6 @@ def processUserReport(config):
             for row in org_metadata
         }
 
-        org_ids = sorted(org_custom_fields.keys())
-        print(f"Found {len(org_ids)} organizations with custom fields")
-
         fixed_cols = [
             "userID", "Full_Name", "Designation", "Email", "Phone_Number", "MDO_Name", "Group", "Tag",
             "Ministry", "Department", "Organization", "User_Registration_Date", "Roles", "Gender",
@@ -403,18 +349,20 @@ def processUserReport(config):
         ]
         fixed_cols_lower = [col_name.lower() for col_name in fixed_cols]
 
-        def process_single_organization(org_id):
-            """Process a single organization - same logic as before but with fixed column handling"""
+        def process_single_organization(org_id, user_slim_df, base_out_path, report_label, folder_suffix=""):
+            """Process a single organization (govt or non-govt subset) and write its mdo-wise CSV
+            (+ custom fields, if any) into mdoid=<org_id><folder_suffix>."""
+            attribute_names = []
             try:
-                print(f"  Processing organization: {org_id}")
-                
+                print(f"  Processing [{report_label}] organization: {org_id}{folder_suffix}")
+
                 # Get pre-computed custom fields for this org
                 attribute_names = org_custom_fields.get(org_id, [])
-                
-                # Filter data for current organization
+
+                # Filter custom-field data for current organization
                 org_data = exploded_cached.filter(col("mdo_id") == org_id)
-                
-                # Create pivot - same logic as before
+
+                # Create pivot
                 if attribute_names:
                     pivoted = (
                         org_data
@@ -424,118 +372,145 @@ def processUserReport(config):
                     )
                 else:
                     pivoted = org_data.select("userID").distinct()
-                
-                # Handle conflicts - same logic as before
+
+                # Handle conflicts
                 conflicts = []
                 attribute_names_lower = [attr_name.lower() for attr_name in attribute_names]
-                
+
                 for i, attr_lower in enumerate(attribute_names_lower):
                     if attr_lower in fixed_cols_lower:
                         conflicts.append(attribute_names[i])
-                 
+
                 # Rename conflicting columns
                 renamed_pivoted = pivoted
                 custom_field_mapping = {}
-                
+
                 for conflict_col in conflicts:
                     if conflict_col in pivoted.columns:
                         new_name = f"Custom_{conflict_col}"
                         renamed_pivoted = renamed_pivoted.withColumnRenamed(conflict_col, new_name)
                         custom_field_mapping[conflict_col] = new_name
-                
-                # Join with user data - same logic as before
-                org_user_data = mdo_wise_slim.filter(col("mdoid") == org_id)
+
+                # User data (govt or non-govt subset) drives the output rows so that:
+                #  - the govt/non-govt split is respected
+                #  - users with no custom fields still appear (left join keeps them)
+                #  - orgs with NO custom fields at all still get a report (attribute_names is empty,
+                #    pivoted just carries distinct userIDs, so the join adds no extra columns)
+                org_user_data = user_slim_df.filter(col("mdoid") == org_id)
                 joined = (
-                    renamed_pivoted
-                    .join(org_user_data, ["userID"], "left")
+                    org_user_data
+                    .join(renamed_pivoted, ["userID"], "left")
                     .withColumn("mdoid", lit(org_id))
                 )
-                
-                # Create final column list - same logic as before
+
+                # Create final column list
                 final_custom_cols = []
                 for attr_name in attribute_names:
                     if attr_name in custom_field_mapping:
                         final_custom_cols.append(custom_field_mapping[attr_name])
                     else:
                         final_custom_cols.append(attr_name)
-                
+
                 available_columns = set(joined.columns)
                 existing_fixed_cols = [c for c in fixed_cols if c in available_columns]
                 existing_custom_cols = [c for c in final_custom_cols if c in available_columns]
                 final_columns = existing_fixed_cols + existing_custom_cols
-                
+
                 # Remove duplicates
                 final_columns = list(dict.fromkeys(final_columns))
-                
+
                 def safe_column_reference(col_name):
                     """Create safe column reference for selection"""
-                    # If column name has special characters, use backticks in selectExpr
                     if any(char in col_name for char in ['.', ' ', '(', ')', '-', '/', '`']):
                         return f"`{col_name}`"
                     else:
                         return col_name
-                
-                # Create selectExpr list instead of using col() function
+
                 select_expressions = [safe_column_reference(c) for c in final_columns]
-                
+
                 ordered = joined.selectExpr(*select_expressions)
-                
-                out_path = f"{config.localReportDir}/{base_out}/mdoid={org_id}"
-                csv_file_path = f"{out_path}/UserCustomReport.csv"
-                
+
+                out_path = f"{config.localReportDir}/{base_out_path}/mdoid={org_id}{folder_suffix}"
+                csv_file_path = f"{out_path}/{config.userReport}"
+
                 os.makedirs(out_path, exist_ok=True)
-                
+
                 result = dfexportutil.write_single_csv_duckdb(
                     df=ordered,
                     output_path=csv_file_path,
-                    parquet_tmp_path=f"{out_path}/temp_parquet_{org_id}",
+                    parquet_tmp_path=f"{out_path}/temp_parquet_{org_id}{folder_suffix}",
                     keep_parquets=False
                 )
 
                 # write warehouse files - 'warehouseUserCustomReportDir': 'user_custom_report'
-                warehouse_user_custom_report_file = f"{config.warehouseReportDir}/{config.warehouseUserCustomReportDir}/{org_id}_custom_report.parquet"
-                
-                # Write as Parquet
+                warehouse_user_custom_report_file = (
+                    f"{config.warehouseReportDir}/{config.warehouseUserCustomReportDir}/"
+                    f"{org_id}{folder_suffix}_custom_report.parquet"
+                )
+
                 dfexportutil.write_single_parquet(
                     df=ordered,
                     final_path=warehouse_user_custom_report_file)
-                
+
                 return {
-                    'org_id': org_id,
+                    'org_id': f"{org_id}{folder_suffix}",
                     'success': result.get('success', True),
                     'rows_written': result.get('rows_written', 0),
                     'custom_fields_count': len(attribute_names),
                     'error': None
                 }
-                
+
             except Exception as e:
                 return {
-                    'org_id': org_id,
+                    'org_id': f"{org_id}{folder_suffix}",
                     'success': False,
                     'rows_written': 0,
-                    'custom_fields_count': len(attribute_names) if 'attribute_names' in locals() else 0,
+                    'custom_fields_count': len(attribute_names),
                     'error': str(e)
                 }
 
-        max_workers = min(8, len(org_ids))
-        print(f"Processing {len(org_ids)} organizations using {max_workers} parallel workers...")
+        # Determine, per org, whether it has govt users, non-govt users, or both.
+        govt_org_ids = set(
+            row.mdoid for row in govt_mdo_wise_slim.select("mdoid").distinct().collect() if row.mdoid is not None
+        )
+        non_govt_org_ids = set(
+            row.mdoid for row in non_govt_mdo_wise_slim.select("mdoid").distinct().collect() if row.mdoid is not None
+        )
+        both_org_ids = govt_org_ids & non_govt_org_ids
+
+        print(f"Orgs with only Govt users: {len(govt_org_ids - both_org_ids)}")
+        print(f"Orgs with only Non-Govt users: {len(non_govt_org_ids - both_org_ids)}")
+        print(f"Orgs with BOTH Govt and Non-Govt users (2 reports each): {len(both_org_ids)}")
+
+        # Build the task list:
+        #  - Govt subset always writes to mdoid=<org_id> (no suffix)
+        #  - Non-Govt subset writes to mdoid=<org_id> (no suffix) UNLESS the org also has
+        #    Govt users, in which case it writes to mdoid=<org_id>_non_govt to avoid collision.
+        tasks = []
+        for org_id in govt_org_ids:
+            tasks.append((org_id, govt_mdo_wise_slim, "GOVT", ""))
+        for org_id in non_govt_org_ids:
+            suffix = "_non_govt" if org_id in both_org_ids else ""
+            tasks.append((org_id, non_govt_mdo_wise_slim, "NON-GOVT", suffix))
+
+        print(f"Processing {len(tasks)} org report(s) (govt + non-govt combined) using up to 8 parallel workers...")
 
         successful_orgs = 0
         failed_orgs = 0
         total_rows = 0
-        start_time = time.time()
 
-        if max_workers > 1 and len(org_ids) > 3:
-            # Parallel processing for multiple organizations
+        max_workers = min(8, len(tasks)) if tasks else 1
+
+        if max_workers > 1 and len(tasks) > 3:
             with ThreadPoolExecutor(max_workers=max_workers) as executor:
-                # Submit all tasks
-                future_to_org = {executor.submit(process_single_organization, org_id): org_id
-                                for org_id in org_ids}
-                
-                # Collect results as they complete
-                for future in as_completed(future_to_org):
+                future_to_task = {
+                    executor.submit(process_single_organization, org_id, slim_df, base_out, label, suffix): (org_id, suffix)
+                    for (org_id, slim_df, label, suffix) in tasks
+                }
+
+                for future in as_completed(future_to_task):
                     result = future.result()
-                    
+
                     if result['success']:
                         successful_orgs += 1
                         total_rows += result['rows_written']
@@ -543,12 +518,10 @@ def processUserReport(config):
                     else:
                         failed_orgs += 1
                         print(f"  ❌ {result['org_id']}: {result['error']}")
-
         else:
-            # Sequential processing for small number of organizations
-            for org_id in org_ids:
-                result = process_single_organization(org_id)
-                
+            for (org_id, slim_df, label, suffix) in tasks:
+                result = process_single_organization(org_id, slim_df, base_out, label, suffix)
+
                 if result['success']:
                     successful_orgs += 1
                     total_rows += result['rows_written']
@@ -557,33 +530,12 @@ def processUserReport(config):
                     failed_orgs += 1
                     print(f"  ❌ {result['org_id']}: {result['error']}")
 
-
-        # all_org_ids = [row.mdoid for row in mdo_wise_slim.select("mdoid").distinct().collect()]
-        # orgs_without_custom = [org_id for org_id in all_org_ids if org_id not in org_ids]
-
-        # if orgs_without_custom:
-        #     print(f"\n📊 Processing {len(orgs_without_custom)} organizations without custom fields...")
-            
-        #     # Use bulk processing for organizations without custom fields
-        #     standard_orgs_df = mdo_wise_slim.filter(col("mdoid").isin(orgs_without_custom))
-            
-        #     bulk_result = dfexportutil.write_csv_per_mdo_id_duckdb(
-        #         df=standard_orgs_df,
-        #         output_dir=f"{config.localReportDir}/{base_out}",
-        #         group_by_attr="mdoid",
-        #         parquet_tmp_path=f"{config.localReportDir}/{base_out}_standard_orgs",
-        #         large_ids=orgs_without_custom,
-        #         max_workers=max_workers,
-        #         keep_parquets=False,
-        #         csv_filename="UserCustomReport.csv"
-        #     )
-            
-        #     successful_orgs += bulk_result.get('successful_writes', 0)
-        #     failed_orgs += bulk_result.get('failed_writes', 0)
-        #     print(f"✅ Standard organizations: {bulk_result.get('successful_writes', 0)} successful")
+        print(f"Done: {successful_orgs} successful, {failed_orgs} failed, {total_rows:,} total rows")
 
         exploded_cached.unpersist()
         mdo_wise_slim.unpersist()
+        govt_mdo_wise_slim.unpersist()
+        non_govt_mdo_wise_slim.unpersist()
 
     except Exception as e:
         print(f"\n❌ Error occurred: {str(e)}")

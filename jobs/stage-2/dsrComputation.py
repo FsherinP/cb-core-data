@@ -7,13 +7,16 @@ import pandas as pd
 from pyspark.sql import SparkSession
 from pyspark.sql import functions as F
 from pyspark.sql.functions import (
-    col, lit, when, expr, countDistinct, size, current_timestamp, date_trunc, date_sub,to_timestamp, split, sum, round, length
+    col, lit, when, expr, countDistinct, size, current_timestamp, date_trunc, date_sub,
+    to_timestamp, split, sum, round, length, upper, coalesce, from_json, explode_outer,
+    exists, max as spark_max
 )
 from datetime import datetime, timedelta
 from pyspark.sql.types import (StructType, StructField, StringType)
 from datetime import datetime, timedelta, time, timezone
 import sys
-
+import os
+import requests
 sys.path.append(str(Path(__file__).resolve().parents[2]))
 from dfutil.content import contentDFUtil
 from dfutil.utils.utils import druidDFOption
@@ -22,10 +25,31 @@ from dfutil.utils import utils
 from dfutil.utils.redis import Redis
 from dfutil.user import userDFUtil
 from dfutil.dfexport import dfexportutil
+from util import schemas
 
 from constants.ParquetFileConstants import ParquetFileConstants
 from jobs.default_config import create_config
 from jobs.config import get_environment_config
+
+
+# ---------------------------------------------------------------------------
+# Constants — previously hardcoded in Ansible, now owned by this script
+# ---------------------------------------------------------------------------
+CENTRAL_MINISTRIES_COUNT = 94
+STATE_UT_COUNT = 36
+
+
+def format_count(n):
+    n = int(n)
+    s = str(n)
+    if len(s) <= 3:
+        return s
+    result = s[-3:]
+    s = s[:-3]
+    while s:
+        result = s[-2:] + ',' + result
+        s = s[:-2]
+    return result
 
 
 class DSRComputationModel:
@@ -43,21 +67,80 @@ class DSRComputationModel:
     def current_date_time():
         return datetime.now().strftime("%Y-%m-%d %H:%M:%S")
 
-
     def process_data(self, spark, config):
         try:
             output_path = getattr(config, 'baseCachePath', '/home/analytics/pyspark/data-res/pq_files/cache_pq/')
+
             userDF = spark.read.option("recursiveFileLookup", "true").parquet(ParquetFileConstants.USER_PARQUET_FILE) \
                 .withColumnRenamed("id", "user_id") \
                 .withColumnRenamed("rootorgid", "mdo_id") \
                 .withColumn("userCreatedTimestamp", to_timestamp(col("createddate"), "yyyy-MM-dd HH:mm:ss:SSSZ").cast("long"))
+
+            # ------------------------------------------------------------------ #
+            # Exclude VOLUNTEER (Non-Govt) users from every metric in this report.
+            # A user is VOLUNTEER/Non-Govt if EITHER:
+            #   - any designation inside their profiledetails JSON contains "VOLUNTEER", OR
+            #   - their roles array contains an entry that contains "VOLUNTEER"
+            #
+            # designation lives inside profiledetails (a JSON string) under
+            # professionalDetails, which is itself an array, so it has to be parsed
+            # and exploded to get at it. Exploding directly on userDF would multiply
+            # rows per user (bad for every downstream count), so instead we parse it
+            # in a small side dataframe, collapse back to a single per-user flag via
+            # groupBy, and join that flag onto userDF — which stays one row per user.
+            # ------------------------------------------------------------------ #
+            profileDetailsSchema = schemas.makeProfileDetailsSchema(False, True, True, True)
+
+            designationVolunteerFlagDF = (
+                userDF.select(col("user_id"), col("profiledetails"))
+                .na.fill("{}", subset=["profiledetails"])
+                .withColumn("profileDetailsParsed", from_json(col("profiledetails"), profileDetailsSchema))
+                .withColumn("professionalDetail", explode_outer(col("profileDetailsParsed.professionalDetails")))
+                .withColumn("designation", coalesce(col("professionalDetail.designation"), lit("")))
+                .groupBy("user_id")
+                .agg(
+                    spark_max(
+                        when(upper(col("designation")).contains("VOLUNTEER"), lit(1)).otherwise(lit(0))
+                    ).alias("is_volunteer_by_designation")
+                )
+            )
+
+
+            userDF = userDF.join(designationVolunteerFlagDF, ["user_id"], "left") \
+                .withColumn("is_volunteer_by_designation",
+                            coalesce(col("is_volunteer_by_designation"), lit(0)))
+
+            is_volunteer_expr = (
+                    (col("is_volunteer_by_designation") == 1) |
+                    coalesce(exists(col("roles"), lambda r: upper(r).contains("VOLUNTEER")), lit(False))
+            )
+
+            volunteerUserIdsDF = userDF.filter(is_volunteer_expr) \
+                .select(col("user_id").alias("actor_id")) \
+                .distinct() \
+                .cache()
+
+            userDF = userDF.filter(~is_volunteer_expr).drop("is_volunteer_by_designation")
+
             eventsEnrolmentDataDF = spark.read.parquet(ParquetFileConstants.EVENT_ENROLMENT_PARQUET_FILE)
             contentEnrolmentDataDF = spark.read.parquet(ParquetFileConstants.ENROLMENT_WAREHOUSE_COMPUTED_PARQUET_FILE)
             externalContentEnrolmentDataDF = spark.read.parquet(ParquetFileConstants.EXTERNAL_ENROLMENT_COMPUTED_PARQUET_FILE)
             contentDF = spark.read.parquet(ParquetFileConstants.CONTENT_WAREHOUSE_COMPUTED_PARQUET_FILE)
             externalContentDF = spark.read.parquet(ParquetFileConstants.EXTERNAL_CONTENT_COMPUTED_PARQUET_FILE)
+
+            # Event enrolments aren't joined against userDF anywhere below (unlike content
+            # enrolments), so VOLUNTEER exclusion has to be applied explicitly here via an
+            # inner join against the (already-filtered, govt-only) user set.
+            eventsEnrolmentDataDF = eventsEnrolmentDataDF.join(
+                userDF.select("user_id"),
+                ["user_id"],
+                "inner"
+            )
+
+
             # ------------------------------------------------------------------ #
-            # --- Active users (status == 1) joined with org
+            # Active users (status == 1) joined with org
+            # ------------------------------------------------------------------ #
             userWithOrgDF = userDF.filter(col("mdo_id").isNotNull())
             activeUsersDF = userDF.filter(col("status") == 1)
 
@@ -65,12 +148,13 @@ class DSRComputationModel:
             # Content enrolments (active users only)
             # ------------------------------------------------------------------ #
             enrichedContentEnrolmentsDF = contentEnrolmentDataDF.alias("e") \
-                .join(activeUsersDF.select("user_id").alias("u"), col("e.userID") == col("u.user_id"), "inner") \
+                .join(activeUsersDF.select("user_id").alias("u"),
+                      col("e.userID") == col("u.user_id"), "inner") \
                 .select(col("e.*"))
 
             total_enrolments = enrichedContentEnrolmentsDF.count()
-            Redis.update("dashboard_enrolment_count", str(total_enrolments), conf=config)
-            #print(f"Total Enrolments : {total_enrolments}")
+            #Redis.update("dashboard_enrolment_count", str(total_enrolments), conf=config)
+            Redis.update("dashboard_enrolment_count_updated_format", format_count(total_enrolments), conf=config)
 
             # ------------------------------------------------------------------ #
             # Unique users enrolled in Course (Live or Retired)
@@ -78,7 +162,7 @@ class DSRComputationModel:
             enrichedCourseEnrolmentsDF = contentEnrolmentDataDF.alias("e") \
                 .join(
                 contentDF.select("content_id", "content_type", "content_status").alias("c"),
-                col("e.content_id") == col("c.content_id"), "left"           # FIX: e.content_id not e.courseID
+                col("e.content_id") == col("c.content_id"), "left"
             ) \
                 .join(
                 userWithOrgDF.select("user_id").alias("u"),
@@ -92,36 +176,33 @@ class DSRComputationModel:
                 (col("content_status").isin("Live", "Retired"))
             ) \
                 .agg(countDistinct("e.userID").alias("c")).first()[0]
-            Redis.update("dashboard_unique_users_enrolled_count", str(unique_users_enrolled), conf=config)
-            #print(f"Unique users enrolled in Course : {unique_users_enrolled}")
+            #Redis.update("dashboard_unique_users_enrolled_count", str(unique_users_enrolled), conf=config)
+            Redis.update("dashboard_unique_users_enrolled_count_updated_format", format_count(unique_users_enrolled), conf=config)
 
             # ------------------------------------------------------------------ #
             # Content completions — certificateID > 5 chars
-            # FIX: column is certificateID not certificate_id in contentEnrolmentDataDF
             # ------------------------------------------------------------------ #
             total_content_completions = enrichedContentEnrolmentsDF \
                 .filter(length(col("certificateID")) > 5) \
                 .count()
-            #print(f"Total Completions : {total_content_completions}")
-            Redis.update("dashboard_completed_count", str(total_content_completions), conf=config)
+            #Redis.update("dashboard_completed_count", str(total_content_completions), conf=config)
+            Redis.update("dashboard_completed_count_updated_format", format_count(total_content_completions), conf=config)
 
             # ------------------------------------------------------------------ #
             # Event metrics
             # ------------------------------------------------------------------ #
             total_event_enrolments = eventsEnrolmentDataDF.count()
-            Redis.update("dashboard_events_enrolment_count", str(total_event_enrolments), conf=config)
-            #print(f"Total Event enrolments : {total_event_enrolments}")
+            #Redis.update("dashboard_events_enrolment_count", str(total_event_enrolments), conf=config)
+            Redis.update("dashboard_events_enrolment_count_updated_format", format_count(total_event_enrolments), conf=config)
 
             enrichedEventCompletionsDF = eventsEnrolmentDataDF \
-                .filter(length(col("certificate_id")) > 5)   # certificate_id ✅ correct for events
+                .filter(length(col("certificate_id")) > 5)
             total_event_completions = enrichedEventCompletionsDF.count()
-            Redis.update("dashboard_events_completed_count", str(total_event_completions), conf=config)
-            #print(f"Total Event completions : {total_event_completions}")
+            #Redis.update("dashboard_events_completed_count", str(total_event_completions), conf=config)
+            Redis.update("dashboard_events_completed_count_updated_format", format_count(total_event_completions), conf=config)
 
             # ------------------------------------------------------------------ #
             # Certificates generated yesterday (content + events)
-            # FIX: content uses first_completed_on not first_certificate_generated_on
-            #      event uses completed_on_datetime ✅
             # ------------------------------------------------------------------ #
             prev_day = (datetime.now() - timedelta(days=1)).strftime("%Y-%m-%d")
             print(prev_day)
@@ -129,7 +210,7 @@ class DSRComputationModel:
             content_certs_yday = enrichedContentEnrolmentsDF \
                 .filter(length(col("certificateID")) > 5) \
                 .filter(F.to_date(col("first_completed_on")) == prev_day) \
-                .count()                                                          # FIX: added .count()
+                .count()
 
             event_certs_yday = eventsEnrolmentDataDF \
                 .filter(length(col("certificate_id")) > 5) \
@@ -140,13 +221,14 @@ class DSRComputationModel:
             print("event count : " + str(event_certs_yday))
             total_certs_yday = content_certs_yday + event_certs_yday
             Redis.update("lp_completed_yesterday_count", str(total_certs_yday), conf=config)
-            #print(f"Total certificates yesterday : {total_certs_yday}")
+            Redis.update("lp_completed_yesterday_count_updated_format", format_count(total_certs_yday), conf=config)
 
             # ------------------------------------------------------------------ #
             # Registered users (active) & registered yesterday
             # ------------------------------------------------------------------ #
             total_registered_users = activeUsersDF.count()
-            Redis.update("mdo_total_registered_officer_count", str(total_registered_users), conf=config)
+            #Redis.update("mdo_total_registered_officer_count", str(total_registered_users), conf=config)
+            Redis.update("mdo_total_registered_officer_count_updated_format", format_count(total_registered_users), conf=config)
 
             usersRegisteredYesterdayCount = activeUsersDF \
                 .withColumn("yesterdayStartTimestamp",
@@ -155,30 +237,40 @@ class DSRComputationModel:
                             date_trunc("day", current_timestamp()).cast("long")) \
                 .filter(expr("userCreatedTimestamp >= yesterdayStartTimestamp AND userCreatedTimestamp < todayStartTimestamp")) \
                 .count()
-            Redis.update("dashboard_new_users_registered_yesterday", str(usersRegisteredYesterdayCount), conf=config)
+            #Redis.update("dashboard_new_users_registered_yesterday", str(usersRegisteredYesterdayCount), conf=config)
+            Redis.update("dashboard_new_users_registered_yesterday_updated_format", format_count(usersRegisteredYesterdayCount), conf=config)
 
             # ------------------------------------------------------------------ #
-            # Live courses count including external courses
-            # FIX: content_sub_type is correct ✅ — was content_substatus in schema comment
+            # Live courses — reuse single filtered DF for count, publishers, duration
             # ------------------------------------------------------------------ #
             contentDF = spark.read.parquet(ParquetFileConstants.CONTENT_WAREHOUSE_COMPUTED_PARQUET_FILE)
-            liveCourseCount = contentDF \
+
+            liveCoursesDF = contentDF \
                 .filter(col("content_status").isin("Live", "LIVE")) \
                 .filter(col("content_sub_type").isin("Course", "Moderated Course", "External Content")) \
-                .count()
-            Redis.update("dashboard_courses_published_live_count", str(liveCourseCount), conf=config)
+                .cache()
 
-            # set new variable for external content live count
-            liveExternalCourseCount = contentDF \
+            # Count
+            liveCourseCount = liveCoursesDF.count()
+            #Redis.update("dashboard_courses_published_live_count", str(liveCourseCount), conf=config)
+            Redis.update("dashboard_courses_published_live_count_updated_format", format_count(liveCourseCount), conf=config)
+
+            # Distinct publishers
+            course_publisher_count = liveCoursesDF \
+                .filter(col("content_provider_id").isNotNull()) \
+                .select(countDistinct("content_provider_id").alias("publisher_count")) \
+                .first()["publisher_count"]
+            #Redis.update("dashboard_course_publisher_count", str(course_publisher_count), conf=config)
+            Redis.update("dashboard_course_publisher_count_updated_format", format_count(course_publisher_count), conf=config)
+
+            liveCoursesFilteredDF = contentDF \
                 .filter(col("content_status").isin("Live", "LIVE")) \
-                .filter(col("content_sub_type").isin("External Content")) \
-                .count()
-            Redis.update("dashboard_external_courses_published_live_count", str(liveExternalCourseCount), conf=config)
+                .filter(col("content_sub_type").isin("Course", "Moderated Course")) \
+                .cache()
 
+            # Duration in hours
             parts = split(col("content_duration"), ":")
-            result = contentDF \
-                .filter(col("content_status").isin("Live", "LIVE")) \
-                .filter(col("content_sub_type").isin("Course", "Moderated Course", "External Content")) \
+            result = liveCoursesFilteredDF \
                 .withColumn(
                 "duration_seconds",
                 parts[0].cast("int") * 3600 +
@@ -187,13 +279,47 @@ class DSRComputationModel:
             ) \
                 .agg(round(sum("duration_seconds") / 3600).cast("int").alias("total_hours"))
             total_hours = result.first()["total_hours"]
-            Redis.update("dashboard_courses_published_live_duration", str(total_hours), conf=config)
+            #Redis.update("dashboard_courses_published_live_duration", str(total_hours), conf=config)
+            Redis.update("dashboard_courses_published_live_duration_updated_format", format_count(total_hours), conf=config)
+
+            liveCoursesDF.unpersist()
+
+            # ------------------------------------------------------------------ #
+            # Hardcoded constants — written to Redis so Ansible just fetches them
+            # ------------------------------------------------------------------ #
+            Redis.update("dashboard_central_ministries_count", str(CENTRAL_MINISTRIES_COUNT), conf=config)
+            Redis.update("dashboard_state_ut_count", str(STATE_UT_COUNT), conf=config)
+            print("Done till here")
+            # ------------------------------------------------------------------ #
+            # Department organisations onboarded — ES org_v4 index
+            # Total active orgs (status=1) minus central ministries minus state/UTs
+            # ------------------------------------------------------------------ #
+            es_url = f"http://{config.sparkElasticsearchConnectionHost}:{config.sparkElasticsearchConnectionPort}/org_v4/_count"
+            count_query = {
+                "query": {
+                    "bool": {
+                        "must": [
+                            {"match": {"status": 1}}
+                        ]
+                    }
+                }
+            }
+            response = requests.post(es_url, json=count_query, headers={"Content-Type": "application/json"})
+            total_orgs = response.json()["count"]
+
+            #total_orgs = org_df.filter(col("status") == 1).count()
+            dept_org_onboarded = total_orgs - CENTRAL_MINISTRIES_COUNT - STATE_UT_COUNT
+            #Redis.update("dashboard_dept_org_onboarded_count", str(dept_org_onboarded), conf=config)
+            Redis.update("dashboard_dept_org_onboarded_count_updated_format", format_count(dept_org_onboarded), conf=config)
 
             # ------------------------------------------------------------------ #
             # MAU (last 30 days) via Druid
+            # Druid can't join against our user table directly, so instead of asking
+            # Druid for a pre-aggregated COUNT(DISTINCT actor_id), we pull back the
+            # distinct actor_ids themselves and exclude VOLUNTEER users here in Spark
+            # by anti-joining against volunteerUserIdsDF (actor_id == user_id).
             # ------------------------------------------------------------------ #
-            loginSchema = StructType([StructField("user_id", StringType(), True)])
-            mau_query = """SELECT COUNT(DISTINCT(actor_id)) AS activeCount
+            mau_query = """SELECT DISTINCT actor_id
                            FROM "telemetry-events-syncts"
                            WHERE eid IN ('IMPRESSION', 'INTERACT', 'START', 'END')
                              AND actor_type = 'User'
@@ -202,10 +328,45 @@ class DSRComputationModel:
 
             mau_df = druidDFOption(mau_query, config.sparkDruidRouterHost, limit=10000000, spark=spark)
             if mau_df is None:
-                mau_df = self._empty_df(spark, "activeCount")
+                mau_df = self._empty_df(spark, "actor_id")
 
-            total_mau = mau_df.select("activeCount").first()[0]
-            Redis.update("lp_monthly_active_users", str(total_mau), conf=config)
+            mau_govt_only_df = mau_df.join(volunteerUserIdsDF, ["actor_id"], "left_anti")
+            total_mau = mau_govt_only_df.select(countDistinct("actor_id").alias("activeCount")).first()["activeCount"]
+            #Redis.update("lp_monthly_active_users", str(total_mau), conf=config)
+            Redis.update("lp_monthly_active_users_updated_format", format_count(total_mau), conf=config)
+
+            # ------------------------------------------------------------------ #
+            # Users logged in yesterday via Druid — same approach as MAU above:
+            # pull distinct actor_ids, then anti-join against volunteerUserIdsDF.
+            # ------------------------------------------------------------------ #
+            user_loggedin_yesterday_query = """SELECT DISTINCT actor_id
+                                               FROM "telemetry-events-syncts"
+                                               WHERE eid IN ('IMPRESSION', 'INTERACT', 'START', 'END')
+                                                 AND actor_type = 'User'
+                                                 AND __time >= TIME_FLOOR(CURRENT_TIMESTAMP + INTERVAL '5:30' HOUR TO MINUTE - INTERVAL '24' HOUR, 'P1D')
+                                                 AND __time <  TIME_FLOOR(CURRENT_TIMESTAMP + INTERVAL '5:30' HOUR TO MINUTE, 'P1D')"""
+
+            user_loggedin_yesterday_df = druidDFOption(
+                user_loggedin_yesterday_query,
+                config.sparkDruidRouterHost,
+                limit=10000000,
+                spark=spark
+            )
+            if user_loggedin_yesterday_df is None:
+                user_loggedin_yesterday_df = spark.createDataFrame(
+                    [], StructType([StructField("actor_id", StringType(), True)])
+                )
+
+            user_loggedin_yesterday_govt_only_df = user_loggedin_yesterday_df.join(
+                volunteerUserIdsDF, ["actor_id"], "left_anti"
+            )
+            user_loggedin_yesterday_count = user_loggedin_yesterday_govt_only_df \
+                .select(countDistinct("actor_id").alias("userLoggedInYesterday")) \
+                .first()["userLoggedInYesterday"]
+            #Redis.update("dashboard_user_loggedin_yesterday_count", str(user_loggedin_yesterday_count), conf=config)
+            Redis.update("dashboard_user_loggedin_yesterday_count_updated_format", format_count(user_loggedin_yesterday_count), conf=config)
+
+            volunteerUserIdsDF.unpersist()
 
             print("[SUCCESS] DSRComputationModel unified metrics updated")
 
@@ -215,6 +376,8 @@ class DSRComputationModel:
 
 
 def main():
+    os.environ[
+        'PYSPARK_SUBMIT_ARGS'] = '--packages com.datastax.spark:spark-cassandra-connector_2.12:3.4.1,org.elasticsearch:elasticsearch-spark-30_2.12:8.11.0,org.postgresql:postgresql:42.6.0 pyspark-shell'
     spark = SparkSession.builder \
         .appName("DSR computation Model") \
         .config("spark.executor.memory", "90g") \

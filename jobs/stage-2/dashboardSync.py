@@ -136,7 +136,7 @@ class DashboardSyncModel:
             #self.update_learner_home_page_data(spark, config)
 
             # ===== PHASE 4: CBP Top 10 Reviews (Scala line 114) =====
-            #self.cbp_top_10_reviews(spark, config)
+            self.cbp_top_10_reviews(spark, config)
             # ===== PHASE 5: Kafka displatches for druid ingest =====
             enrolmentWarehouseComputed = spark.read.parquet(ParquetFileConstants.ENROLMENT_WAREHOUSE_COMPUTED_PARQUET_FILE)
             contentWarehouseComputed = spark.read.parquet(ParquetFileConstants.CONTENT_WAREHOUSE_COMPUTED_PARQUET_FILE)
