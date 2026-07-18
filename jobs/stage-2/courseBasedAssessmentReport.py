@@ -8,7 +8,8 @@ from pyspark.sql import SparkSession
 from pyspark.sql.types import StructType, StructField, StringType, IntegerType, BooleanType, ArrayType
 from pyspark.sql.window import Window
 from pyspark.sql.functions import (col, row_number, countDistinct, current_timestamp, date_format, broadcast,
-                                   unix_timestamp, when, lit, concat_ws, from_unixtime, format_string, expr)
+                                   unix_timestamp, when, lit, concat_ws, from_unixtime, format_string, expr,
+                                   upper, coalesce, concat)
 from datetime import datetime
 from pyspark.sql import functions as F
 import sys
@@ -105,7 +106,7 @@ class CourseBasedAssessmentModel:
 
             allCourseProgramDetailsWithCompDF = assessmentDFUtil.all_course_program_details_with_competencies_json_dataframe(
                 spark.read.parquet(ParquetFileConstants.CONTENT_COMPUTED_PARQUET_FILE) \
-                .filter(col("category").isin(categories)), hierarchyDF, organizationDF, spark)
+                    .filter(col("category").isin(categories)), hierarchyDF, organizationDF, spark)
             print("All Course Program Details with Competencies JSON DataFrame Schema:")
 
             allCourseProgramDetailsDF = allCourseProgramDetailsWithCompDF.drop("competenciesJson")
@@ -125,15 +126,6 @@ class CourseBasedAssessmentModel:
 
             retakesDF = userAssessChildrenDetailsDF.groupBy("assessChildID", "userID").agg(
                 countDistinct("assessStartTime").alias("retakes"))
-
-            # Step 2: Get highest scored entry per (assessChildID, userID) using row_number()
-            #windowSpec = Window.partitionBy("assessChildID", "userID").orderBy(col("assessEndTimestamp").desc())
-            #userAssessChildDataLatestDF = userAssessChildrenDetailsDF\
-            #.join(retakesDF.select("assessChildID","userID","retakes"),["assessChildID","userID"], "left")
-            #userAssessChildDataLatestDF.printSchema()
-            #userAssessChildDataLatestDF.filter(col("userID") == "745f1095-82ff-41f3-9c73-23e07a5e181d") \
-            #.select("userID", "assessPassOriginal", "assessOverallResultOriginal", "assessPassPercentageOriginal") \
-            #.show(truncate=False)
 
             windowSpec = Window.partitionBy("assessChildID", "userID").orderBy(col("assessEndTimestamp").desc())
 
@@ -192,6 +184,7 @@ class CourseBasedAssessmentModel:
                 col("Ministry"),
                 col("Department"),
                 col("Organisation"),
+                col("role").alias("Roles"),  # used only to classify Govt / Non-Govt users, dropped before write
                 col("assessChildName").alias("assessment_name"),
                 col("assessment_type"),
                 col("assessOrgName").alias("assessment_content_provider"),
@@ -221,7 +214,7 @@ class CourseBasedAssessmentModel:
                             when(col("ministry_name").isNull(), col("userOrgName")).otherwise(col("ministry_name"))) \
                 .withColumn("Department", when(
                 (col("Ministry").isNotNull()) & (col("Ministry") != col("userOrgName")) & (
-                            col("dept_name").isNull() | (col("dept_name") == "")),
+                        col("dept_name").isNull() | (col("dept_name") == "")),
                 col("userOrgName")).otherwise(col("dept_name"))) \
                 .withColumn("Organisation",
                             when((col("Ministry") != col("userOrgName")) & (col("Department") != col("userOrgName")),
@@ -245,6 +238,9 @@ class CourseBasedAssessmentModel:
                 col("Ministry"),
                 col("Department"),
                 col("Organisation"),
+                # NOTE: old assessment computed parquet does not carry a "role" field today.
+                # Non-Govt classification for these legacy rows falls back to Designation only.
+                lit(None).cast(StringType()).alias("Roles"),
                 col("source_title").alias("assessment_name"),
                 col("assessment_type"),
                 col("courseOrgID").alias("assessment_content_provider"),
@@ -279,6 +275,7 @@ class CourseBasedAssessmentModel:
                 col("Ministry"),
                 col("Department"),
                 col("Organisation"),
+                col("Roles"),  # used only to classify Govt / Non-Govt users, dropped before write
                 col("Employee_Id"),
                 col("assessment_name").alias("Assessment Name"),
                 col("assessment_type").alias("Assessment Type"),
@@ -297,6 +294,43 @@ class CourseBasedAssessmentModel:
                 col("retakes").alias("No of Retakes"),
                 col("mdoid"),
                 col("Report_Last_Generated_On")
+            )
+
+            # ---- Govt / Non-Govt classification ----
+            # Designation or Roles containing "VOLUNTEER" => Non-Govt user, everything else => Govt user
+            mdoReportDF = mdoReportDF.withColumn(
+                "is_non_govt_user",
+                when(
+                    upper(coalesce(col("Designation"), lit(""))).contains("VOLUNTEER") |
+                    upper(coalesce(col("Roles").cast("string"), lit(""))).contains("VOLUNTEER"),
+                    lit(True)
+                ).otherwise(lit(False))
+            ).cache()
+
+            govt_part_df = mdoReportDF.filter(~col("is_non_govt_user")).drop("is_non_govt_user", "Roles")
+            non_govt_part_df = mdoReportDF.filter(col("is_non_govt_user")).drop("is_non_govt_user", "Roles")
+
+            # Determine, per org, whether it has govt users, non-govt users, or both.
+            govt_org_ids = set(
+                row.mdoid for row in govt_part_df.select("mdoid").distinct().collect() if row.mdoid is not None
+            )
+            non_govt_org_ids = set(
+                row.mdoid for row in non_govt_part_df.select("mdoid").distinct().collect() if row.mdoid is not None
+            )
+            both_org_ids = govt_org_ids & non_govt_org_ids
+
+            print(f"Orgs with only Govt users: {len(govt_org_ids - both_org_ids)}")
+            print(f"Orgs with only Non-Govt users: {len(non_govt_org_ids - both_org_ids)}")
+            print(f"Orgs with BOTH Govt and Non-Govt users (2 reports each): {len(both_org_ids)}")
+
+            # Govt subset keeps mdoid=<org_id>. Non-Govt subset keeps mdoid=<org_id> too,
+            # UNLESS that org also has Govt users, in which case it becomes
+            # mdoid=<org_id>_non_govt so the two reports for that org don't collide.
+            both_org_ids_list = list(both_org_ids)
+            non_govt_part_df = non_govt_part_df.withColumn(
+                "mdoid",
+                when(col("mdoid").isin(both_org_ids_list), concat(col("mdoid"), lit("_non_govt")))
+                .otherwise(col("mdoid"))
             )
 
             finalAssessmentDF = spark.read.parquet(ParquetFileConstants.FINAL_ASSESSMENT_PARQUET_FILE)
@@ -351,9 +385,6 @@ class CourseBasedAssessmentModel:
                 col("data_last_generated_on"))
 
             warehouseDF = warehouseDF.unionByName(finalAssessmentDF)
-            #print("\n[BEFORE JOIN]")
-            #print(f"warehouseDF count: {warehouseDF.count()}")
-            #print(f"warehouseDF distinct content_ids: {warehouseDF.select('content_id').distinct().count()}")
             # request from anshu to replace assesment_type 'Course Assessment' with 'Comprehensive Assessment Progam'
             # when course sub type is 'Comprehensive Assessment Program'
             assessmentMinPassDF = spark.read.parquet(f"{config.baseCachePath}/esCourseAssessment")
@@ -408,11 +439,24 @@ class CourseBasedAssessmentModel:
             w = Window.partitionBy("user_id", "content_id", "assessment_id").orderBy(col("score_achieved").desc(), col("completion_date").desc())
 
             warehouseDF = (warehouseDF.withColumn("rn", row_number().over(w)).filter(col("rn") == 1).drop("rn"))
+
+            cba_out_path = f"{config.localReportDir}/{config.cbaReportPath}/{today}"
+
+            print(f"➡️  Writing GOVT course-based assessment report -> {cba_out_path}")
             dfexportutil.write_csv_per_mdo_id_duckdb(
-                mdoReportDF,
-                f"{config.localReportDir}/{config.cbaReportPath}/{today}",
+                govt_part_df,
+                cba_out_path,
                 'mdoid',
                 f"{config.localReportDir}/temp/cba-report/{today}",
+                csv_filename=config.cbaReport
+            )
+
+            print(f"➡️  Writing NON-GOVT course-based assessment report -> {cba_out_path}")
+            dfexportutil.write_csv_per_mdo_id_duckdb(
+                non_govt_part_df,
+                cba_out_path,
+                'mdoid',
+                f"{config.localReportDir}/temp/cba-report-non-govt/{today}",
                 csv_filename=config.cbaReport
             )
 
@@ -421,6 +465,8 @@ class CourseBasedAssessmentModel:
              .mode("overwrite")
              .option("compression", "snappy")
              .parquet(f"{config.warehouseReportDir}/{config.dwAssessmentTable}"))
+
+            mdoReportDF.unpersist()
 
             total_time = time.time() - start_time
             print(
