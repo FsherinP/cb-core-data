@@ -442,23 +442,34 @@ class CourseBasedAssessmentModel:
 
             cba_out_path = f"{config.localReportDir}/{config.cbaReportPath}/{today}"
 
-            print(f"➡️  Writing GOVT course-based assessment report -> {cba_out_path}")
-            dfexportutil.write_csv_per_mdo_id_duckdb(
-                govt_part_df,
-                cba_out_path,
-                'mdoid',
-                f"{config.localReportDir}/temp/cba-report/{today}",
-                csv_filename=config.cbaReport
-            )
+            # dfexportutil.write_csv_per_mdo_id_duckdb throws a KeyError on
+            # 'successful_conversions' when it's handed a dataframe with zero
+            # orgs/partitions to write (e.g. no Non-Govt/VOLUNTEER users found
+            # in this run at all). Guard each write so an empty subset doesn't
+            # crash the whole job.
+            if govt_org_ids:
+                print(f"➡️  Writing GOVT course-based assessment report -> {cba_out_path}")
+                dfexportutil.write_csv_per_mdo_id_duckdb(
+                    govt_part_df,
+                    cba_out_path,
+                    'mdoid',
+                    f"{config.localReportDir}/temp/cba-report/{today}",
+                    csv_filename=config.cbaReport
+                )
+            else:
+                print("ℹ️  No Govt users found in this run — skipping Govt CSV write.")
 
-            print(f"➡️  Writing NON-GOVT course-based assessment report -> {cba_out_path}")
-            dfexportutil.write_csv_per_mdo_id_duckdb(
-                non_govt_part_df,
-                cba_out_path,
-                'mdoid',
-                f"{config.localReportDir}/temp/cba-report-non-govt/{today}",
-                csv_filename=config.cbaReport
-            )
+            if non_govt_org_ids:
+                print(f"➡️  Writing NON-GOVT course-based assessment report -> {cba_out_path}")
+                dfexportutil.write_csv_per_mdo_id_duckdb(
+                    non_govt_part_df,
+                    cba_out_path,
+                    'mdoid',
+                    f"{config.localReportDir}/temp/cba-report-non-govt/{today}",
+                    csv_filename=config.cbaReport
+                )
+            else:
+                print("ℹ️  No Non-Govt (VOLUNTEER) users found in this run — skipping Non-Govt CSV write.")
 
             (warehouseDF.coalesce(1)
              .write

@@ -494,23 +494,35 @@ class UserEnrolmentModel:
             enrolment_out_path = f"{config.localReportDir}/{config.userEnrolmentReportPath}/{today}"
 
             print("📝 Writing CSV reports...")
-            print(f"➡️  Writing GOVT user enrolment report -> {enrolment_out_path}")
-            dfexportutil.write_csv_per_mdo_id_duckdb(
-                govt_part_df,
-                enrolment_out_path,
-                'mdoid',
-                f"{config.localReportDir}/temp/user_enrolment_report/{today}",
-                csv_filename=config.userEnrollmentReport
-            )
 
-            print(f"➡️  Writing NON-GOVT user enrolment report -> {enrolment_out_path}")
-            dfexportutil.write_csv_per_mdo_id_duckdb(
-                non_govt_part_df,
-                enrolment_out_path,
-                'mdoid',
-                f"{config.localReportDir}/temp/user_enrolment_report_non_govt/{today}",
-                csv_filename=config.userEnrollmentReport
-            )
+            # dfexportutil.write_csv_per_mdo_id_duckdb throws a KeyError on
+            # 'successful_conversions' when it's handed a dataframe with zero
+            # orgs/partitions to write (e.g. no Non-Govt/VOLUNTEER users found
+            # in this run at all). Guard each write so an empty subset doesn't
+            # crash the whole job.
+            if govt_org_ids:
+                print(f"➡️  Writing GOVT user enrolment report -> {enrolment_out_path}")
+                dfexportutil.write_csv_per_mdo_id_duckdb(
+                    govt_part_df,
+                    enrolment_out_path,
+                    'mdoid',
+                    f"{config.localReportDir}/temp/user_enrolment_report/{today}",
+                    csv_filename=config.userEnrollmentReport
+                )
+            else:
+                print("ℹ️  No Govt users found in this run — skipping Govt CSV write.")
+
+            if non_govt_org_ids:
+                print(f"➡️  Writing NON-GOVT user enrolment report -> {enrolment_out_path}")
+                dfexportutil.write_csv_per_mdo_id_duckdb(
+                    non_govt_part_df,
+                    enrolment_out_path,
+                    'mdoid',
+                    f"{config.localReportDir}/temp/user_enrolment_report_non_govt/{today}",
+                    csv_filename=config.userEnrollmentReport
+                )
+            else:
+                print("ℹ️  No Non-Govt (VOLUNTEER) users found in this run — skipping Non-Govt CSV write.")
 
             print("📦 Writing warehouse data...")
             warehouseDF = platformWarehouseDF.unionByName(marketPlaceWarehouseDF)
