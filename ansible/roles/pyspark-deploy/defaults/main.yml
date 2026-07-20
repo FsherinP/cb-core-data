@@ -159,7 +159,6 @@ courseCategoriesToSelect: ['Course', 'Moderated Course', 'Invite-Only Program', 
 'apiBasedNotificationEnabled': True
 'notificationBatchSize': 100
 'bharat_kalp_event_tags': ['Bharat Kalp - Talks', 'Bharat Kalp - Podcast']
-'bharatKalpCoursesApiUrl' : 'https://portal.igotkarmayogi.gov.in/apis/static/form/v1/read'
 
 bq_script_path: /home/analytics/pyspark/bq-scripts.sh
 es_form_data_ids: "{{ es_form_data_ids }}"
