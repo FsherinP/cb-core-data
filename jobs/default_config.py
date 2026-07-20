@@ -246,10 +246,10 @@ DEFAULT_CONFIG = {
     'peerValidationFormIndex': 'fs-forms-alias-v2',
 
     # Course category configuration
-    'courseCategoriesToSelect': ['Course', 'Moderated Course', 'Invite-Only Program', 'Moderated Program', 'Blended Program', 'Curated Program', 'Standalone Assessment', 'Moderated Assessment', 'Invite-Only Assessment', 'External Redirect', 'Case Study', 'Comprehensive Assessment Program', 'Multilingual Course', 'Pre Enrolment Assessment', 'Learning Pathway'],
+    'courseCategoriesToSelect': ["Course", "Moderated Course", "Invite-Only Program", "Moderated Program", "Blended Program", "Curated Program", "Standalone Assessment", "Moderated Assessment", "Invite-Only Assessment", "External Redirect", "Case Study", "Comprehensive Assessment Program", "Multilingual Course", "Pre Enrolment Assessment", "Learning Pathway"],
 
     # Bharat Kalp Configuration
-    'bharat_kalp_event_tags': ['Bharat Kalp - Talks', 'Bharat Kalp - Podcast'],
+    'bharat_kalp_event_tags': ["Bharat Kalp - Talks", "Bharat Kalp - Podcast"],
     'bharatKalpCoursesApiUrl' : "https://portal.dev.karmayogibharat.net/apis/static/form/v1/read"
 
 }
