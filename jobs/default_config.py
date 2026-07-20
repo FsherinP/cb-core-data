@@ -83,7 +83,7 @@ DEFAULT_CONFIG = {
     'dwAparCBPEnrollmentTable': 'apar_cbp_enrollment',
     'dwCourseCompletionSurveryTable': 'course_completion_survey_details',
     'dwBharatKalpCoursesTable': 'bk_course_enrolments',
-    'dwBharatkalpEventsTable': 'bk_event_enrolments',
+    'dwBharatKalpEventsTable': 'bk_event_enrolments',
     'dwpeerValidationNotificationQueue': 'peer_validation_notification_queue',
     'dwpeerValidationFormStateTable': 'peer_validation_form_state',
 
