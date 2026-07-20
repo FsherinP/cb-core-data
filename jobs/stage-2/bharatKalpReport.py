@@ -72,25 +72,22 @@ class BharatKalpReport:
         except ValueError as e:
             raise RuntimeError(f"Bharat Kalp Courses API did not return valid JSON : {e}") from e
 
-    def read_bharat_kalp_courses(self):
-        api_response = self.fetch_bharat_kalp_courses()
-
-        weeks = (
-        api_response.get("result", {})
-                    .get("form", {})
-                    .get("data", {})
-                    .get("individualSection", {})
-                    .get("weekProgress", {})
-                    .get("Weeks", [])
+    def read_bharat_kalp_courses(self, api_response):
+        week = (
+            api_response.get("result", {})
+                        .get("form", {})
+                        .get("data", {})
+                        .get("individualSection", {})
+                        .get("weekProgress", {})
+                        .get("weeks", [])
         )
 
         rows = []
-        for week in weeks:
-            for tab in week.get("tabs", []):
-                content_ids = tab.get("content_ids", {})
-                for content_type in ("course", "program", "event", "assessment"):
-                    for content_id in content_ids.get(content_type, []):
-                        rows.append(Row(content_id=content_id, content_type=content_type))
+        for tab in week.get("tabs", []):
+            content_ids = tab.get("content_ids", {})
+            for content_type in ("course", "program"):
+                for content_id in content_ids.get(content_type, []):
+                    rows.append(Row(content_id=content_id, content_type=content_type))
 
         schema = StructType([
             StructField("content_id", StringType(), True),
@@ -100,6 +97,31 @@ class BharatKalpReport:
         df = self.spark.createDataFrame(rows, schema=schema).distinct()
         if df.limit(1).count() == 0:
             raise ValueError("No Bharat Kalp Courses found in the provided path. Please check the configuration.")
+        return df
+    
+    def read_bharat_kalp_events(self, api_response):
+        resource_types = (
+            api_response.get("result", {})
+                        .get("form", {})
+                        .get("data", {})
+                        .get("individualSection", {})
+                        .get("events", {})
+                        .get("eventsApiConfig", {})
+                        .get("requestBody", {})
+                        .get("request", {})
+                        .get("filters", {})
+                        .get("resourceType", [])
+        )
+
+        rows = [Row(event_tag=event_tag) for event_tag in resource_types]
+
+        schema = StructType([
+            StructField("event_tag", StringType(), True)
+        ])
+
+        df = self.spark.createDataFrame(rows, schema=schema).distinct()
+        if df.limit(1).count() == 0:
+            raise ValueError("No Bharat Kalp Event tags found in the provided path. Please check the configuration.")
         return df
     
     def read_warehouse_data(self, table_name):
@@ -118,9 +140,13 @@ class BharatKalpReport:
     def process_data(self):
         currentDateTime = date_format(current_timestamp(), ParquetFileConstants.DATE_TIME_WITH_AMPM_FORMAT)
         print("Step 1: Loading Data ")
-        bharatKalpCoursesDF = self.read_bharat_kalp_courses()
+        api_response = self.fetch_bharat_kalp_courses()
+        bharatKalpCoursesDF = self.read_bharat_kalp_courses(api_response)
+        bharatKalpEventTagsDF = self.read_bharat_kalp_events(api_response)
+        event_tags = [row.event_tag for row in bharatKalpEventTagsDF.collect()]
+
         enrolmentDF = self.read_warehouse_data(self.config.dwEnrollmentsTable)
-        eventsDF = self.read_warehouse_data("event_details").filter(col("event_tag").isin(self.config.bharat_kalp_event_tags))
+        eventsDF = self.read_warehouse_data("event_details").filter(col("event_tag").isin(event_tags))
         eventEnrolmentsDF = self.read_warehouse_data("event_enrolment_details")
         userDF = self.spark.read.parquet(ParquetFileConstants.USER_COMPUTED_PARQUET_FILE).filter(col("isBharatKalpMember") == True).select(col("userID").alias("user_id")).distinct()
         print("Step 1: Complete")
