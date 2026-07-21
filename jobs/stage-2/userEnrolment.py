@@ -393,7 +393,7 @@ class UserEnrolmentModel:
                 col("courseID"),
                 col("is_enrolled"),
                 col("enrolment_status"),
-                col("unenrolled_on"),
+                when(col("enrolment_status") == "unenrolled", col("unenrolled_on")).otherwise(None).alias("unenrolled_on"),
                 col("role").alias("Roles")  # used only to classify Govt / Non-Govt users, dropped before write
             )
                                  .dropDuplicates(["userID", "Batch_Id", "courseID"])
