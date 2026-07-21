@@ -222,7 +222,8 @@ class UserEnrolmentModel:
                              col("userOrgName"))
                         .otherwise(lit("")))
             .filter(col("userStatus").cast("int") == 1)
-            .withColumn("enrolment_status",
+            .withColumn("enrolment_status", lit("enrolled"))
+            .withColumn("is_enrolled",
                         when(col("dbCompletionStatus").isNull(), "unenrolled")
                         .otherwise("enrolled"))
             .withColumn("unenrolled_on", lit(None).cast(StringType()))
@@ -271,6 +272,7 @@ class UserEnrolmentModel:
                 col("certificateID").alias("Certificate_ID"),
                 col("Report_Last_Generated_On"),
                 col("live_cbp_plan_mandate").alias("Live_CBP_Plan_Mandate"),
+                col("is_enrolled"),
                 col("enrolment_status"),
                 col("unenrolled_on"),
                 col("role").alias("Roles")  # used only to classify Govt / Non-Govt users, dropped before write
@@ -291,6 +293,7 @@ class UserEnrolmentModel:
                                                       ParquetFileConstants.DATE_TIME_FORMAT
                                                   ))
                                       .withColumn("data_last_generated_on", currentDateTime)
+                                      .withColumn("enrolment_status", lit("enrolled"))
                                       .withColumn("firstCompletedOn", date_format(col("firstCompletedOn"),
                                                                                   ParquetFileConstants.DATE_TIME_FORMAT))
                                       .select(
@@ -305,6 +308,7 @@ class UserEnrolmentModel:
                 .when(col("dbCompletionStatus") == 1, "in-progress")
                 .otherwise("completed")
                 .alias("user_consumption_status"),
+                col("enrolment_status"),
                 col("firstCompletedOn").alias("first_completed_on"),
                 col("firstCompletedOn").alias("first_certificate_generated_on"),
                 col("courseCompletedTimestamp").alias("last_completed_on"),
@@ -339,7 +343,7 @@ class UserEnrolmentModel:
                                                   col("userOrgName"))
                                              .otherwise(lit("")))
                                  .filter(col("userStatus").cast("int") == 1)
-                                 .withColumn("enrolment_status",
+                                 .withColumn("is_enrolled",
                                              when((col("userCourseCompletionStatus").isNull()) |
                                                   (col("userCourseCompletionStatus") == "not-enrolled"),
                                                   "unenrolled")
@@ -387,6 +391,7 @@ class UserEnrolmentModel:
                 col("live_cbp_plan_mandate").alias("Live_CBP_Plan_Mandate"),
                 col("userID"),
                 col("courseID"),
+                col("is_enrolled"),
                 col("enrolment_status"),
                 col("unenrolled_on"),
                 col("role").alias("Roles")  # used only to classify Govt / Non-Govt users, dropped before write
@@ -417,6 +422,7 @@ class UserEnrolmentModel:
                 col("completionPercentage").alias("content_progress_percentage"),
                 col("courseProgress").alias("resource_count_consumed"),
                 col("userCourseCompletionStatus").alias("user_consumption_status"),
+                col("enrolment_status"),
                 col("firstCompletedOn").alias("first_completed_on"),
                 col("firstCompletedOn").alias("first_certificate_generated_on"),
                 col("completedOn").alias("last_completed_on"),
