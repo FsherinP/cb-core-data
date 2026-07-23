@@ -8,7 +8,7 @@ from pyspark.sql import SparkSession
 from pyspark.sql.types import StructType, StructField, StringType, IntegerType, BooleanType, ArrayType,FloatType
 from pyspark.sql.functions import (col, lower, when, lit, expr, concat_ws, explode_outer, from_json, to_date,
                                    current_timestamp, date_format, round, coalesce, broadcast, size, map_keys,
-                                   map_values,format_string)
+                                   map_values, format_string, regexp_extract)
 from pyspark.sql.functions import col, expr
 from pyspark.sql import Column, DataFrame, Row, SparkSession
 
@@ -50,6 +50,27 @@ class BlendedModel:
                     expr(f"{in_col} / 3600").cast("int"),
                     expr(f"{in_col} % 3600 / 60").cast("int"),
                     expr(f"{in_col} % 60").cast("int")
+                )
+            )
+        )
+
+    @staticmethod
+    def duration_format_from_string(df, in_col, out_col=None):
+        out_col_name = out_col if out_col is not None else in_col
+
+        hours = coalesce(regexp_extract(col(in_col), r'(\d+)\s*hr', 1).cast("int"),lit(0))
+        minutes = coalesce(regexp_extract(col(in_col), r'(\d+)\s*min', 1).cast("int"),lit(0))
+        seconds = coalesce(regexp_extract(col(in_col), r'(\d+)\s*sec', 1).cast("int"),lit(0))
+
+        return df.withColumn(
+            out_col_name,
+            when(col(in_col).isNull(), lit(""))
+            .otherwise(
+                format_string(
+                    "%02d:%02d:%02d",
+                    hours,
+                    minutes,
+                    seconds
                 )
             )
         )
@@ -226,7 +247,8 @@ class BlendedModel:
                 .cache()
 
             # Apply duration formatting
-            fullDF = self.duration_format(fullDF, "bpChildDuration").distinct()
+            #fullDF = self.duration_format(fullDF, "bpChildDuration").distinct()
+            fullDF = self.duration_format_from_string(fullDF,"bpBatchSessionDuration").distinct()
             bpChildrenWithProgress.unpersist(blocking=True)
             fullReportDF = fullDF \
                 .filter(col("userStatus").cast("int") == 1) \
