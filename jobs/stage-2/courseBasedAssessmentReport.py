@@ -142,8 +142,8 @@ class CourseBasedAssessmentModel:
                             when(col("assessPassPercentage").isNotNull(), col("assessPassPercentage")).otherwise(
                                 lit("Need to pass in all sections"))) \
                 .withColumn("assessment_type",
-                            when(col("assessCategory") == "Standalone Assessment", col("assessCategory")).
-                            when(col("assessPrimaryCategory").isNotNull(), col("assessPrimaryCategory")).otherwise(
+                            when(col("assessPrimaryCategory").isNotNull(), col("assessPrimaryCategory")).
+                            when(col("assessCategory") == "Standalone Assessment", col("assessCategory")).otherwise(
                                 lit(""))) \
                 .withColumn("assessment_course_name",
                             when(col("assessment_type") == "Course Assessment", col("assessName")).otherwise(lit(""))) \
