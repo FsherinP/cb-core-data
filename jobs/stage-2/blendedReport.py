@@ -274,7 +274,7 @@ class BlendedModel:
                     col("bpChildCategory").alias("Component_Type"),
                     col("bpChildMode").alias("Component_Mode"),
                     col("bpChildUserStatus").alias("Status"),
-                    col("bpChildDuration").alias("Component_Duration"),
+                    col("bpBatchSessionDuration").alias("Component_Duration"),
                     col("bpChildProgressPercentage").alias("Component_Progress_Percentage"),
                     col("bpChildCompletedOn").alias("Component_Completed_On"),
                     col("bpChildLastAccessedOn").alias("Last_Accessed_On"),
