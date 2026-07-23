@@ -380,7 +380,7 @@ class BlendedModel:
                     col("bpChildCategory").alias("component_type"),
                     col("bpChildBatchSessionType").alias("component_mode"),
                     col("bpChildUserStatus").alias("component_status"),
-                    col("bpChildDuration").alias("component_duration"),
+                    col("bpBatchSessionDuration").alias("component_duration"),
                     col("bpChildProgressPercentage").alias("component_progress_percentage"),
                     col("bpChildCompletedOn").alias("component_completed_on"),
                     col("bpChildLastAccessedOn").alias("last_accessed_on"),
@@ -508,6 +508,7 @@ def bpBatchDataframe(spark):
         .withColumn("bpBatchSessionStartDate", col("bpBatchSessionDetails.startDate")) \
         .withColumn("bpBatchSessionStartTime", col("bpBatchSessionDetails.startTime")) \
         .withColumn("bpBatchSessionEndTime", col("bpBatchSessionDetails.endTime")) \
+        .withColumn("bpBatchSessionDuration", col("bpBatchSessionDetails.sessionDuration")) \
         .drop("bpBatchAttrs", "bpBatchSessionDetails")
     
     # Remove bpBatchAttrs from the main BP batch DataFrame
