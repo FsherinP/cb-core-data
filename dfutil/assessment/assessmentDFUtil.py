@@ -277,9 +277,31 @@ def assessment_children_dataframe(assess_with_hierarchy_df: DataFrame) -> DataFr
         # print(f"📊 Input DataFrame rows: {input_count:,}")
 
         print("🔄 Exploding children array...")
-        exploded_df = assess_with_hierarchy_df.select(
-            col("assessID"), explode_outer(col("children")).alias("ch")
-        )
+        exploded_df = assess_with_hierarchy_df.select(col("assessID"), explode_outer(col("children")).alias("ch"))
+
+        child_df = exploded_df.filter(col("ch").isNotNull()).select(
+            col("assessID"),
+            col("ch.identifier").alias("assessChildID"),
+            col("ch.name").alias("assessChildName"),
+            col("ch.duration").cast(FloatType()).alias("assessChildDuration"),
+            col("ch.primaryCategory").alias("assessChildPrimaryCategory"),
+            col("ch.contentType").alias("assessChildContentType"),
+            col("ch.objectType").alias("assessChildObjectType"),
+            col("ch.showTimer").alias("assessChildShowTimer"),
+            col("ch.allowSkip").alias("assessChildAllowSkip"))
+
+        self_df = assess_with_hierarchy_df.select(
+            col("assessID"),
+            col("assessID").alias("assessChildID"),
+            col("assessName").alias("assessChildName"),
+            col("assessDuration").alias("assessChildDuration"),
+            col("assessCategory").alias("assessChildPrimaryCategory"),
+            col("assessContentType").alias("assessChildContentType"),
+            col("assessObjectType").alias("assessChildObjectType"),
+            lit(None).cast("string").alias("assessChildShowTimer"),
+            lit(None).cast("string").alias("assessChildAllowSkip"))
+
+        df = child_df.unionByName(self_df).dropDuplicates(["assessID", "assessChildID"])
         # exploded_count = exploded_df.count()
         # print(f"✅ After exploding children - Rows: {exploded_count:,}")
 
