@@ -34,7 +34,7 @@ from pyspark.sql.functions import (
     col, when, expr, collect_list, concat_ws, concat, lit, struct, to_json,
     row_number, window, desc, coalesce, countDistinct, first, last,
     avg, round as spark_round, element_at, size, bround, date_trunc,
-    date_sub, split, from_json, schema_of_json, lower
+    date_sub, split, from_json, schema_of_json, lower, to_date, current_date
 )
 from pyspark.sql.functions import col, desc
 from pyspark.sql.window import Window
@@ -134,6 +134,7 @@ class DashboardSyncModel:
 
             # ===== PHASE 3: Learner Home Page Data (Scala line 108) =====
             #self.update_learner_home_page_data(spark, config)
+            self.process_trending(spark, config)
 
             # ===== PHASE 4: CBP Top 10 Reviews (Scala line 114) =====
             self.cbp_top_10_reviews(spark, config)
@@ -1370,7 +1371,7 @@ class DashboardSyncModel:
 
         try:
             # Load warehouse tables and create joined data
-            user_warehouse_df = spark.read.parquet(ParquetFileConstants.USER_WAREHOUSE_COMPUTED_PARQUET_FILE)
+            #user_warehouse_df = spark.read.parquet(ParquetFileConstants.USER_WAREHOUSE_COMPUTED_PARQUET_FILE)
             enrolment_warehouse_df = spark.read.parquet(ParquetFileConstants.ENROLMENT_WAREHOUSE_COMPUTED_PARQUET_FILE)
             content_warehouse_df = spark.read.parquet(ParquetFileConstants.CONTENT_WAREHOUSE_COMPUTED_PARQUET_FILE)
 
@@ -1382,17 +1383,21 @@ class DashboardSyncModel:
                 enrolment_warehouse_df.content_id.alias("courseID"),
                 enrolment_warehouse_df.user_consumption_status,
                 content_warehouse_df.content_status.alias("courseStatus"),
-                content_warehouse_df.content_type.alias("category")
+                content_warehouse_df.content_type.alias("category"),
+                "enrolled_on"
             )
 
             # Trending courses (Scala lines 1229-1238)
-            trending_courses = enrolment_df.filter(
-                col("courseStatus") == "Live"
-            ).filter(
-                col("category") == "Course"
-            ).groupBy("courseID") \
-                .agg(F.count("*").alias("enrollmentCount")) \
-                .orderBy(desc("enrollmentCount"))
+            trending_courses = (enrolment_df
+                                .withColumn("enrolled_on", to_date(col("enrolled_on"), "yyyy-MM-dd"))
+                                .filter((col("enrolled_on") >= date_sub(current_date(), 7)) &
+                                        (col("enrolled_on") <= date_sub(current_date(), 1)))
+                                .filter(col("courseStatus") == "Live")
+                                .filter(col("category") == "Course")
+                                .groupBy("courseID")
+                                .agg(F.count("*").alias("enrollmentCount"))
+                                .orderBy(desc("enrollmentCount"))
+                                )
 
             total_course_count = trending_courses.count()
             course_limit_count = int(total_course_count * 0.10)
@@ -1405,7 +1410,26 @@ class DashboardSyncModel:
                                           .agg(concat_ws(",", collect_list("courseID"))).first()[0] or ""
             print(hardcode_trending_courses)
             print(hardcoded_course_ids)
-            # Trending programs (Scala lines 1240-1249)
+
+            # Trending courses by org (Scala lines 1251-1265)
+            trending_courses_org_df = self.duckdb_executor.execute_query(
+                spark, "trending_courses_org", QueryConstants.TRENDING_COURSES_BY_ORG
+            )
+            if trending_courses_org_df and trending_courses_org_df.count() > 0:
+                print(f"📝 Redis Map Key: lhp_trending (courses by org)")
+                print(f"   DataFrame (first 5 rows):")
+                trending_courses_org_df.show(5, truncate=False)
+
+            # Most enrolled tag (Scala lines 1283-1284)
+            most_enrolled_tag = trending_course_ids
+
+            # Update Redis (Scala lines 1286-1291)
+            Redis.updateMapField('lhp_trending', 'across:courses', trending_course_ids, conf=config)
+            Redis.update("lhp_mostEnrolledTag", most_enrolled_tag, conf=config)
+
+
+            # Trending programs (Scala lines 1240-1249) - Commenting out the Trending Programs section because the new UI/UX implementation considers only context_type = Course.
+            """
             trending_programs = enrolment_df.filter(
                 col("courseStatus") == "Live"
             ).filter(
@@ -1420,15 +1444,6 @@ class DashboardSyncModel:
             trending_program_ids = trending_programs.limit(program_limit_count) \
                                        .agg(concat_ws(",", collect_list("courseID"))).first()[0] or ""
 
-            # Trending courses by org (Scala lines 1251-1265)
-            trending_courses_org_df = self.duckdb_executor.execute_query(
-                spark, "trending_courses_org", QueryConstants.TRENDING_COURSES_BY_ORG
-            )
-            if trending_courses_org_df and trending_courses_org_df.count() > 0:
-                print(f"📝 Redis Map Key: lhp_trending (courses by org)")
-                print(f"   DataFrame (first 5 rows):")
-                trending_courses_org_df.show(5, truncate=False)
-
             # Trending programs by org (Scala lines 1267-1281)
             trending_programs_org_df = self.duckdb_executor.execute_query(
                 spark, "trending_programs_org", QueryConstants.TRENDING_PROGRAMS_BY_ORG
@@ -1437,20 +1452,9 @@ class DashboardSyncModel:
                 print(f"📝 Redis Map Key: lhp_trending (programs by org)")
                 print(f"   DataFrame (first 5 rows):")
                 trending_programs_org_df.show(5, truncate=False)
-
-            # Most enrolled tag (Scala lines 1283-1284)
-            most_enrolled_tag = trending_course_ids
-
-            # Update Redis (Scala lines 1286-1291)
-            print("===================================")
-            print(trending_course_ids)
-            Redis.updateMapField('lhp_trending', 'across:courses', trending_course_ids, conf=config)
-            Redis.updateMapField('lhp_trending', 'across:programs', trending_program_ids, conf=config)
-            Redis.update("lhp_mostEnrolledTag", most_enrolled_tag, conf=config)
-            #print(f"📝 Redis.updateMapField('lhp_trending', 'across:courses', '{trending_course_ids[:200]}...')")
-            #print(f"📝 Redis.updateMapField('lhp_trending', 'across:programs', '{trending_program_ids[:200]}...')")
-            #print(f"📝 Redis Key: lhp_mostEnrolledTag, Value: {most_enrolled_tag[:200]}...")
-
+            
+            #Redis.updateMapField('lhp_trending', 'across:programs', trending_program_ids, conf=config)
+            """
             print("✅ Trending calculations completed")
 
         except Exception as e:
