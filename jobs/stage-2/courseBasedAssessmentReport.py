@@ -149,8 +149,7 @@ class CourseBasedAssessmentModel:
                             when(col("assessment_type") == "Course Assessment", col("assessName")).otherwise(lit(""))) \
                 .withColumn("Total_Score_Calculated",
                             when(col("assessMaxQuestions").isNotNull(), col("assessMaxQuestions") * 1)) \
-                .withColumn("course_id",
-                            when(col("assessCategory") == "Standalone Assessment", lit("")).otherwise(col("assessID"))) \
+                .withColumn("course_id",lit(col("assessID"))) \
                 .withColumn("Tags", concat_ws(", ", col("tag")))
 
             finalFormattedDF = self.duration_format(finalDF, "assessExpectedDuration") \
