@@ -5,10 +5,8 @@ import os
 import time
 from pathlib import Path
 from pyspark.sql import SparkSession
-from pyspark.sql.types import StructType, MapType, StructField, StringType, IntegerType, FloatType, BooleanType, ArrayType
-from pyspark.sql.window import Window
-from pyspark.sql.functions import (col, row_number, struct, lit, to_json, countDistinct, current_timestamp, current_date, date_format, broadcast, desc, unix_timestamp, when, lit, concat_ws, from_unixtime, format_string, expr)
-from datetime import datetime
+from pyspark.sql.types import StructField, StringType, IntegerType, FloatType
+from pyspark.sql.functions import (col, struct, current_timestamp, when, lit, round)
 import sys
 from datetime import datetime, timedelta
 from zoneinfo import ZoneInfo
@@ -19,9 +17,6 @@ sys.path.append(str(Path(__file__).resolve().parents[2]))
 
 # Reusable imports from userReport structure
 from constants.ParquetFileConstants import ParquetFileConstants
-from dfutil.assessment import assessmentDFUtil
-from dfutil.content import contentDFUtil
-from dfutil.dfexport import dfexportutil
 from dfutil.utils import utils
 from jobs.default_config import create_config
 from jobs.config import get_environment_config
@@ -50,10 +45,9 @@ class WeeklyClapsModel:
         query = f"""SELECT uid AS userid, SUM(total_time_spent) / 60.0 AS platformEngagementTime, 
                    COUNT(*) AS sessionCount FROM "summary-events" WHERE dimensions_type = 'app' 
                    AND __time >= TIMESTAMP '{week_start}' AND __time <= TIMESTAMP '{week_end}' 
-                   AND uid IS NOT NULL GROUP BY 1"""
+                   AND uid IS NOT NULL AND REGEXP_LIKE(uid, '^[0-9a-fA-F]{{8}}-[0-9a-fA-F]{{4}}-[0-9a-fA-F]{{4}}-[0-9a-fA-F]{{4}}-[0-9a-fA-F]{{12}}')  GROUP BY 1"""
         print(query)
         df = utils.druidDFOption(query, config.sparkDruidRouterHost, limit=1000000, spark=spark)
-        #df.filter(col("userid") == '765232d9-bccf-41c6-b8e9-8ac837e35af8').show()
         if df is None:
             print("Druid returned empty data, returning empty DataFrame with expected schema.")
             return spark.createDataFrame([], self.get_users_platform_engagement_schema())
@@ -85,7 +79,8 @@ class WeeklyClapsModel:
             app_postgres_url = f"jdbc:postgresql://{config.appPostgresHost}/{config.appPostgresSchema}"
 
             existing_weekly_claps_df = spark.read.parquet(ParquetFileConstants.CLAPS_PARQUET_FILE)
-            platform_engagement_df = self.users_platform_engagement_dataframe(weekStart, weekEndTime, spark, config)
+            platform_engagement_df = (self.users_platform_engagement_dataframe(weekStart, weekEndTime, spark, config)
+                                      .withColumn("platformEngagementTime", round(col("platformEngagementTime"))))
 
             joined_df = existing_weekly_claps_df.join(platform_engagement_df, ["userid"], "full_outer")
 
@@ -110,18 +105,6 @@ class WeeklyClapsModel:
             # CASE WHEN throws a DATATYPE_MISMATCH error since both branches
             # of a when/otherwise must resolve to the same type.
             default_week_json = lit('{"timespent":0.0,"numberOfSessions":0}')
-
-            joined_df = joined_df \
-                .withColumn("w1", when(col("w1").isNull(), default_week_json).otherwise(col("w1"))) \
-                .withColumn("w2", when(col("w2").isNull(), default_week_json).otherwise(col("w2"))) \
-                .withColumn("w3", when(col("w3").isNull(), default_week_json).otherwise(col("w3"))) \
-                .withColumn("total_claps", when(col("total_claps").isNull(), lit(0).cast("long")).otherwise(col("total_claps"))) \
-                .withColumn("claps_updated_this_week",
-                            when(col("claps_updated_this_week").isNull(), lit(False)).otherwise(col("claps_updated_this_week"))) \
-                .withColumn("last_claps_updated_on",
-                            when(col("last_claps_updated_on").isNull(), current_timestamp()).otherwise(col("last_claps_updated_on"))) \
-                .withColumn("last_updated_on",
-                            when(col("last_updated_on").isNull(), lit(dataTillDate)).otherwise(col("last_updated_on")))
 
             joined_df = joined_df.withColumn("w4", struct(
                 when(col("platformEngagementTime").isNull(), lit(0.0)).otherwise(col("platformEngagementTime")).alias(
@@ -165,11 +148,15 @@ class WeeklyClapsModel:
             # safety net since nulls are handled above, but left in place
             # so existing behavior/structure is not touched) ===
             df = df.withColumn("total_claps", when(col("total_claps").isNull(), 0).otherwise(col("total_claps"))) \
-                .withColumn("claps_updated_this_week",
-                            when(col("claps_updated_this_week").isNull(), False).otherwise(
-                                col("claps_updated_this_week"))) \
-                .withColumn("last_claps_updated_on",
-                            when(condition, current_timestamp()).otherwise(col("last_claps_updated_on")))
+                .withColumn("claps_updated_this_week",when(col("claps_updated_this_week").isNull(), False)
+                            .otherwise(col("claps_updated_this_week"))) \
+                .withColumn("last_claps_updated_on",when(col("last_claps_updated_on").isNull() | condition,current_timestamp())
+                            .otherwise(col("last_claps_updated_on"))) \
+                .withColumn("last_updated_on",when(col("last_updated_on").isNull(), lit(dataTillDate))
+                            .otherwise(col("last_updated_on"))) \
+                .withColumn("w1", when(col("w1").isNull(), default_week_json).otherwise(col("w1"))) \
+                .withColumn("w2", when(col("w2").isNull(), default_week_json).otherwise(col("w2"))) \
+                .withColumn("w3", when(col("w3").isNull(), default_week_json).otherwise(col("w3")))
 
             df = df.drop("platformEngagementTime", "sessionCount")
 
