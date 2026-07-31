@@ -67,9 +67,7 @@ def processUserReport(config):
         print("📖 Step 3: Loading Content Duration Data...")
         content_duration_df = (
             spark.read.parquet(ParquetFileConstants.CONTENT_COMPUTED_PARQUET_FILE)
-            .filter((col("courseCategory").isin("Course", "Pre Enrolment Assessment", "Moderated Course",
-                                                "Moderated Assessment", "Invite-Only Assessment", "Standalone Assessment",
-                                                "Multilingual Course", "Blended Program", "Comprehensive Assessment Program")))
+            .filter((col("courseCategory") == "Course"))
             .select(
                 col("courseID").alias("content_id"),
                 col("courseDuration").cast("double"),
