@@ -133,7 +133,7 @@ class DashboardSyncModel:
             self.dashboardRedisUpdates(spark, config)
 
             # ===== PHASE 3: Learner Home Page Data (Scala line 108) =====
-            #self.update_learner_home_page_data(spark, config)
+            self.update_learner_home_page_data(spark, config)
 
             # ===== PHASE 4: CBP Top 10 Reviews (Scala line 114) =====
             self.cbp_top_10_reviews(spark, config)
@@ -142,7 +142,7 @@ class DashboardSyncModel:
             contentWarehouseComputed = spark.read.parquet(ParquetFileConstants.CONTENT_WAREHOUSE_COMPUTED_PARQUET_FILE)
             #userDF = spark.read.parquet(ParquetFileConstants.USER_SELECT_PARQUET_FILE)
             #orgDF = spark.read.parquet(ParquetFileConstants.ORG_SELECT_PARQUET_FILE)
-           # STEP 1: Select only needed columns from each DF to reduce size
+            # STEP 1: Select only needed columns from each DF to reduce size
             enrolment_slim = enrolmentWarehouseComputed.select(
                 col("userID"),
                 col("content_id"),
@@ -162,29 +162,29 @@ class DashboardSyncModel:
 
                 # Timestamps -> 10-digit epoch (seconds)
                 unix_timestamp(col("first_completed_on"), "yyyy-MM-dd HH:mm:ss")
-                    .cast(LongType())
-                    .alias("courseCompletedTimestamp"),
+                .cast(LongType())
+                .alias("courseCompletedTimestamp"),
                 unix_timestamp(col("enrolled_on"), "yyyy-MM-dd HH:mm:ss")
-                    .cast(LongType())
-                    .alias("courseEnrolledTimestamp"),
+                .cast(LongType())
+                .alias("courseEnrolledTimestamp"),
                 unix_timestamp(col("first_completed_on"), "yyyy-MM-dd HH:mm:ss")
-                    .cast(LongType())
-                    .alias("lastContentAccessTimestamp"),
+                .cast(LongType())
+                .alias("lastContentAccessTimestamp"),
 
                 # Progress mapping (0/1/2)
                 when(col("user_consumption_status") == "enrolled", 0)
-                    .when(col("user_consumption_status").contains("progress"), 1)
-                    .when(col("user_consumption_status") == "completed", 2)
-                    .otherwise(0)
-                    .cast(LongType())
-                    .alias("courseProgress"),
+                .when(col("user_consumption_status").contains("progress"), 1)
+                .when(col("user_consumption_status") == "completed", 2)
+                .otherwise(0)
+                .cast(LongType())
+                .alias("courseProgress"),
 
                 when(col("user_consumption_status") == "enrolled", 0)
-                    .when(col("user_consumption_status").contains("progress"), 1)
-                    .when(col("user_consumption_status") == "completed", 2)
-                    .otherwise(0)
-                    .cast(LongType())
-                    .alias("dbCompletionStatus"),
+                .when(col("user_consumption_status").contains("progress"), 1)
+                .when(col("user_consumption_status") == "completed", 2)
+                .otherwise(0)
+                .cast(LongType())
+                .alias("dbCompletionStatus"),
 
                 # Placeholders for content fields (to be filled by join with content DF)
                 lit(None).cast("string").alias("category"),
@@ -208,11 +208,11 @@ class DashboardSyncModel:
 
                 # Completion metrics
                 col("content_progress_percentage")
-                    .cast(FloatType())
-                    .alias("completionPercentage"),
+                .cast(FloatType())
+                .alias("completionPercentage"),
                 col("user_consumption_status").alias("completionStatus"),
+                )
             )
-        )
             # Final checkpoint
             allCourseProgramCompletionWithDetailsDF = allCourseProgramCompletionWithDetailsDF.checkpoint()
 
@@ -550,7 +550,7 @@ class DashboardSyncModel:
             try:
                 print("🎯 Processing core competencies by MDO...")
                 core_comp_by_mdo_df = self.duckdb_executor.execute_query(
-                spark, "core_comp_by_mdo", QueryConstants.CORE_COMPETENCIES_BY_MDO)
+                    spark, "core_comp_by_mdo", QueryConstants.CORE_COMPETENCIES_BY_MDO)
                 if core_comp_by_mdo_df and core_comp_by_mdo_df.count() > 0:
                     core_comp_by_mdo_df = core_comp_by_mdo_df.repartition(128, "userOrgID")
                     # Persist in memory to avoid recomputation
@@ -1055,7 +1055,7 @@ class DashboardSyncModel:
             cbps_under_30mins_df = content_df.filter(
                 (col("courseStatus") == "Live") &
                 (col("courseDuration") < 1800) &
-                (col("category").isin("Course", "Program")) &
+                (col("courseCategory").isin("Course")) &
                 ~(col("courseID").endswith("_rc"))).orderBy(desc("rating"))
             if cbps_under_30mins_df.count() > 0:
                 courses_under_30mins = cbps_under_30mins_df.select("courseID") \
@@ -1066,13 +1066,13 @@ class DashboardSyncModel:
                     f"📝 Redis.updateMapField('lhp_trending', 'across:under_30_mins', '{courses_under_30mins_str[:200]}...')")
 
             # Process trending (Scala line 1310)
-            self.process_trending(spark, config)
+            #self.process_trending(spark, config)
 
             # Process learning hours (Scala line 1304)
-            self.process_learning_hours(spark, config)
+            #self.process_learning_hours(spark, config)
 
             # Process certifications (Scala line 1307)
-            self.process_certifications(spark, config)
+            #self.process_certifications(spark, config)
 
 
             # Update last run date (Scala line 1071)
@@ -1513,23 +1513,23 @@ class DashboardSyncModel:
 def main():
     # Initialize Spark Session with optimized settings for caching
     spark = SparkSession.builder \
-    .appName("DashboardSync") \
-    .config("spark.executor.memory", "25g") \
-    .config("spark.driver.memory", "20g") \
-    .config("spark.driver.maxResultSize", "4g") \
-    .config("spark.sql.shuffle.partitions", "64") \
-    .config("spark.driver.bindAddress", "127.0.0.1") \
-    .config("spark.sql.legacy.timeParserPolicy", "LEGACY") \
-    .config("spark.network.timeout", "600s") \
-    .config("spark.executor.heartbeatInterval", "60s") \
-    .config("spark.shuffle.io.connectionTimeout", "300s") \
-    .config("spark.shuffle.io.maxRetries", "20") \
-    .config("spark.shuffle.io.retryWait", "10s") \
-    .config("spark.executor.memoryOverhead", "5g")\
-    .config("spark.sql.adaptive.enabled", "true") \
-    .config("spark.sql.adaptive.coalescePartitions.enabled", "true") \
-    .config("spark.sql.adaptive.skewJoin.enabled", "true") \
-    .getOrCreate()
+        .appName("DashboardSync") \
+        .config("spark.executor.memory", "25g") \
+        .config("spark.driver.memory", "20g") \
+        .config("spark.driver.maxResultSize", "4g") \
+        .config("spark.sql.shuffle.partitions", "64") \
+        .config("spark.driver.bindAddress", "127.0.0.1") \
+        .config("spark.sql.legacy.timeParserPolicy", "LEGACY") \
+        .config("spark.network.timeout", "600s") \
+        .config("spark.executor.heartbeatInterval", "60s") \
+        .config("spark.shuffle.io.connectionTimeout", "300s") \
+        .config("spark.shuffle.io.maxRetries", "20") \
+        .config("spark.shuffle.io.retryWait", "10s") \
+        .config("spark.executor.memoryOverhead", "5g") \
+        .config("spark.sql.adaptive.enabled", "true") \
+        .config("spark.sql.adaptive.coalescePartitions.enabled", "true") \
+        .config("spark.sql.adaptive.skewJoin.enabled", "true") \
+        .getOrCreate()
     spark.sparkContext.setCheckpointDir("/home/analytics/spark-checkpoints")
     # Create model instance
     start_time = datetime.now()

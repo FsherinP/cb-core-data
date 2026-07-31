@@ -9,7 +9,7 @@ from pyspark.sql.types import StructType, StructField, StringType, IntegerType, 
 from pyspark.sql.window import Window
 from pyspark.sql.functions import (col, row_number, countDistinct, current_timestamp, date_format, broadcast,
                                    unix_timestamp, when, lit, concat_ws, from_unixtime, format_string, expr,
-                                   upper, coalesce, concat)
+                                   upper, coalesce, concat, trim, exists, split)
 from datetime import datetime
 from pyspark.sql import functions as F
 import sys
@@ -296,12 +296,15 @@ class CourseBasedAssessmentModel:
             )
 
             # ---- Govt / Non-Govt classification ----
-            # Designation or Roles containing "VOLUNTEER" => Non-Govt user, everything else => Govt user
+            # Exact (trimmed, case-insensitive) match on Designation, and an exact
+            # match against any element of the Roles array. Using .contains(...)
+            # here would wrongly flag designations like "Civil Defence Volunteer"
+            # as Non-Govt just because the substring "VOLUNTEER" appears in them.
             mdoReportDF = mdoReportDF.withColumn(
                 "is_non_govt_user",
                 when(
-                    upper(coalesce(col("Designation"), lit(""))).contains("VOLUNTEER") |
-                    upper(coalesce(col("Roles").cast("string"), lit(""))).contains("VOLUNTEER"),
+                    (trim(upper(coalesce(col("Designation"), lit("")))) == "VOLUNTEER") |
+                    coalesce(exists(split(coalesce(col("Roles"), lit("")), ","), lambda r: trim(upper(r)) == "VOLUNTEER"), lit(False)),
                     lit(True)
                 ).otherwise(lit(False))
             ).cache()
