@@ -1,8 +1,9 @@
 #!/bin/bash
 
 set -e
-
-echo "🚀 STARTING WAREHOUSE LOAD (SCHEMA SAFE VERSION)"
+SCRIPT_START=$(date +%s)
+SCRIPT_START_HUMAN=$(date '+%Y-%m-%d %H:%M:%S')
+echo "🚀 STARTING WAREHOUSE LOAD (SCHEMA SAFE VERSION) — ${SCRIPT_START_HUMAN}"
 
 readonly PROJECT_ROOT="/home/analytics/pyspark"
 
@@ -23,7 +24,6 @@ PG_USER=$(echo "$CONFIG_VALUES" | sed -n '2p')
 PG_PASSWORD=$(echo "$CONFIG_VALUES" | sed -n '3p')
 PG_DB=$(echo "$CONFIG_VALUES" | sed -n '4p')
 
-# Split "host:port" into separate variables
 if [[ "$PG_HOST_PORT" == *:* ]]; then
     PG_HOST="${PG_HOST_PORT%:*}"
     PG_PORT="${PG_HOST_PORT##*:}"
@@ -38,24 +38,33 @@ if [[ -z "$PG_HOST" || -z "$PG_PASSWORD" ]]; then
 fi
 
 export PGPASSWORD="$PG_PASSWORD"
-# Limits DuckDB to 8GB RAM to prevent OOM (Out of Memory) kills
-export DUCKDB_MEMORY_LIMIT="20GB"
 
 DATA="/home/analytics/pyspark/warehouse"
 
 echo "🔗 Postgres: $PG_HOST:$PG_PORT/$PG_DB"
 
 # =========================================================
-# COMMON LOADER
+# TIMING LOG — collects per-table durations for the summary
+# =========================================================
+declare -a TIMING_LOG
+
+# =========================================================
+# COMMON LOADER (now with per-table timing)
 # =========================================================
 load_table () {
     TABLE=$1
     QUERY=$2
 
+    local TABLE_START=$(date +%s)
+    local TABLE_START_HUMAN=$(date '+%Y-%m-%d %H:%M:%S')
+
     echo "=============================="
-    echo "🚀 Loading $TABLE"
+    echo "🚀 Loading $TABLE — started ${TABLE_START_HUMAN}"
     echo "=============================="
+
     duckdb -c "
+        SET memory_limit = '20GB';
+        SET threads = 4;
         INSTALL postgres;
         LOAD postgres;
 
@@ -68,7 +77,12 @@ load_table () {
         $QUERY;
     "
 
-    echo "✅ Done $TABLE"
+    local TABLE_END=$(date +%s)
+    local TABLE_ELAPSED=$((TABLE_END - TABLE_START))
+
+    echo "✅ Done $TABLE — took $((TABLE_ELAPSED / 60))m $((TABLE_ELAPSED % 60))s"
+
+    TIMING_LOG+=("${TABLE}|${TABLE_ELAPSED}")
 }
 
 # =========================================================
@@ -143,7 +157,7 @@ SELECT
     data_last_generated_on
 FROM (
     SELECT *,
-           ROW_NUMBER() OVER (PARTITION BY content_id) AS rn
+           ROW_NUMBER() OVER (PARTITION BY content_id ORDER BY last_published_on DESC) AS rn
     FROM read_parquet('${DATA}/content/*.snappy.parquet')
 )
 WHERE rn = 1
@@ -249,12 +263,6 @@ SELECT *
 FROM read_parquet('${DATA}/event_enrolment_details/*.snappy.parquet')
 "
 
-# 12. COURSE COMPLETION SURVEY
-#load_table "course_completion_survey_details" "
-#SELECT *
-#FROM read_parquet('${DATA}/course_completion_survey_details/*.snappy.parquet')
-#"
-
 # 13. USER ENROLMENTS (MOVED TO LAST - 19GB)
 load_table "user_enrolments" "
 SELECT
@@ -288,4 +296,24 @@ FROM read_parquet('${DATA}/user_enrolments/*.snappy.parquet')
 WHERE content_id IS NOT NULL
 "
 
+SCRIPT_END=$(date +%s)
+SCRIPT_END_HUMAN=$(date '+%Y-%m-%d %H:%M:%S')
+ELAPSED=$((SCRIPT_END - SCRIPT_START))
+
 echo "🎉 ALL TABLES LOADED SUCCESSFULLY"
+echo "🕒 Started:  ${SCRIPT_START_HUMAN}"
+echo "🕒 Finished: ${SCRIPT_END_HUMAN}"
+echo "⏱️  Total elapsed: $((ELAPSED / 60))m $((ELAPSED % 60))s"
+
+# =========================================================
+# PER-TABLE TIMING SUMMARY
+# =========================================================
+echo ""
+echo "📊 PER-TABLE TIMING SUMMARY"
+printf "%-30s %10s\n" "Table" "Duration"
+printf "%-30s %10s\n" "------------------------------" "----------"
+for entry in "${TIMING_LOG[@]}"; do
+    TABLE_NAME="${entry%%|*}"
+    DURATION="${entry##*|}"
+    printf "%-30s %5dm %02ds\n" "$TABLE_NAME" "$((DURATION / 60))" "$((DURATION % 60))"
+done
