@@ -89,7 +89,8 @@ class LearnerLeaderBoardModel:
                 F.col("u.profile_image"),
                 F.col("u.month"),
                 F.col("u.year"),
-                F.coalesce(F.col("l.rank"), F.lit(0)).alias("previous_rank")))
+                F.coalesce(F.col("l.rank"), F.lit(0)).alias("previous_rank"))
+             .withColumn("job_execution_datetime", F.current_timestamp()))
             # Write to Cassandra
             utils.writeToCassandra(finalDF, config.cassandraUserKeyspace, config.cassandraLearnerLeaderBoardTable)
             utils.writeToCassandra(finalDF.select("userid", "row_num"), config.cassandraUserKeyspace, config.cassandraLearnerLeaderBoardLookupTable)
