@@ -59,9 +59,8 @@ API_URL_TEMPLATE = 'https://spv.igotkarmayogi.gov.in/api/framework/v1/read/{}'
 HEADERS = {
     'accept': 'application/json, text/plain, */*',
     'wid': 'a62c1d64-0102-4d05-a31d-6a2cc0018f01',
-    #'Authorization': 'bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJJdHlZeDZnWm5pdFVmRUJ6cm0xQWxsSnQwQ3NZN2w4byJ9.XZN6QhXoB-Ld8nA0kf2p51pxpuzfSA2gFlLZIjfuNj8'
-    'Authorization': 'bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiI5a04xTW1TcGVuVTAyam8zVHg1U2p0amhTOFVXeGVSUiJ9.LWAgFust4e0wntxqY8_MQjf5WQ9RSD6Hg45jX_NoCXY'
-    #'cookie': 'connect.sid=s%3A7aKSUGmhbP9AGgQ7E9ceY28NER-p77Cu.qWCP%2FzyeLqJFM7v%2BUpxM%2Bw2ng%2B3AJhv82a3ltTrw7bw'
+    #'Authorization': '<bearer token >'
+    
 }
 
 # Query for Elasticsearch
