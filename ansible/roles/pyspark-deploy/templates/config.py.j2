@@ -242,6 +242,9 @@ JOB_CONFIG = {
     'peerValidationFormIndex': 'fs-forms-alias-v2',
     'apiBasedNotificationEnabled': True,
     'notificationBatchSize': 100,
+
+    #Org Hierarchy Config
+    'api_url_template' : 'https://{{ portal_domain_name }}/api/framework/v1/read/{}',
 }
 
 # External Service Configuration
