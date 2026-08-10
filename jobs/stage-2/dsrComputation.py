@@ -9,10 +9,10 @@ from pyspark.sql import functions as F
 from pyspark.sql.functions import (
     col, lit, when, expr, countDistinct, size, current_timestamp, date_trunc, date_sub,
     to_timestamp, split, sum, round, length, upper, coalesce, from_json, explode_outer,
-    exists, max as spark_max
+    exists, max as spark_max, trim
 )
 from datetime import datetime, timedelta
-from pyspark.sql.types import (StructType, StructField, StringType)
+from pyspark.sql.types import (StructType, StructField, StringType, DateType, IntegerType, LongType)
 from datetime import datetime, timedelta, time, timezone
 import sys
 import os
@@ -52,6 +52,22 @@ def format_count(n):
     return result
 
 
+def format_count(n):
+    n = int(n)
+    s = str(n)
+    if len(s) <= 3:
+        return s
+    result = s[-3:]
+    s = s[:-3]
+    while s:
+        result = s[-2:] + ',' + result
+        s = s[:-2]
+    return result
+
+
+def safe_int(v):
+    return int(v) if v is not None else 0
+
 class DSRComputationModel:
     def __init__(self):
         self.class_name = "org.ekstep.analytics.dashboard.DSRComputationModel"
@@ -79,8 +95,11 @@ class DSRComputationModel:
             # ------------------------------------------------------------------ #
             # Exclude VOLUNTEER (Non-Govt) users from every metric in this report.
             # A user is VOLUNTEER/Non-Govt if EITHER:
-            #   - any designation inside their profiledetails JSON contains "VOLUNTEER", OR
-            #   - their roles array contains an entry that contains "VOLUNTEER"
+            #   - any designation inside their profiledetails JSON is EXACTLY "VOLUNTEER"
+            #     (case-insensitive, trimmed) — NOT a substring match, so designations
+            #     like "Civil Defence Volunteer" are correctly left as Govt.
+            #   - their roles array contains an entry that EXACTLY equals "VOLUNTEER"
+            #     (case-insensitive, trimmed)
             #
             # designation lives inside profiledetails (a JSON string) under
             # professionalDetails, which is itself an array, so it has to be parsed
@@ -100,7 +119,7 @@ class DSRComputationModel:
                 .groupBy("user_id")
                 .agg(
                     spark_max(
-                        when(upper(col("designation")).contains("VOLUNTEER"), lit(1)).otherwise(lit(0))
+                        when(trim(upper(col("designation"))) == "VOLUNTEER", lit(1)).otherwise(lit(0))
                     ).alias("is_volunteer_by_designation")
                 )
             )
@@ -112,7 +131,7 @@ class DSRComputationModel:
 
             is_volunteer_expr = (
                     (col("is_volunteer_by_designation") == 1) |
-                    coalesce(exists(col("roles"), lambda r: upper(r).contains("VOLUNTEER")), lit(False))
+                    coalesce(exists(col("roles"), lambda r: trim(upper(r)) == "VOLUNTEER"), lit(False))
             )
 
             volunteerUserIdsDF = userDF.filter(is_volunteer_expr) \
@@ -332,7 +351,7 @@ class DSRComputationModel:
 
             mau_govt_only_df = mau_df.join(volunteerUserIdsDF, ["actor_id"], "left_anti")
             total_mau = mau_govt_only_df.select(countDistinct("actor_id").alias("activeCount")).first()["activeCount"]
-            #Redis.update("lp_monthly_active_users", str(total_mau), conf=config)
+            Redis.update("lp_monthly_active_users", str(total_mau), conf=config)
             Redis.update("lp_monthly_active_users_updated_format", format_count(total_mau), conf=config)
 
             # ------------------------------------------------------------------ #
@@ -367,12 +386,137 @@ class DSRComputationModel:
             Redis.update("dashboard_user_loggedin_yesterday_count_updated_format", format_count(user_loggedin_yesterday_count), conf=config)
 
             volunteerUserIdsDF.unpersist()
+            run_date = datetime.strptime(self.get_date(), "%Y-%m-%d").date()
+
+            dsr_metrics_schema = StructType([
+                StructField("date", DateType(), True),
+                StructField("central_depts", IntegerType(), True),
+                StructField("dept_orgs", IntegerType(), True),
+                StructField("states_uts", IntegerType(), True),
+                StructField("course_publishers", IntegerType(), True),
+                StructField("courses_published", IntegerType(), True),
+                StructField("course_duration_hours", IntegerType(), True),
+                StructField("course_enrolments", LongType(), True),
+                StructField("course_completions", LongType(), True),
+                StructField("event_enrolments", LongType(), True),
+                StructField("event_completions", LongType(), True),
+                StructField("users_registered_total", LongType(), True),
+                StructField("new_user_registrations", IntegerType(), True),
+                StructField("users_enrolled_one_course", LongType(), True),
+                StructField("certificates_issued", IntegerType(), True),
+                StructField("users_logged_in", IntegerType(), True),
+                StructField("mau", IntegerType(), True),
+            ])
+
+            metrics_row = (
+                run_date,
+                safe_int(CENTRAL_MINISTRIES_COUNT),
+                safe_int(dept_org_onboarded),
+                safe_int(STATE_UT_COUNT),
+                safe_int(course_publisher_count),
+                safe_int(liveCourseCount),
+                safe_int(total_hours),
+                safe_int(total_enrolments),
+                safe_int(total_content_completions),
+                safe_int(total_event_enrolments),
+                safe_int(total_event_completions),
+                safe_int(total_registered_users),
+                safe_int(usersRegisteredYesterdayCount),
+                safe_int(unique_users_enrolled),
+                safe_int(total_certs_yday),
+                safe_int(user_loggedin_yesterday_count),
+                safe_int(total_mau),
+            )
+
+            dsrMetricsDF = spark.createDataFrame([metrics_row], schema=dsr_metrics_schema)
+
+            dw_postgres_url = f"jdbc:postgresql://{config.dwPostgresHost}/{config.dwPostgresSchema}"
+
+            # -------------------------------------------------------------- #
+            # Read existing history table. If this read fails for any
+            # reason, ABORT — do not fall back to writing just this one
+            # row, since that would wipe out all prior history.
+            # -------------------------------------------------------------- #
+            try:
+                existingMetricsDF = self.read_postgres_table(
+                    spark,
+                    dw_postgres_url,
+                    "dsr_metrics_history",
+                    config.dwPostgresUsername,
+                    config.dwPostgresCredential
+                )
+            except Exception as read_err:
+                raise RuntimeError(
+                    f"Failed to read existing dsr_metrics_history table — aborting to avoid "
+                    f"overwriting history with a single row: {read_err}"
+                ) from read_err
+
+            # Drop any existing row for today's date (rerun-safe)
+            existingMetricsDF = existingMetricsDF.filter(col("date") != lit(run_date))
+
+            # CRITICAL: force this DataFrame to materialize NOW, before the
+            # write below truncates the table. Spark reads are lazy — if we
+            # don't force evaluation here, the write's "truncate=true" will
+            # empty the table BEFORE this read actually executes, since both
+            # are part of the same lazy plan reading/writing the same table.
+            # That silently turns "existing + new row" into just "new row".
+            existingMetricsDF = existingMetricsDF.cache()
+            existing_row_count = existingMetricsDF.count()
+            print(f"[INFO] Existing dsr_metrics_history rows before write: {existing_row_count}")
+
+            # Postgres columns are all NUMERIC (unconstrained), which Spark's JDBC
+            # reader maps to DecimalType — not the Integer/LongType used above.
+            # Cast the new row's columns to match existingMetricsDF's actual schema
+            # so unionByName doesn't fail on a type mismatch.
+            for field in existingMetricsDF.schema.fields:
+                if field.name != "date":
+                    dsrMetricsDF = dsrMetricsDF.withColumn(field.name, col(field.name).cast(field.dataType))
+
+            combinedMetricsDF = existingMetricsDF.unionByName(dsrMetricsDF)
+
+            # Postgres's numeric column is unconstrained, so it stores whatever
+            # scale the incoming value has. Casting to LongType here (rather than
+            # leaving the DecimalType(38,18) picked up during the union) keeps
+            # values stored as clean whole numbers instead of "94.000000000000000000".
+            for field in combinedMetricsDF.schema.fields:
+                if field.name != "date":
+                    combinedMetricsDF = combinedMetricsDF.withColumn(field.name, col(field.name).cast("long"))
+
+            self.write_postgres_table(combinedMetricsDF, dw_postgres_url,
+                                      "dsr_metrics_history",
+                                      config.dwPostgresUsername,
+                                      config.dwPostgresCredential)
+
+            existingMetricsDF.unpersist()
 
             print("[SUCCESS] DSRComputationModel unified metrics updated")
 
         except Exception as e:
             print(f"❌ Error occurred during DSRComputationModel processing: {str(e)}")
             raise e
+
+    def write_postgres_table(self, df, url: str, table: str, username: str, password: str):
+        df.write \
+            .format("jdbc") \
+            .option("url", url) \
+            .option("dbtable", table) \
+            .option("user", username) \
+            .option("password", password) \
+            .option("driver", "org.postgresql.Driver") \
+            .option("truncate", "true") \
+            .mode("overwrite") \
+            .save()
+
+    def read_postgres_table(self, spark, url: str, table: str, username: str, password: str):
+        """Read data from PostgreSQL table"""
+        return spark.read \
+            .format("jdbc") \
+            .option("url", url) \
+            .option("dbtable", table) \
+            .option("user", username) \
+            .option("password", password) \
+            .option("driver", "org.postgresql.Driver") \
+            .load()
 
 
 def main():

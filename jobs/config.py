@@ -236,12 +236,15 @@ JOB_CONFIG = {
 
     # Bharat kalp Configuration
     'bharat_kalp_event_tags': ['Bharat Kalp - Talks', 'Bharat Kalp - Podcast'],
-    'bharatKalpCoursesApiUrl' : "https:// {{ domain_name }}/apis/static/form/v1/read",
+    'bharatKalpCoursesApiUrl' : "https://{{ domain_name }}/apis/static/form/v1/read",
     
     # Peer validation configuration
     'peerValidationFormIndex': 'fs-forms-alias-v2',
     'apiBasedNotificationEnabled': True,
     'notificationBatchSize': 100,
+
+    #Org Hierarchy Config
+    'api_url_template' : 'https://{{ portal_domain_name }}/api/framework/v1/read/{}',
 }
 
 # External Service Configuration
