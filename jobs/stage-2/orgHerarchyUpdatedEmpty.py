@@ -1,5 +1,3 @@
-import findspark
-findspark.init()
 import requests
 import pandas as pd
 import psycopg2
@@ -8,30 +6,40 @@ import datetime
 from elasticsearch import Elasticsearch
 from elasticsearch.connection import RequestsHttpConnection
 import logging
-import redis
 import json
-from pyspark.sql.functions import lit
+import sys
+from pathlib import Path
+sys.path.append(str(Path(__file__).resolve().parents[2]))
+from jobs.config import get_environment_config
+from jobs.default_config import create_config
 
 
 # Configure logger at the top of your script (add this near your imports)
 logging.basicConfig(level=logging.DEBUG)
 logger = logging.getLogger(__name__)
 
+config_dict = get_environment_config()
+config = create_config(config_dict)
+
 # Elasticsearch settings
 es = Elasticsearch(
-    ['http://10.175.5.10:9200'],
+    hosts=[{
+            "host": config.sparkElasticsearchConnectionHost,
+            "port": int(config.sparkElasticsearchConnectionPort)
+        }],
     headers={"Content-Type": "application/json"},
     connection_class=RequestsHttpConnection
 )  # Update with your ES host
 index_name = 'org_v4'  # Update with your index
-
+hardcoded_ids = ["0133783095823810560", "0136855852269322243827"]
+host, port = config.dwPostgresHost.split(":")
 # PostgreSQL settings
 pg_conn = psycopg2.connect(
-    dbname='sunbird',
-    user='postgres',
-    password='password123',
-    host='10.175.5.15',
-    port='5432'
+    dbname=config.appPostgresSchema,
+    user=config.appPostgresUsername,
+    password=config.appPostgresCredential,
+    host=host,
+    port=port
 )
 pg_cursor = pg_conn.cursor()
 #pg_cursor.execute('SET search_path TO wingspan;')
@@ -44,24 +52,17 @@ pg_conn.commit()
 try:
     pg_cursor.execute("TRUNCATE TABLE org_hierarchy_new;")
     pg_conn.commit()
-    pg_cursor.execute("TRUNCATE TABLE org_hierarchy_lookup;")
-    pg_conn.commit()
-    pg_cursor.execute("TRUNCATE TABLE mdo_children_lookup;")
-    pg_conn.commit()
+    #pg_cursor.execute("TRUNCATE TABLE org_hierarchy_lookup;")
+    #pg_conn.commit()
+    #pg_cursor.execute("TRUNCATE TABLE mdo_children_lookup;")
+    #pg_conn.commit()
     print("Tables org_hierarchy_new, org_hierarchy_lookup, and mdo_children_lookup truncated successfully.")
 except Exception as e:
     print(f"Failed to truncate table: {e}")
     exit(1)
 
 # API and headers
-API_URL_TEMPLATE = 'https://spv.igotkarmayogi.gov.in/api/framework/v1/read/{}'
-#API_URL_TEMPLATE = 'https://portal.qa.karmayogibharat.net/api/framework/v1/read/{}'
-HEADERS = {
-    'accept': 'application/json, text/plain, */*',
-    'wid': 'a62c1d64-0102-4d05-a31d-6a2cc0018f01',
-    #'Authorization': '<bearer token >'
-    
-}
+API_URL_TEMPLATE = config.api_url_template
 
 # Query for Elasticsearch
 query_body = {
@@ -79,13 +80,35 @@ query_body = {
     ]
 }
 
-def fetch_es_data():
+query_body_hardcoded = {
+    "query": {
+        "bool": {
+            "must": [
+                {
+                    "terms": {
+                        "identifier.raw": hardcoded_ids
+                    }
+                },
+                {
+                    "exists": {
+                        "field": "orgHierarchyFrameworkId"
+                    }
+                }
+            ]
+        }
+    },
+    "_source": [
+        "identifier", "orgName", "orgHierarchyFrameworkId",
+        "ministryorstatetype", "createdDate", "sbOrgType", "updatedDate"
+    ]
+}
+
+def fetch_es_data(query):
     scroll = '2m'
     page_size = 1000
-    query_body["size"] = page_size  # move size into body
-
+    query["size"] = page_size  # move size into body
     results = []
-    page = es.search(index=index_name, body=query_body, scroll=scroll)
+    page = es.search(index=index_name, body=query, scroll=scroll)
     sid = page['_scroll_id']
     scroll_size = len(page['hits']['hits'])
     results.extend(page['hits']['hits'])
@@ -100,7 +123,10 @@ def fetch_es_data():
     #print(f"Fetched {df} ")
     return df
 
-def parse_framework_data(data):
+def parse_framework_data(data, org_name, org_id, created_date, updated_date):
+    """
+    Updated to handle empty frameworks by inserting a record with just org info
+    """
     categories = data.get("result", {}).get("framework", {}).get("categories", [])
     level_names = [
         "LevelOne", "LevelTwo", "LevelThree", "LevelFour", "LevelFive",
@@ -154,8 +180,19 @@ def parse_framework_data(data):
             level_one_terms = cat.get("terms", [])
             break
 
-    for term in level_one_terms:
-        walk(term, 0, {})
+    # Check if level_one_terms is empty
+    if not level_one_terms:
+        logger.info(f"No LevelOne terms found for org {org_id} ({org_name}). Creating default entry.")
+        # Create a single hierarchy with all levels as None
+        # This will trigger an insert with just org info
+        empty_hierarchy = {}
+        for level in level_names:
+            empty_hierarchy[level] = (None, None)
+        results.append(empty_hierarchy)
+    else:
+        # Process normally if terms exist
+        for term in level_one_terms:
+            walk(term, 0, {})
 
     # Ensure all results have all levels
     for h in results:
@@ -261,7 +298,7 @@ def build_flat_descendant_map(categories):
 def insert_mdo_children_lookup(mdo_id, children_ids):
     """
     Insert MDO ID and its unique child IDs (comma-separated) into mdo_children_lookup table.
-    
+
     Args:
         mdo_id: The parent MDO ID (varchar(100))
         children_ids: List of unique child MDO IDs
@@ -272,7 +309,7 @@ def insert_mdo_children_lookup(mdo_id, children_ids):
     else:
         # Convert list to comma-separated string of unique IDs
         children_str = ",".join(str(child_id) for child_id in children_ids if child_id)
-    
+
     try:
         sql = """
             INSERT INTO mdo_children_lookup (mdo_id, children_id)
@@ -291,22 +328,21 @@ def find_and_insert_all_children(org_id, data):
     """
     Find all unique child MDO IDs for each MDO ID in the framework and insert into lookup table.
     This method processes the entire framework hierarchy and creates parent-child mappings.
-    
+
     Args:
         data: The framework data from API response
     """
     categories = data.get("result", {}).get("framework", {}).get("categories", [])
-    
+
     # Build the flat descendant map (this already finds all children)
     flat_map = build_flat_descendant_map(categories)
     print(f"Flat descendant map: {flat_map}")
-    
+
     # Insert each parent-children relationship into the lookup table
     for mdo_id, children_ids in flat_map.items():
         if mdo_id:  # Only insert if mdo_id exists
-            print(f"Inserting MDO ID {mdo_id} with children {children_ids}")
             insert_mdo_children_lookup(mdo_id, children_ids)
-        
+
     # 👉 Create an org-wide lookup entry with ALL unique descendant MDOs
     all_children = set(flat_map.keys())  # include all parent IDs
     for children_ids in flat_map.values():  # plus any extra children not in keys
@@ -315,7 +351,7 @@ def find_and_insert_all_children(org_id, data):
     all_children = list(all_children)
     print(f"Inserting ORG level mapping for org_id={org_id} with children={all_children}")
     insert_mdo_children_lookup(org_id, all_children)
-    
+
     # Commit all inserts
     pg_conn.commit()
     logger.info(f"Inserted {len(flat_map)} MDO parent-children relationships into mdo_children_lookup")
@@ -331,12 +367,14 @@ def process_frameworks(df):
 
         try:
             url = API_URL_TEMPLATE.format(framework_id)
-            response = requests.get(url, headers=HEADERS)
+            response = requests.get(url)
             if response.status_code == 200:
                 data = response.json()
-                logger.debug(f"Processing framework {framework_id} |||||||||||--|||||||||| {data}")
-                hierarchies = parse_framework_data(data)
-                insert_hierarchy_lookup(org_id, org_name, data)
+                #logger.debug(f"Processing framework {framework_id} |||||||||||--|||||||||| {data}")
+
+                # Updated: Pass org_name, org_id, created_date, updated_date to parse_framework_data
+                hierarchies = parse_framework_data(data, org_name, org_id, created_date, updated_date)
+                #insert_hierarchy_lookup(org_id, org_name, data)
 
                 # --- FLAT DESCENDANT MAP LOGGING ---
                 categories = data.get("result", {}).get("framework", {}).get("categories", [])
@@ -346,7 +384,7 @@ def process_frameworks(df):
                 logger.debug("--------------------------------------------------------------------")
 
                 # --- NEW: Find and insert all children into lookup table ---
-                find_and_insert_all_children(org_id, data)
+                #find_and_insert_all_children(org_id, data)
 
                 # --- Write to Redis here if needed ---
                 # redis_client.set(f"flatmap:{framework_id}", json.dumps(flat_map))
@@ -415,10 +453,51 @@ def insert_hierarchy_lookup(org_id, org_name, data):
             pg_cursor.execute(sql, values)
             pg_conn.commit()
 
+def main():
+    df = fetch_es_data(query_body)
+    # Replace Spark DataFrame `.show()` (not available on pandas DataFrame)
+    if isinstance(df, pd.DataFrame):
+        if df.empty:
+            logger.info("No records fetched from Elasticsearch.")
+        else:
+            print(df.head(5).to_string()) 
 
-if __name__ == "__main__":
-    df = fetch_es_data()
+    hardCodedDF = fetch_es_data(query_body_hardcoded)
+    #df = pd.concat([df, hardCodedDF], ignore_index=True)
+    #df.drop_duplicates(subset=['identifier'], inplace=True)
+    #if isinstance(df, pd.DataFrame):
+    #    if df.empty:
+    #        logger.info("No records fetched from Elasticsearch.")
+    #    else:
+    #        print(df.head(5).to_string())
+    # add ids for karmayogi bharat and karyogi prorambh trainee as hard coded
+
+        # Union both DataFrames, preferring unique rows by `identifier`.
+    # Handle cases where one or both frames are empty/None.
+    if (hardCodedDF is None or hardCodedDF.empty) and (df is None or df.empty):
+        df = pd.DataFrame(columns=["identifier", "orgName", "orgHierarchyFrameworkId", "ministryorstatetype", "createdDate", "sbOrgType", "updatedDate"]) 
+        logger.info("No records fetched from Elasticsearch (both frames empty).")
+    elif hardCodedDF is None or hardCodedDF.empty:
+        df = df.copy()
+    elif df is None or df.empty:
+        df = hardCodedDF.copy()
+    else:
+        df = pd.concat([df, hardCodedDF], ignore_index=True)
+
+    # Remove duplicates by identifier and reset index
+    df = df.drop_duplicates(subset=['identifier'], keep='first').reset_index(drop=True)
+
+    if df.empty:
+        logger.info("No records after union/deduplication.")
+    else:
+        print(df.head(5).to_string())
+
+    #df.drop_duplicates(subset=['identifier'], inplace=True)
+
     process_frameworks(df)
     pg_cursor.close()
     pg_conn.close()
     logger.debug("All data processed and saved.")
+    
+if __name__ == "__main__":
+    main()

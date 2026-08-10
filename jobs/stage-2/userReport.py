@@ -5,7 +5,7 @@ import sys
 from pathlib import Path
 from pyspark.sql import SparkSession
 from pyspark.sql.functions import (
-    col, when, coalesce, lit, upper,
+    col, when, coalesce, lit, upper, concat, exists, split,
     current_timestamp, date_format, from_unixtime, concat_ws, from_json, explode, trim, length, first, expr
 )
 from concurrent.futures import ThreadPoolExecutor, as_completed
@@ -312,8 +312,8 @@ def processUserReport(config):
                 # Designation or Roles containing "VOLUNTEER" => Non-Govt user, everything else => Govt user
                 "is_non_govt_user",
                 when(
-                    upper(coalesce(col("Designation"), lit(""))).contains("VOLUNTEER") |
-                    upper(coalesce(col("Roles").cast("string"), lit(""))).contains("VOLUNTEER"),
+                    (trim(upper(coalesce(col("Designation"), lit("")))) == "VOLUNTEER") |
+                    coalesce(exists(split(coalesce(col("Roles"), lit("")), ","), lambda r: trim(upper(r)) == "VOLUNTEER"), lit(False)),
                     lit(True)
                 ).otherwise(lit(False))
             )
@@ -482,18 +482,39 @@ def processUserReport(config):
         print(f"Orgs with only Non-Govt users: {len(non_govt_org_ids - both_org_ids)}")
         print(f"Orgs with BOTH Govt and Non-Govt users (2 reports each): {len(both_org_ids)}")
 
+        # ------------------------------------------------------------------ #
+        # PERFORMANCE: only orgs that actually have custom fields need the
+        # expensive per-org pivot + join + individual write. Every other org
+        # (typically the large majority) is written in bulk via
+        # write_csv_per_mdo_id_duckdb, exactly like the original fast version.
+        # Doing per-org processing for EVERY org (govt + non-govt, with or
+        # without custom fields) is what caused the 30-min job to take 3+ hrs.
+        # ------------------------------------------------------------------ #
+        orgs_with_custom_fields = set(org_custom_fields.keys())
+
+        govt_orgs_with_custom = govt_org_ids & orgs_with_custom_fields
+        non_govt_orgs_with_custom = non_govt_org_ids & orgs_with_custom_fields
+        govt_orgs_without_custom = govt_org_ids - orgs_with_custom_fields
+        non_govt_orgs_without_custom = non_govt_org_ids - orgs_with_custom_fields
+
+        print(f"Govt orgs needing per-org custom-field processing: {len(govt_orgs_with_custom)}")
+        print(f"Non-Govt orgs needing per-org custom-field processing: {len(non_govt_orgs_with_custom)}")
+        print(f"Govt orgs going through bulk write (no custom fields): {len(govt_orgs_without_custom)}")
+        print(f"Non-Govt orgs going through bulk write (no custom fields): {len(non_govt_orgs_without_custom)}")
+
+        # ---- Slow path: per-org pivot, ONLY for orgs with custom fields ---- #
         # Build the task list:
         #  - Govt subset always writes to mdoid=<org_id> (no suffix)
         #  - Non-Govt subset writes to mdoid=<org_id> (no suffix) UNLESS the org also has
         #    Govt users, in which case it writes to mdoid=<org_id>_non_govt to avoid collision.
         tasks = []
-        for org_id in govt_org_ids:
+        for org_id in govt_orgs_with_custom:
             tasks.append((org_id, govt_mdo_wise_slim, "GOVT", ""))
-        for org_id in non_govt_org_ids:
+        for org_id in non_govt_orgs_with_custom:
             suffix = "_non_govt" if org_id in both_org_ids else ""
             tasks.append((org_id, non_govt_mdo_wise_slim, "NON-GOVT", suffix))
 
-        print(f"Processing {len(tasks)} org report(s) (govt + non-govt combined) using up to 8 parallel workers...")
+        print(f"Processing {len(tasks)} org report(s) with custom fields using up to 8 parallel workers...")
 
         successful_orgs = 0
         failed_orgs = 0
@@ -530,7 +551,55 @@ def processUserReport(config):
                     failed_orgs += 1
                     print(f"  ❌ {result['org_id']}: {result['error']}")
 
-        print(f"Done: {successful_orgs} successful, {failed_orgs} failed, {total_rows:,} total rows")
+        # ---- Fast path: bulk write for every org with NO custom fields ---- #
+        # dfexportutil.write_csv_per_mdo_id_duckdb throws a KeyError on
+        # 'successful_conversions' when handed a dataframe with zero orgs to
+        # write, so each bulk call is skipped if its subset is empty.
+        if govt_orgs_without_custom:
+            print(f"📦 Bulk-writing {len(govt_orgs_without_custom)} Govt org(s) without custom fields...")
+            govt_bulk_df = govt_mdo_wise_slim.filter(col("mdoid").isin(list(govt_orgs_without_custom)))
+            bulk_govt_result = dfexportutil.write_csv_per_mdo_id_duckdb(
+                govt_bulk_df,
+                f"{config.localReportDir}/{base_out}",
+                'mdoid',
+                f"{config.localReportDir}/temp/user_report_bulk_govt/{today}",
+                csv_filename=config.userReport
+            )
+            successful_orgs += bulk_govt_result.get('successful_writes', len(govt_orgs_without_custom))
+            failed_orgs += bulk_govt_result.get('failed_writes', 0)
+            print(f"  ✅ Govt bulk write done: {bulk_govt_result.get('successful_writes', len(govt_orgs_without_custom))} orgs")
+        else:
+            print("ℹ️  No Govt orgs without custom fields — skipping Govt bulk write.")
+
+        if non_govt_orgs_without_custom:
+            print(f"📦 Bulk-writing {len(non_govt_orgs_without_custom)} Non-Govt org(s) without custom fields...")
+            # Same collision rule as the per-org path: only suffix mdoid with
+            # _non_govt for orgs that also have Govt users; leave it as-is
+            # for orgs that only ever had Non-Govt users.
+            both_org_ids_list = list(both_org_ids)
+            non_govt_bulk_df = (
+                non_govt_mdo_wise_slim
+                .filter(col("mdoid").isin(list(non_govt_orgs_without_custom)))
+                .withColumn(
+                    "mdoid",
+                    when(col("mdoid").isin(both_org_ids_list), concat(col("mdoid"), lit("_non_govt")))
+                    .otherwise(col("mdoid"))
+                )
+            )
+            bulk_non_govt_result = dfexportutil.write_csv_per_mdo_id_duckdb(
+                non_govt_bulk_df,
+                f"{config.localReportDir}/{base_out}",
+                'mdoid',
+                f"{config.localReportDir}/temp/user_report_bulk_non_govt/{today}",
+                csv_filename=config.userReport
+            )
+            successful_orgs += bulk_non_govt_result.get('successful_writes', len(non_govt_orgs_without_custom))
+            failed_orgs += bulk_non_govt_result.get('failed_writes', 0)
+            print(f"  ✅ Non-Govt bulk write done: {bulk_non_govt_result.get('successful_writes', len(non_govt_orgs_without_custom))} orgs")
+        else:
+            print("ℹ️  No Non-Govt orgs without custom fields — skipping Non-Govt bulk write.")
+
+        print(f"Done: {successful_orgs} successful, {failed_orgs} failed, {total_rows:,} total rows (per-org path)")
 
         exploded_cached.unpersist()
         mdo_wise_slim.unpersist()

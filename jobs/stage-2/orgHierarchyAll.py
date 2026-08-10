@@ -8,30 +8,38 @@ import datetime
 from elasticsearch import Elasticsearch
 from elasticsearch.connection import RequestsHttpConnection
 import logging
-import redis
 import json
-from pyspark.sql.functions import lit
-
+import sys
+from pathlib import Path
+sys.path.append(str(Path(__file__).resolve().parents[2]))
+from jobs.config import get_environment_config
+from jobs.default_config import create_config
 
 # Configure logger at the top of your script (add this near your imports)
 logging.basicConfig(level=logging.DEBUG)
 logger = logging.getLogger(__name__)
 
+config_dict = get_environment_config()
+config = create_config(config_dict)
+
 # Elasticsearch settings
 es = Elasticsearch(
-    ['http://10.175.5.10:9200'],
+    hosts=[{
+        "host": config.sparkElasticsearchConnectionHost,
+        "port": int(config.sparkElasticsearchConnectionPort)
+    }],
     headers={"Content-Type": "application/json"},
     connection_class=RequestsHttpConnection
 )  # Update with your ES host
 index_name = 'org_v4'  # Update with your index
-
+host, port = config.dwPostgresHost.split(":")
 # PostgreSQL settings
 pg_conn = psycopg2.connect(
-    dbname='sunbird',
-    user='postgres',
-    password='password123',
-    host='10.175.5.15',
-    port='5432'
+    dbname=config.appPostgresSchema,
+    user=config.appPostgresUsername,
+    password=config.appPostgresCredential,
+    host=host,
+    port=port
 )
 pg_cursor = pg_conn.cursor()
 #pg_cursor.execute('SET search_path TO wingspan;')
@@ -54,14 +62,8 @@ except Exception as e:
     exit(1)
 
 # API and headers
-API_URL_TEMPLATE = 'https://spv.igotkarmayogi.gov.in/api/framework/v1/read/{}'
-#API_URL_TEMPLATE = 'https://portal.qa.karmayogibharat.net/api/framework/v1/read/{}'
-HEADERS = {
-    'accept': 'application/json, text/plain, */*',
-    'wid': 'a62c1d64-0102-4d05-a31d-6a2cc0018f01',
-    #'Authorization': '<bearer token >'
-    
-}
+API_URL_TEMPLATE = config.api_url_template
+
 
 # Query for Elasticsearch
 query_body = {
@@ -79,11 +81,12 @@ query_body = {
     ]
 }
 
+#query_body = {"query":{"bool":{"must":[{"match":{"identifier":"01358338771259392049"}},{"terms":{"sbOrgType":["state","ministry"]}},{"exists":{"field":"orgHierarchyFrameworkId"}}]}},"_source":["identifier","orgName","orgHierarchyFrameworkId","ministryorstatetype","createdDate","sbOrgType","updatedDate"]}
+
 def fetch_es_data():
     scroll = '2m'
     page_size = 1000
     query_body["size"] = page_size  # move size into body
-
     results = []
     page = es.search(index=index_name, body=query_body, scroll=scroll)
     sid = page['_scroll_id']
@@ -261,7 +264,7 @@ def build_flat_descendant_map(categories):
 def insert_mdo_children_lookup(mdo_id, children_ids):
     """
     Insert MDO ID and its unique child IDs (comma-separated) into mdo_children_lookup table.
-    
+
     Args:
         mdo_id: The parent MDO ID (varchar(100))
         children_ids: List of unique child MDO IDs
@@ -272,7 +275,7 @@ def insert_mdo_children_lookup(mdo_id, children_ids):
     else:
         # Convert list to comma-separated string of unique IDs
         children_str = ",".join(str(child_id) for child_id in children_ids if child_id)
-    
+
     try:
         sql = """
             INSERT INTO mdo_children_lookup (mdo_id, children_id)
@@ -291,22 +294,21 @@ def find_and_insert_all_children(org_id, data):
     """
     Find all unique child MDO IDs for each MDO ID in the framework and insert into lookup table.
     This method processes the entire framework hierarchy and creates parent-child mappings.
-    
+
     Args:
         data: The framework data from API response
     """
     categories = data.get("result", {}).get("framework", {}).get("categories", [])
-    
+
     # Build the flat descendant map (this already finds all children)
     flat_map = build_flat_descendant_map(categories)
     print(f"Flat descendant map: {flat_map}")
-    
+
     # Insert each parent-children relationship into the lookup table
     for mdo_id, children_ids in flat_map.items():
         if mdo_id:  # Only insert if mdo_id exists
-            print(f"Inserting MDO ID {mdo_id} with children {children_ids}")
             insert_mdo_children_lookup(mdo_id, children_ids)
-        
+
     # 👉 Create an org-wide lookup entry with ALL unique descendant MDOs
     all_children = set(flat_map.keys())  # include all parent IDs
     for children_ids in flat_map.values():  # plus any extra children not in keys
@@ -315,7 +317,7 @@ def find_and_insert_all_children(org_id, data):
     all_children = list(all_children)
     print(f"Inserting ORG level mapping for org_id={org_id} with children={all_children}")
     insert_mdo_children_lookup(org_id, all_children)
-    
+
     # Commit all inserts
     pg_conn.commit()
     logger.info(f"Inserted {len(flat_map)} MDO parent-children relationships into mdo_children_lookup")
@@ -331,10 +333,10 @@ def process_frameworks(df):
 
         try:
             url = API_URL_TEMPLATE.format(framework_id)
-            response = requests.get(url, headers=HEADERS)
+            response = requests.get(url)
             if response.status_code == 200:
                 data = response.json()
-                logger.debug(f"Processing framework {framework_id} |||||||||||--|||||||||| {data}")
+                #logger.debug(f"Processing framework {framework_id} |||||||||||--|||||||||| {data}")
                 hierarchies = parse_framework_data(data)
                 insert_hierarchy_lookup(org_id, org_name, data)
 
@@ -352,7 +354,7 @@ def process_frameworks(df):
                 # redis_client.set(f"flatmap:{framework_id}", json.dumps(flat_map))
 
                 for hierarchy in hierarchies:
-                    #logger.debug(f"{hierarchy} |||||| (org_name -- {org_name} org_id ----{org_id})")
+                    logger.debug(f"{hierarchy} |||||| (org_name -- {org_name} org_id ----{org_id})")
                     insert_to_postgres(org_name, org_id, hierarchy, created_date, updated_date)
                     pg_conn.commit()
             else:
@@ -415,10 +417,14 @@ def insert_hierarchy_lookup(org_id, org_name, data):
             pg_cursor.execute(sql, values)
             pg_conn.commit()
 
-
-if __name__ == "__main__":
+def main():
+    print("Starting Org Hierarchy...")
     df = fetch_es_data()
     process_frameworks(df)
     pg_cursor.close()
     pg_conn.close()
     logger.debug("All data processed and saved.")
+
+
+if __name__ == "__main__":
+    main()

@@ -104,7 +104,7 @@ class WeeklyClapsModel:
             # The default must match that same STRING type, or Spark's
             # CASE WHEN throws a DATATYPE_MISMATCH error since both branches
             # of a when/otherwise must resolve to the same type.
-            default_week_json = lit('{"timespent":0.0,"numberOfSessions":0}')
+            #default_week_json = struct(lit(0.0).alias("timespent"), lit(0).alias("numberOfSessions"))
 
             joined_df = joined_df.withColumn("w4", struct(
                 when(col("platformEngagementTime").isNull(), lit(0.0)).otherwise(col("platformEngagementTime")).alias(
@@ -154,9 +154,9 @@ class WeeklyClapsModel:
                             .otherwise(col("last_claps_updated_on"))) \
                 .withColumn("last_updated_on",when(col("last_updated_on").isNull(), lit(dataTillDate))
                             .otherwise(col("last_updated_on"))) \
-                .withColumn("w1", when(col("w1").isNull(), default_week_json).otherwise(col("w1"))) \
-                .withColumn("w2", when(col("w2").isNull(), default_week_json).otherwise(col("w2"))) \
-                .withColumn("w3", when(col("w3").isNull(), default_week_json).otherwise(col("w3")))
+                #.withColumn("w1", when(col("w1").isNull(), default_week_json).otherwise(col("w1"))) \
+                #.withColumn("w2", when(col("w2").isNull(), default_week_json).otherwise(col("w2"))) \
+                #.withColumn("w3", when(col("w3").isNull(), default_week_json).otherwise(col("w3")))
 
             df = df.drop("platformEngagementTime", "sessionCount")
 
