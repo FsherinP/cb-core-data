@@ -6,7 +6,8 @@ from pathlib import Path
 from pyspark.sql import SparkSession
 from pyspark.sql.functions import (
     col, when, coalesce, lit, upper,
-    current_timestamp, date_format, from_unixtime, concat_ws, from_json, explode, trim, length, first, expr
+    current_timestamp, date_format, from_unixtime, concat_ws, from_json, explode, first, expr,
+    sum as F_sum, max as F_max, get_json_object, size as F_size, bround
 )
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from pyspark.sql.functions import collect_set
@@ -65,15 +66,92 @@ def processUserReport(config):
 
         # Step 3: Load Content Duration
         print("📖 Step 3: Loading Content Duration Data...")
+
         content_duration_df = (
-            spark.read.parquet(ParquetFileConstants.CONTENT_COMPUTED_PARQUET_FILE)
-            .filter((col("courseCategory") == "Course"))
+            spark.read.parquet(ParquetFileConstants.CONTENT_HIERARCHY_FLATTENED_PARQUET_FILE)
             .select(
-                col("courseID").alias("content_id"),
+                "root_content_id",
+                "first_level_child_identifier",
+                "courseCategory",
+                "first_level_child_primaryCategory",
+                "parent_duration",
+                "first_level_child_duration"
+            )
+            .filter(
+                col("courseCategory").isin(
+                    "Course",
+                    "Pre Enrolment Assessment",
+                    "Moderated Course",
+                    "Moderated Assessment",
+                    "Invite-Only Assessment",
+                    "Standalone Assessment",
+                    "Multilingual Course",
+                    "Blended Program",
+                    "Comprehensive Assessment Program",
+                    "Curated Program"
+                )
+            )
+            .withColumn(
+                "selected_child_duration",
+                when(
+                    col("courseCategory") == "Blended Program",
+                    when(
+                        col("first_level_child_primaryCategory").isin(
+                            "Course Unit",
+                            "Learning Resource"
+                        ),
+                        col("first_level_child_duration").cast("double")
+                    ).otherwise(lit(0.0))
+                )
+                .when(
+                    col("courseCategory").isin(
+                        "Comprehensive Assessment Program",
+                        "Curated Program"
+                    ),
+                    when(
+                        col("first_level_child_primaryCategory") == "Course Assessment",
+                        col("first_level_child_duration").cast("double")
+                    ).otherwise(lit(0.0))
+                )
+                .otherwise(lit(0.0))
+            )
+            .groupBy("root_content_id", "courseCategory")
+            .agg(
+                F_max(coalesce(col("parent_duration"), lit(0.0))).cast("double").alias("parent_duration"),
+                F_sum(coalesce(col("selected_child_duration"), lit(0.0))).alias("selected_child_duration")
+            )
+            .withColumn(
+                "courseDuration",
+                when(
+                    col("courseCategory").isin(
+                        "Blended Program",
+                        "Comprehensive Assessment Program",
+                        "Curated Program"
+                    ),
+                    col("selected_child_duration")
+                )
+                .otherwise(
+                    col("parent_duration")
+                )
+            )
+            .select(
+                col("root_content_id").alias("content_id"),
                 col("courseDuration").cast("double"),
-                col("category")
+                col("courseCategory").alias("category")
             )
         )
+
+        externalContentDF = (spark.read.parquet(ParquetFileConstants.EXTERNAL_CONTENT_PARQUET_FILE)
+                             .select(col("content_id"), get_json_object(col("cios_data"),"$.content.duration").cast("double").alias("external_content_duration"))
+                             .fillna(0, ["external_content_duration"]))
+        externalCourseEnrolments_df = (spark.read.parquet(ParquetFileConstants.EXTERNAL_COURSE_ENROLMENTS_PARQUET_FILE)
+                                       .filter((col("status") == 2) & col("issued_certificates").isNotNull() & (F_size(col("issued_certificates")) > 0))
+                                       .select( col("userid").alias("userID"),col("courseid").alias("content_id")).distinct())
+        external_duration_calc = (externalCourseEnrolments_df.join(externalContentDF, "content_id", "left")
+                                   .groupBy(col("userID")).agg(F_sum(col("external_content_duration")).alias("total_external_content_duration"))
+                                  .select("userID", "total_external_content_duration")
+                                  .withColumn("total_external_content_duration", bround(col("total_external_content_duration") / 3600.0, 2)))
+
         print("✅ Step 3 Complete")
 
         # Step 4: Add User Status Classification
@@ -82,9 +160,9 @@ def processUserReport(config):
 
         # Step 5: Join User and Content Data
         print("🔗 Step 5: Joining User and Content Data...")
-        user_enrolment_master_df = userDFUtil.appendContentDurationCompletionForEachUser(
+        user_enrolment_master_df = (userDFUtil.appendContentDurationCompletionForEachUser(
             spark, user_master_df, user_enrolment_df, content_duration_df
-        )
+        ).join(external_duration_calc, on="userID", how="left"))
         print("✅ Step 5 Complete")
 
 
@@ -101,7 +179,8 @@ def processUserReport(config):
             .withColumn("Tag", concat_ws(", ", col("additionalProperties.tag"))) \
             .withColumn("Total_Learning_Hours",
                         coalesce(col("total_event_learning_hours_with_certificates"), lit(0)) +
-                        coalesce(col("total_content_duration"), lit(0))
+                        coalesce(col("total_content_duration"), lit(0)) +
+                        coalesce(col("total_external_content_duration"), lit(0))
                         ) \
             .withColumn("weekly_claps_day_before_yesterday",
                         when(col("weekly_claps_day_before_yesterday").isNull() |
