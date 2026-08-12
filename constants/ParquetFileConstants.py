@@ -73,6 +73,7 @@ class ParquetFileConstants:
     USER_WAREHOUSE_COMPUTED_PARQUET_FILE = str(OUTPUT_COMPUTED_DIR / "user-warehouse-computed/")
     CONTENT_WAREHOUSE_COMPUTED_PARQUET_FILE = str(OUTPUT_COMPUTED_DIR / "content-warehouse-computed/")
     GAMIFICATION_BADGE_USER_ENROLMENT_PARQUET_FILE = str(OUTPUT_COMPUTED_DIR / "user_enrolment_badge_computed/")
+    CONTENT_HIERARCHY_FLATTENED_PARQUET_FILE = str(OUTPUT_COMPUTED_DIR / "content_hierarchy_flattened")
     ###
     ###  Output CSV File
     ###
