@@ -154,7 +154,7 @@ class UserAssessmentModel:
                 col("assessName").alias("Assessment_Name"),
                 col("Overall_Status"),
                 col("Assessment_Status"),
-                col("assessPassPercentage").alias("Percentage_Of_Score"),
+                col("assessOverallResult").alias("Percentage_Of_Score"),
                 col("noOfAttempts").alias("Number_of_Attempts"),
                 col("maskedEmail").alias("Email"),
                 col("maskedPhone").alias("Phone"),
