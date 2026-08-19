@@ -1,0 +1,1200 @@
+<title>cb-core-data — Pipeline Schematic</title>
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<style>
+  /* ============================= TOKENS ============================= */
+  :root {
+    color-scheme: light;
+    --surface:        #F1F3F7;
+    --surface-raised:  #FFFFFF;
+    --surface-sunken:  #E6E9F0;
+    --text-primary:    #12161F;
+    --text-secondary:  #4B5566;
+    --text-muted:      #7A8494;
+    --border:          #D8DEE7;
+    --border-strong:   #B9C2D0;
+    --accent:          #2A78D6;
+    --accent-ink:      #FFFFFF;
+    --stage0:          #1BAF7A;
+    --stage1:          #4A3AA7;
+    --stage2:          #EB6834;
+    --shared:          #5B6472;
+    --good:            #0CA30C;
+    --warning:         #B9770E;
+    --serious:         #C0552F;
+    --critical:        #D03B3B;
+    --shadow: 0 1px 2px rgba(20,26,40,.04), 0 8px 24px -8px rgba(20,26,40,.10);
+    --font-display: "Avenir Next", "Segoe UI Semibold", -apple-system, "Helvetica Neue", Arial, sans-serif;
+    --font-body: Charter, "Iowan Old Style", Georgia, "Times New Roman", serif;
+    --font-mono: ui-monospace, "SF Mono", "Cascadia Code", "Roboto Mono", Consolas, monospace;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root:where(:not([data-theme="light"])) {
+      color-scheme: dark;
+      --surface:        #12161F;
+      --surface-raised:  #1A2030;
+      --surface-sunken:  #0C0F16;
+      --text-primary:    #F3F5F9;
+      --text-secondary:  #B7C0CE;
+      --text-muted:      #7E8898;
+      --border:          #2A3244;
+      --border-strong:   #3A4458;
+      --accent:          #3987E5;
+      --accent-ink:      #08111F;
+      --stage0:          #199E70;
+      --stage1:          #9085E9;
+      --stage2:          #D95926;
+      --shared:          #8A93A3;
+      --good:            #3FBF3F;
+      --warning:         #FAB219;
+      --serious:         #EC835A;
+      --critical:        #E66767;
+      --shadow: 0 1px 2px rgba(0,0,0,.3), 0 8px 28px -8px rgba(0,0,0,.55);
+    }
+  }
+  :root[data-theme="dark"] {
+    color-scheme: dark;
+    --surface:        #12161F;
+    --surface-raised:  #1A2030;
+    --surface-sunken:  #0C0F16;
+    --text-primary:    #F3F5F9;
+    --text-secondary:  #B7C0CE;
+    --text-muted:      #7E8898;
+    --border:          #2A3244;
+    --border-strong:   #3A4458;
+    --accent:          #3987E5;
+    --accent-ink:      #08111F;
+    --stage0:          #199E70;
+    --stage1:          #9085E9;
+    --stage2:          #D95926;
+    --shared:          #8A93A3;
+    --good:            #3FBF3F;
+    --warning:         #FAB219;
+    --serious:         #EC835A;
+    --critical:        #E66767;
+    --shadow: 0 1px 2px rgba(0,0,0,.3), 0 8px 28px -8px rgba(0,0,0,.55);
+  }
+  :root[data-theme="light"] {
+    color-scheme: light;
+    --surface:        #F1F3F7;
+    --surface-raised:  #FFFFFF;
+    --surface-sunken:  #E6E9F0;
+    --text-primary:    #12161F;
+    --text-secondary:  #4B5566;
+    --text-muted:      #7A8494;
+    --border:          #D8DEE7;
+    --border-strong:   #B9C2D0;
+    --accent:          #2A78D6;
+    --accent-ink:      #FFFFFF;
+    --stage0:          #1BAF7A;
+    --stage1:          #4A3AA7;
+    --stage2:          #EB6834;
+    --shared:          #5B6472;
+    --good:            #0CA30C;
+    --warning:         #B9770E;
+    --serious:         #C0552F;
+    --critical:        #D03B3B;
+    --shadow: 0 1px 2px rgba(20,26,40,.04), 0 8px 24px -8px rgba(20,26,40,.10);
+  }
+
+  /* ============================= BASE ============================= */
+  * { box-sizing: border-box; }
+  html, body { margin: 0; padding: 0; }
+  body {
+    background: var(--surface);
+    color: var(--text-primary);
+    font-family: var(--font-body);
+    font-size: 16px;
+    line-height: 1.55;
+    -webkit-font-smoothing: antialiased;
+  }
+  a { color: var(--accent); text-decoration: none; }
+  a:hover { text-decoration: underline; }
+  h1, h2, h3, h4 {
+    font-family: var(--font-display);
+    font-weight: 700;
+    text-wrap: balance;
+    margin: 0;
+    color: var(--text-primary);
+    letter-spacing: -0.01em;
+  }
+  code, .mono { font-family: var(--font-mono); }
+  p { max-width: 66ch; }
+  :focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; border-radius: 3px; }
+  .eyebrow {
+    font-family: var(--font-display);
+    font-size: 11.5px;
+    font-weight: 700;
+    letter-spacing: .11em;
+    text-transform: uppercase;
+    color: var(--text-muted);
+  }
+  ::selection { background: color-mix(in srgb, var(--accent) 30%, transparent); }
+  @media (prefers-reduced-motion: reduce) {
+    * { animation-duration: 0.001ms !important; animation-iteration-count: 1 !important; transition-duration: 0.001ms !important; }
+  }
+
+  /* ============================= SHELL ============================= */
+  .shell { display: grid; grid-template-columns: 258px 1fr; min-height: 100vh; }
+  .rail {
+    position: sticky; top: 0; align-self: start; height: 100vh;
+    border-right: 1px solid var(--border);
+    background: var(--surface-raised);
+    display: flex; flex-direction: column;
+    padding: 22px 18px 18px;
+    overflow-y: auto;
+  }
+  .rail-brand { display: flex; align-items: baseline; gap: 8px; margin-bottom: 4px; }
+  .rail-brand .mark { font-family: var(--font-display); font-weight: 800; font-size: 19px; letter-spacing: -0.02em; }
+  .rail-brand .tag { font-family: var(--font-mono); font-size: 10.5px; color: var(--text-muted); }
+  .rail-sub { font-size: 12px; color: var(--text-muted); margin: 2px 0 18px; }
+  .search-box { position: relative; margin-bottom: 18px; }
+  .search-box input {
+    width: 100%; padding: 9px 12px 9px 30px; border-radius: 8px;
+    border: 1px solid var(--border-strong); background: var(--surface);
+    color: var(--text-primary); font-family: var(--font-body); font-size: 13.5px;
+  }
+  .search-box input::placeholder { color: var(--text-muted); }
+  .search-box svg { position: absolute; left: 9px; top: 50%; transform: translateY(-50%); width: 14px; height: 14px; stroke: var(--text-muted); }
+  .rail nav { display: flex; flex-direction: column; gap: 1px; margin-bottom: 20px; }
+  .rail nav a {
+    color: var(--text-secondary); font-family: var(--font-display); font-size: 13px; font-weight: 600;
+    padding: 7px 9px; border-radius: 6px; text-decoration: none;
+  }
+  .rail nav a:hover { background: var(--surface-sunken); color: var(--text-primary); }
+  .rail-legend { border-top: 1px solid var(--border); padding-top: 14px; margin-top: auto; }
+  .rail-legend .eyebrow { margin-bottom: 9px; display: block; }
+  .legend-row { display: flex; align-items: center; gap: 8px; font-size: 12px; color: var(--text-secondary); padding: 3px 0; }
+  .legend-dot { width: 9px; height: 9px; border-radius: 50%; flex: none; }
+  main { min-width: 0; padding: 0 0 80px; }
+
+  @media (max-width: 900px) {
+    .shell { grid-template-columns: 1fr; }
+    .rail { position: static; height: auto; border-right: none; border-bottom: 1px solid var(--border); }
+    .rail-legend { margin-top: 14px; }
+  }
+
+  /* ============================= HERO ============================= */
+  .hero { padding: 54px 48px 40px; max-width: 1180px; }
+  .hero .eyebrow { margin-bottom: 12px; }
+  .hero h1 { font-size: 38px; line-height: 1.08; max-width: 20ch; }
+  .hero .lede { font-family: var(--font-body); font-size: 17px; color: var(--text-secondary); margin: 16px 0 0; max-width: 62ch; }
+  .hero .branch-note {
+    margin-top: 18px; font-family: var(--font-mono); font-size: 12.5px; color: var(--text-muted);
+    border-left: 2px solid var(--stage1); padding-left: 12px; max-width: 60ch;
+  }
+  .stat-grid { display: grid; grid-template-columns: repeat(5, 1fr); gap: 12px; margin-top: 34px; }
+  .stat-tile {
+    background: var(--surface-raised); border: 1px solid var(--border); border-radius: 10px;
+    padding: 16px 16px 14px; box-shadow: var(--shadow);
+  }
+  .stat-tile .num {
+    font-family: var(--font-display); font-weight: 800; font-size: 27px; letter-spacing: -0.02em;
+    font-variant-numeric: tabular-nums; color: var(--text-primary);
+  }
+  .stat-tile .lbl { font-size: 12px; color: var(--text-muted); margin-top: 3px; line-height: 1.3; }
+  @media (max-width: 1100px) { .stat-grid { grid-template-columns: repeat(2, 1fr); } .hero { padding: 40px 24px; } }
+
+  /* ============================= SECTIONS ============================= */
+  section.block { padding: 10px 48px 56px; max-width: 1180px; }
+  section.block > .head { margin-bottom: 22px; }
+  section.block > .head h2 { font-size: 25px; }
+  section.block > .head .desc { color: var(--text-secondary); font-size: 14.5px; margin-top: 7px; max-width: 68ch; }
+  @media (max-width: 1100px) { section.block { padding: 10px 24px 48px; } }
+
+  /* ============================= SCHEMATIC ============================= */
+  .flow { display: flex; flex-direction: column; align-items: center; gap: 0; }
+  .flow-row { display: flex; flex-wrap: wrap; justify-content: center; gap: 10px; width: 100%; }
+  .flow-chip {
+    font-family: var(--font-mono); font-size: 12px; padding: 7px 12px; border-radius: 7px;
+    border: 1px solid var(--border-strong); background: var(--surface-raised); color: var(--text-secondary);
+  }
+  .flow-connector { width: 2px; height: 26px; position: relative; margin: 2px 0; background: var(--border-strong); }
+  .flow-connector::after {
+    content: ""; position: absolute; left: -4px; bottom: -1px; width: 0; height: 0;
+    border-left: 5px solid transparent; border-right: 5px solid transparent; border-top: 7px solid var(--border-strong);
+  }
+  .flow-connector.animated {
+    background: linear-gradient(var(--flow-col, var(--accent)) 50%, transparent 50%);
+    background-size: 2px 14px; animation: flowmove 0.6s linear infinite;
+  }
+  .flow-connector.animated::after { border-top-color: var(--flow-col, var(--accent)); }
+  @keyframes flowmove { to { background-position: 0 14px; } }
+  .stage-box {
+    border-radius: 12px; padding: 16px 22px; text-align: center; box-shadow: var(--shadow);
+    border: 1px solid var(--border); background: var(--surface-raised); min-width: 230px;
+  }
+  .stage-box .tag { font-family: var(--font-mono); font-size: 10.5px; letter-spacing: .06em; text-transform: uppercase; font-weight: 700; }
+  .stage-box h3 { font-size: 17px; margin-top: 4px; }
+  .stage-box .file { font-family: var(--font-mono); font-size: 11.5px; color: var(--text-muted); margin-top: 4px; }
+  .stage-box .meta { font-size: 12px; color: var(--text-secondary); margin-top: 8px; }
+  .stage0-box { border-top: 4px solid var(--stage0); }
+  .stage1-box { border-top: 4px solid var(--stage1); }
+  .stage2-fan { display: grid; grid-template-columns: repeat(5, 1fr); gap: 10px; width: 100%; max-width: 980px; }
+  .stage2-cat {
+    border-top: 4px solid var(--stage2); border-radius: 10px; padding: 12px 14px; background: var(--surface-raised);
+    border: 1px solid var(--border); border-top-width: 4px; box-shadow: var(--shadow); text-align: left;
+  }
+  .stage2-cat .n { font-family: var(--font-display); font-weight: 800; font-size: 20px; }
+  .stage2-cat .l { font-size: 12px; color: var(--text-secondary); margin-top: 2px; }
+  @media (max-width: 900px) { .stage2-fan { grid-template-columns: repeat(2,1fr); } }
+
+  /* ============================= FILTER BAR ============================= */
+  .filter-bar { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; margin-bottom: 22px; }
+  .chip {
+    font-family: var(--font-display); font-size: 12.5px; font-weight: 600; padding: 6px 13px; border-radius: 999px;
+    border: 1px solid var(--border-strong); background: var(--surface-raised); color: var(--text-secondary);
+    cursor: pointer; user-select: none; transition: background .12s, color .12s, border-color .12s;
+    display: inline-flex; align-items: center; gap: 6px;
+  }
+  .chip .dot { width: 7px; height: 7px; border-radius: 50%; }
+  .chip:hover { border-color: var(--border-strong); background: var(--surface-sunken); }
+  .chip.active { background: var(--text-primary); color: var(--surface); border-color: var(--text-primary); }
+  .chip.active .dot { filter: brightness(1.3); }
+  .result-count { font-size: 12.5px; color: var(--text-muted); margin-left: auto; font-family: var(--font-mono); }
+
+  /* ============================= JOB CARDS ============================= */
+  .job-grid { display: flex; flex-direction: column; gap: 10px; }
+  .job-card {
+    border: 1px solid var(--border); border-radius: 11px; background: var(--surface-raised);
+    box-shadow: var(--shadow); overflow: hidden;
+  }
+  .job-head { display: flex; align-items: flex-start; gap: 14px; padding: 15px 18px; cursor: pointer; }
+  .job-head .stagebar { width: 4px; border-radius: 3px; align-self: stretch; flex: none; }
+  .job-title-row { display: flex; align-items: baseline; gap: 10px; flex-wrap: wrap; }
+  .job-title-row h4 { font-size: 15.5px; }
+  .job-file { font-family: var(--font-mono); font-size: 11.5px; color: var(--text-muted); }
+  .job-purpose { font-size: 13.5px; color: var(--text-secondary); margin-top: 5px; max-width: 74ch; }
+  .job-main { flex: 1; min-width: 0; }
+  .job-quickstats { display: flex; gap: 14px; margin-top: 9px; flex-wrap: wrap; }
+  .qs { font-family: var(--font-mono); font-size: 11.5px; color: var(--text-muted); display: flex; gap: 5px; align-items: center; }
+  .qs b { color: var(--text-primary); font-weight: 700; }
+  .tagset { display: flex; gap: 6px; flex-wrap: wrap; margin-top: 2px; }
+  .tagpill {
+    font-family: var(--font-display); font-size: 10.5px; font-weight: 700; letter-spacing: .03em; text-transform: uppercase;
+    padding: 2px 8px; border-radius: 5px; white-space: nowrap;
+  }
+  .tagpill.core   { background: color-mix(in srgb, var(--good) 18%, transparent); color: var(--good); }
+  .tagpill.dep    { background: color-mix(in srgb, var(--warning) 20%, transparent); color: var(--warning); }
+  .tagpill.dead   { background: color-mix(in srgb, var(--critical) 18%, transparent); color: var(--critical); }
+  .tagpill.bug    { background: color-mix(in srgb, var(--serious) 20%, transparent); color: var(--serious); }
+  .tagpill.lib    { background: color-mix(in srgb, var(--shared) 22%, transparent); color: var(--shared); }
+  .chev { flex: none; margin-top: 3px; width: 16px; height: 16px; color: var(--text-muted); transition: transform .15s; }
+  .job-card.open .chev { transform: rotate(90deg); }
+  .job-body { display: none; padding: 0 18px 20px 18px; border-top: 1px solid var(--border); }
+  .job-card.open .job-body { display: block; }
+  .job-body-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 22px; margin-top: 16px; }
+  @media (max-width: 800px) { .job-body-grid { grid-template-columns: 1fr; } }
+  .jb-h { font-family: var(--font-display); font-size: 11px; font-weight: 700; letter-spacing: .08em; text-transform: uppercase; color: var(--text-muted); margin-bottom: 8px; }
+  .jb-list { list-style: none; margin: 0 0 16px; padding: 0; display: flex; flex-direction: column; gap: 6px; }
+  .jb-list li { font-size: 12.8px; color: var(--text-secondary); display: flex; gap: 7px; align-items: flex-start; line-height: 1.45; }
+  .src-badge {
+    font-family: var(--font-mono); font-size: 9.5px; font-weight: 700; padding: 1.5px 5px; border-radius: 4px;
+    flex: none; margin-top: 2px; white-space: nowrap; letter-spacing: .02em;
+  }
+  .jb-list code { font-size: 12px; background: var(--surface-sunken); padding: 1px 4px; border-radius: 4px; }
+  .proc-list li::before { content: "—"; color: var(--text-muted); flex: none; }
+  .write-block { margin-bottom: 10px; }
+  .write-block .k { font-family: var(--font-mono); font-size: 10.5px; font-weight: 700; text-transform: uppercase; color: var(--text-muted); letter-spacing: .05em; }
+  .write-block .v { font-size: 12.8px; color: var(--text-secondary); margin-top: 2px; }
+  .write-block .v code { font-size: 12px; }
+  .downstream-note { margin-top: 4px; font-size: 12.8px; color: var(--text-secondary); border-top: 1px dashed var(--border); padding-top: 12px; }
+  .downstream-note b { color: var(--text-primary); }
+
+  /* ============================= DICTIONARY TABLES ============================= */
+  .table-wrap { overflow-x: auto; border: 1px solid var(--border); border-radius: 10px; background: var(--surface-raised); box-shadow: var(--shadow); }
+  table.data-table { width: 100%; border-collapse: collapse; font-size: 12.8px; min-width: 640px; }
+  table.data-table th {
+    text-align: left; font-family: var(--font-display); font-size: 10.5px; text-transform: uppercase; letter-spacing: .06em;
+    color: var(--text-muted); padding: 10px 14px; border-bottom: 1px solid var(--border); background: var(--surface-sunken);
+    position: sticky; top: 0;
+  }
+  table.data-table td { padding: 9px 14px; border-bottom: 1px solid var(--border); color: var(--text-secondary); vertical-align: top; }
+  table.data-table td.mono, table.data-table code { font-family: var(--font-mono); font-size: 12px; color: var(--text-primary); }
+  table.data-table tr:last-child td { border-bottom: none; }
+  table.data-table tr:hover td { background: var(--surface-sunken); }
+  .dict-sub { margin: 30px 0 14px; }
+  .dict-sub h3 { font-size: 16px; }
+  .dict-sub .desc { font-size: 13px; color: var(--text-muted); margin-top: 4px; }
+  .status-dot { display: inline-block; width: 7px; height: 7px; border-radius: 50%; margin-right: 6px; vertical-align: middle; }
+
+  /* ============================= DEPLOY TIMELINE ============================= */
+  .timeline { display: flex; flex-direction: column; gap: 0; border-left: 2px solid var(--border-strong); margin-left: 10px; }
+  .tl-step { position: relative; padding: 0 0 26px 26px; }
+  .tl-step::before {
+    content: attr(data-n); position: absolute; left: -13px; top: -2px; width: 24px; height: 24px; border-radius: 50%;
+    background: var(--accent); color: var(--accent-ink); font-family: var(--font-mono); font-size: 11px; font-weight: 700;
+    display: flex; align-items: center; justify-content: center;
+  }
+  .tl-step h4 { font-size: 14.5px; }
+  .tl-step p { font-size: 13px; color: var(--text-secondary); margin: 5px 0 0; max-width: 68ch; }
+  .tl-step .note { font-family: var(--font-mono); font-size: 11.5px; color: var(--text-muted); margin-top: 5px; }
+
+  /* ============================= ISSUES ============================= */
+  .issue-list { display: flex; flex-direction: column; gap: 8px; }
+  .issue {
+    display: flex; gap: 12px; padding: 12px 16px; border-radius: 9px; border: 1px solid var(--border);
+    background: var(--surface-raised); align-items: flex-start;
+  }
+  .issue .sev { flex: none; font-family: var(--font-mono); font-size: 10px; font-weight: 700; padding: 3px 7px; border-radius: 5px; margin-top: 1px; text-transform: uppercase; letter-spacing: .04em; }
+  .issue p { font-size: 13px; color: var(--text-secondary); margin: 0; max-width: none; }
+  .issue p code { font-size: 12px; }
+  .issue p b { color: var(--text-primary); }
+
+  footer.page-footer {
+    padding: 30px 48px 60px; max-width: 1180px; border-top: 1px solid var(--border); margin-top: 20px;
+    font-size: 12.5px; color: var(--text-muted);
+  }
+  @media (max-width: 1100px) { footer.page-footer { padding: 30px 24px 60px; } }
+  .hidden { display: none !important; }
+</style>
+
+<div class="shell">
+  <aside class="rail">
+    <div class="rail-brand"><span class="mark">cb-core-data</span><span class="tag">v4.8.39.1-hotfix</span></div>
+    <div class="rail-sub">Karmayogi Bharat analytics pipeline</div>
+    <div class="search-box">
+      <svg viewBox="0 0 24 24" fill="none" stroke-width="2"><circle cx="11" cy="11" r="7"/><path d="M21 21l-4.3-4.3"/></svg>
+      <input id="searchInput" type="text" placeholder="Search jobs, tables, paths…" autocomplete="off" />
+    </div>
+    <nav>
+      <a href="#overview">Overview</a>
+      <a href="#schematic">Pipeline map</a>
+      <a href="#index">Job index</a>
+      <a href="#dictionary">Data dictionary</a>
+      <a href="#deploy">Deployment flow</a>
+      <a href="#issues">Known issues</a>
+    </nav>
+    <div class="rail-legend">
+      <span class="eyebrow">Stage legend</span>
+      <div class="legend-row"><span class="legend-dot" style="background:var(--stage0)"></span>Stage 0 — Extract</div>
+      <div class="legend-row"><span class="legend-dot" style="background:var(--stage1)"></span>Stage 1 — Prejoin</div>
+      <div class="legend-row"><span class="legend-dot" style="background:var(--stage2)"></span>Stage 2 — Reports &amp; sync</div>
+      <div class="legend-row"><span class="legend-dot" style="background:var(--shared)"></span>Shared library</div>
+    </div>
+  </aside>
+
+  <main>
+    <header class="hero" id="overview">
+      <span class="eyebrow">Engineering reference · branch cbrelease-4.8.39.1-hotfix</span>
+      <h1>Every job in the Karmayogi Bharat data pipeline, mapped end to end.</h1>
+      <p class="lede">
+        A three-stage PySpark + DuckDB batch pipeline that turns raw platform activity
+        (Cassandra, Elasticsearch, Redis, MongoDB, Druid, Postgres) into 40 requirement-specific
+        reports, a Postgres/BigQuery data warehouse, and the live Redis cache behind the admin
+        dashboard. This page inventories what every job reads, joins, computes and writes —
+        built for someone opening this repository for the first time.
+      </p>
+      <div class="branch-note">
+        Reflects <b style="color:var(--text-secondary)">cbrelease-4.8.39.1-hotfix</b> — the pipeline logic before
+        the performance-profiling/phase-clock instrumentation added in later branches. That
+        instrumentation wraps timing around these same jobs; it changes nothing described here.
+      </div>
+      <div class="stat-grid">
+        <div class="stat-tile"><div class="num">42</div><div class="lbl">pipeline jobs across 3 stages</div></div>
+        <div class="stat-tile"><div class="num">9</div><div class="lbl">external systems read (Cassandra, ES, Redis, Mongo, Druid, 2×Postgres, Kafka, REST)</div></div>
+        <div class="stat-tile"><div class="num">58</div><div class="lbl">named Parquet datasets (31 raw + 27 computed)</div></div>
+        <div class="stat-tile"><div class="num">12</div><div class="lbl">warehouse tables synced to Postgres + BigQuery</div></div>
+        <div class="stat-tile"><div class="num">16</div><div class="lbl">engineering issues flagged in this read</div></div>
+      </div>
+    </header>
+
+    <section class="block" id="schematic">
+      <div class="head">
+        <h2>How data moves through the system</h2>
+        <p class="desc">Stage 0 pulls everything raw into Parquet caches. Stage 1 joins those caches into a handful of reusable "computed" tables. Stage 2 is ~40 independent jobs, each reading the computed tables to build one report, warehouse table, or cache entry.</p>
+      </div>
+      <div class="flow">
+        <div class="flow-row">
+          <span class="flow-chip">Cassandra</span><span class="flow-chip">Elasticsearch</span>
+          <span class="flow-chip">Postgres (app)</span><span class="flow-chip">MongoDB</span>
+          <span class="flow-chip">Druid</span><span class="flow-chip">External REST APIs</span>
+        </div>
+        <div class="flow-connector animated" style="--flow-col:var(--stage0)"></div>
+        <div class="stage-box stage0-box">
+          <div class="tag" style="color:var(--stage0)">Stage 0 · Extract</div>
+          <h3>dataExhaust.py</h3>
+          <div class="file">jobs/stage-0/dataExhaust.py</div>
+          <div class="meta">~29 reads → 27 raw Parquet caches · 4 joins</div>
+        </div>
+        <div class="flow-connector animated" style="--flow-col:var(--stage1)"></div>
+        <div class="stage-box stage1-box">
+          <div class="tag" style="color:var(--stage1)">Stage 1 · Prejoin</div>
+          <h3>prejoinData.py</h3>
+          <div class="file">jobs/stage-1/prejoinData.py + 7 dfutil modules</div>
+          <div class="meta">18 orchestrated steps → ~27 computed Parquet tables · 45+ joins</div>
+        </div>
+        <div class="flow-connector animated" style="--flow-col:var(--stage2)"></div>
+        <div class="stage2-fan">
+          <div class="stage2-cat"><div class="n">3</div><div class="l">Warehouse &amp; dashboard sync</div></div>
+          <div class="stage2-cat"><div class="n">8</div><div class="l">Compliance &amp; enrolment reports</div></div>
+          <div class="stage2-cat"><div class="n">10</div><div class="l">Gamification &amp; scoring</div></div>
+          <div class="stage2-cat"><div class="n">10</div><div class="l">Leaderboards, metrics &amp; campaigns</div></div>
+          <div class="stage2-cat"><div class="n">10</div><div class="l">Surveys, user reports &amp; export</div></div>
+        </div>
+        <div class="flow-connector animated"></div>
+        <div class="flow-row">
+          <span class="flow-chip">Postgres warehouse</span><span class="flow-chip">BigQuery</span>
+          <span class="flow-chip">Redis (dashboard)</span><span class="flow-chip">Cassandra</span>
+          <span class="flow-chip">Kafka</span><span class="flow-chip">GCS (zipped reports)</span>
+        </div>
+      </div>
+    </section>
+
+    <section class="block" id="index">
+      <div class="head">
+        <h2>Job index</h2>
+        <p class="desc">Every job, filterable by stage and searchable by name, file or table. Click a card to see exactly what it reads, joins, computes and writes.</p>
+      </div>
+      <div class="filter-bar" id="filterBar">
+        <span class="chip active" data-filter="all">All</span>
+        <span class="chip" data-filter="0"><span class="dot" style="background:var(--stage0)"></span>Stage 0</span>
+        <span class="chip" data-filter="1"><span class="dot" style="background:var(--stage1)"></span>Stage 1</span>
+        <span class="chip" data-filter="warehouse-sync"><span class="dot" style="background:var(--stage2)"></span>Warehouse sync</span>
+        <span class="chip" data-filter="compliance"><span class="dot" style="background:var(--stage2)"></span>Compliance</span>
+        <span class="chip" data-filter="gamification"><span class="dot" style="background:var(--stage2)"></span>Gamification</span>
+        <span class="chip" data-filter="engagement"><span class="dot" style="background:var(--stage2)"></span>Leaderboards &amp; campaigns</span>
+        <span class="chip" data-filter="export"><span class="dot" style="background:var(--stage2)"></span>Surveys &amp; export</span>
+        <span class="result-count" id="resultCount"></span>
+      </div>
+      <div class="job-grid" id="jobGrid"></div>
+    </section>
+
+    <section class="block" id="dictionary">
+      <div class="head">
+        <h2>Data dictionary</h2>
+        <p class="desc">The authoritative name for every dataset in the pipeline, sourced from <code>constants/ParquetFileConstants.py</code> and the warehouse-sync jobs.</p>
+      </div>
+
+      <div class="dict-sub">
+        <h3>Warehouse tables — Postgres &amp; BigQuery</h3>
+        <p class="desc">Written locally as Parquet under <code>warehouseReportDir</code>, then pushed by <code>dataWarehouse.py</code> / <code>dataWarehouseBash.sh</code> (Postgres, full truncate + reload every run) and <code>bq-scripts.sh</code> (BigQuery, full drop + recreate + load every run).</p>
+      </div>
+      <div class="table-wrap"><table class="data-table" id="warehouseTable">
+        <thead><tr><th>Table</th><th>Populated by</th><th>Postgres</th><th>BigQuery</th><th>Content</th></tr></thead>
+        <tbody></tbody>
+      </table></div>
+
+      <div class="dict-sub">
+        <h3>Raw Parquet caches — written by Stage 0</h3>
+        <p class="desc">Live under <code>data-res/pq_files/cache_pq/&lt;name&gt;/</code>. One folder per Cassandra table, Elasticsearch query, or Postgres table pulled straight from source.</p>
+      </div>
+      <div class="table-wrap"><table class="data-table" id="rawTable">
+        <thead><tr><th>Constant</th><th>Folder</th><th>Source</th></tr></thead>
+        <tbody></tbody>
+      </table></div>
+
+      <div class="dict-sub">
+        <h3>Computed Parquet tables — written by Stage 1</h3>
+        <p class="desc">Live under <code>output/computed/&lt;name&gt;/</code>. These are the tables almost every Stage 2 job reads from.</p>
+      </div>
+      <div class="table-wrap"><table class="data-table" id="computedTable">
+        <thead><tr><th>Constant</th><th>Folder</th><th>Built by</th></tr></thead>
+        <tbody></tbody>
+      </table></div>
+    </section>
+
+    <section class="block" id="deploy">
+      <div class="head">
+        <h2>From commit to running pipeline</h2>
+        <p class="desc">The deployment path is fully visible in this repo; the run-time <em>schedule</em> is not — no cron or Airflow DAG file lives here. <code>gamification/prerequisites.md</code> and an <code>airflowData/</code> path constant both point to an external Airflow instance as the real scheduler.</p>
+      </div>
+      <div class="timeline" id="deployTimeline"></div>
+    </section>
+
+    <section class="block" id="issues">
+      <div class="head">
+        <h2>Known issues found while reading the code</h2>
+        <p class="desc">Flagged for engineering awareness during this read-only analysis — nothing here was changed.</p>
+      </div>
+      <div class="issue-list" id="issueList"></div>
+    </section>
+
+    <footer class="page-footer">
+      Generated from a direct read of <code>cbrelease-4.8.39.1-hotfix</code> (all 42 jobs, every <code>dfutil</code> helper,
+      every deployment script). The current working branch adds a performance-profiling/phase-clock layer around these
+      same jobs — intentionally excluded here per the request that produced this page. See
+      <code>docs/ARCHITECTURE.md</code>, <code>docs/JOB_DETAILS.md</code> and <code>docs/DATA_DICTIONARY.md</code> for the
+      full written reference.
+    </footer>
+  </main>
+</div>
+
+<script>
+/* ============================================================================
+   DATA
+   Read-type prefixes: C=Cassandra  ES=Elasticsearch  PGa=Postgres(app db)
+   PGw=Postgres(warehouse db, direct)  Mongo  Druid  API=external REST
+   PQr=raw Parquet cache  PQ=Stage-1 computed Parquet  PQw=warehouse-export Parquet
+   Write-type prefixes: same, plus Redis, Kafka, CSV
+============================================================================= */
+const SRC_COLORS = {
+  C:   'var(--stage0)',  ES:  'var(--stage0)', PGa: 'var(--stage1)', PGw: 'var(--stage1)',
+  Mongo: 'var(--stage0)', Druid: 'var(--stage0)', API: 'var(--stage0)',
+  PQr: 'var(--shared)', PQ: 'var(--stage1)', PQw: 'var(--stage2)',
+  Redis: 'var(--stage2)', Kafka: 'var(--stage2)', CSV: 'var(--stage2)'
+};
+function srcBadge(str) {
+  const m = str.match(/^([A-Za-z]+):\s*(.*)$/);
+  if (!m) return `<li><span class="src-badge" style="background:var(--surface-sunken);color:var(--text-muted)">·</span>${str}</li>`;
+  const [, type, rest] = m;
+  const col = SRC_COLORS[type] || 'var(--text-muted)';
+  return `<li><span class="src-badge" style="background:color-mix(in srgb, ${col} 20%, transparent); color:${col}">${type}</span>${rest}</li>`;
+}
+
+const JOBS = [
+{ id:'dataExhaust', stage:0, group:'foundation', name:'Data Exhaust (raw extraction)', file:'jobs/stage-0/dataExhaust.py',
+  tags:['core'],
+  purpose:'The single point of entry for every raw external system in the pipeline. Reads Cassandra, Elasticsearch and Postgres directly and caches every result as Parquet — nothing downstream ever talks to a live source again.',
+  reads:['C: cassandraUserEnrolmentsTable, cassandraCourseBatchTable (course keyspace)','C: framework/content/questionset hierarchy tables (hierarchy-store keyspace)','C: userAssessment, ratingSummary, acbp, ratings, userRoles, org, oldAssessment, user, learnerLeaderBoard, karmaPoints ×2, userExtendedProfile (user keyspace)','C: sunbird_courses.user_external_enrolments, enrollment_history_by_action, access_setting_rules_v2','ES: compositesearch — content, events, final/course assessment (4 separate queries)','ES: fs-forms-data-alias-v2 — course completion survey','PGa: org_hierarchy_v4, learner_stats (cios/dwLearnerStats), cios_content_entity'],
+  joins:['LEFT · Cassandra org ⋈ Postgres org_hierarchy_v4 on sborgid — attach ministry/dept hierarchy','LEFT · + ministry lookup on l1mapid','LEFT · + department lookup on l2mapid','LEFT · Event enrolments ⋈ Event details on event_id — attach duration'],
+  proc:['29 distinct reads fan into 27 raw Parquet folders — the widest single job in the repo','Builds org hierarchy by joining the Cassandra org table against Postgres org_hierarchy_v4 three times (self, ministry, department)','Flattens nested ES event JSON (speakers, recorded links) and formats durations as HH:MM:SS','Reads oldAssessmentTable via a "safe columns" path that excludes timestamp columns known to overflow'],
+  writes:{ parquet:['27 raw caches under data-res/pq_files/cache_pq/ — enrolment, batch, kcmV6, questionsetHierarchy, userAssessmentRaw, hierarchy, ratingSummary, acbp, rating, role, esContent, org, orgHierarchy, orgCompleteHierarchy, weeklyClaps, externalContent, externalCourseEnrolments, unenrolledUserAudit, oldAssessmentDetails, user, learnerLeaderBoard, userKarmaPoints, userKarmaPointsSummary, eventDetails, eventEnrolmentDetails, userExtendedProfile, esFinalAssessment, esCourseAssessment, accessControlSettings, courseCompletionSurvey'] },
+  downstream:'Every Stage 1 and most Stage 2 jobs read from these caches. Nothing runs before this job.' },
+
+{ id:'prejoinData', stage:1, group:'foundation', name:'Prejoin &amp; Compute (18-step pipeline)', file:'jobs/stage-1/prejoinData.py',
+  tags:['core'],
+  purpose:'A thin orchestrator that runs 18 join/derive steps from 7 shared "dfutil" library modules, turning raw per-table caches into the handful of denormalized "computed" tables that almost every Stage 2 job reads from.',
+  reads:['PQr: every raw cache dataExhaust.py wrote (user, org, enrolment, batch, rating, ratingSummary, esContent, acbp, userAssessmentRaw, questionsetHierarchy, externalContent, externalCourseEnrolments, userKarmaPoints, weeklyClaps, eventEnrolmentDetails)'],
+  joins:['~45 joins total across the 7 dfutil modules — see each module below'],
+  proc:[
+    '1. assessmentDFUtil.parse_raw_assessment_data — derives section-vs-overall pass/fail logic, writes a cleaned "userAssessment" back into the raw cache dir',
+    '2–9. userDFUtil + contentDFUtil steps — build org-with-hierarchy, rating/summary, ES course/program catalog, content master, content hierarchy, assessment-ES frame, external content, user profile',
+    '10–13. enrolmentDFUtil + userDFUtil steps — enrolment master, external enrolment, org×user mapping, enrolment-warehouse frame',
+    '14–16. userDFUtil.preComputeUserWarehouseData, contentDFUtil.preComputeContentWarehouseData, contentDFUtil.writeWarehouseParquetFiles — build the three warehouse-facing master tables (user, content, enrolment) plus org_hierarchy/event_details/event_enrolment_details written directly to warehouseReportDir',
+    '17. assessmentDFUtil.precomputeOldAssessmentDataframe — legacy pre-migration assessment records',
+    '18. acbpDFUtil_v3.preComputeACBPData — the ACBP allocation engine (see below)'
+  ],
+  writes:{ parquet:['27 computed tables under output/computed/ — see Data dictionary'],
+           warehouse:['warehouse/org_hierarchy, warehouse/event_details, warehouse/event_enrolment_details — written directly here, bypassing the computed/ convention'] },
+  downstream:'USER_ORG_COMPUTED_FILE, CONTENT_COMPUTED_PARQUET_FILE and ENROLMENT_COMPUTED_PARQUET_FILE are read by nearly every one of the 40 Stage 2 jobs below.' },
+
+{ id:'dfutil-user', stage:1, group:'foundation', name:'dfutil/user/userDFUtil.py', file:'dfutil/user/userDFUtil.py', tags:['lib'],
+  purpose:'User profile parsing, org-hierarchy attachment, and the final user-warehouse builder. 8 joins.',
+  reads:['PQ: USER_PARQUET_FILE, ROLE, USER_KARMA_POINTS, CLAPS, ORG, ORG_HIERARCHY, ORG_COMPUTED, USER_COMPUTED, ENROLMENT_WAREHOUSE_COMPUTED, CONTENT_COMPUTED, EVENT_ENROLMENT'],
+  joins:['LEFT · user ⋈ role (concatenated) on userID','LEFT · + karma points (summed) on userID','LEFT · + weekly claps on userID','LEFT · org ⋈ org-hierarchy on orgID','INNER · user ⋈ org (default join) on userOrgID — produces USER_ORG_COMPUTED_FILE, the master table','LEFT · enrolment ⋈ content-duration on content_id','LEFT · user-master ⋈ enrolment-aggregates on userID','INNER · enrolment ⋈ event-details on userID'],
+  proc:['Parses the nested profileDetails JSON blob (personal/employment/professional/cadre details) into flat columns','preComputeOrgHierarchyWithUser produces USER_ORG_COMPUTED_FILE — the single most-read table in the whole repo'],
+  writes:{ parquet:['USER_SELECT, USER_COMPUTED, ORG_SELECT, ORG_HIERARCHY_SELECT, ORG_COMPUTED, USER_ORG_COMPUTED, USER_WAREHOUSE_COMPUTED'] },
+  downstream:'USER_ORG_COMPUTED_FILE is read directly by ~20 of the 40 Stage 2 jobs.' },
+
+{ id:'dfutil-content', stage:1, group:'foundation', name:'dfutil/content/contentDFUtil.py', file:'dfutil/content/contentDFUtil.py', tags:['lib'],
+  purpose:'Builds the master content catalog (course/program metadata + ratings + org) and the content-warehouse table. 11 joins.',
+  reads:['PQ: ESCONTENT, RATING_SUMMARY, RATING, ALL_COURSE_PROGRAM_COMPUTED, CONTENT_RATING_COMPUTED, ORG_COMPUTED, EXTERNAL_CONTENT, HIERARCHY, ENROLMENT_COMPUTED, BATCH_SELECT, EXTERNAL_ENROLMENT_COMPUTED, EXTERNAL_CONTENT_COMPUTED'],
+  joins:['LEFT · content ⋈ content-rating on courseID','LEFT · + org on courseOrgID — produces CONTENT_COMPUTED, the master content table','LEFT · enrolment ⋈ resource-count on courseID','LEFT · content ⋈ completion-aggregates on courseID','INNER then broadcast LEFT · Blended-Program subset ⋈ batch data on courseID','OUTER · marketplace content ⋈ marketplace enrolment-aggregates on content_id','LEFT · + SCORM-detection flags on courseID','LEFT · event-enrolments ⋈ karma points on (user_id, event_id)'],
+  proc:['preComputeContentWarehouseData unions platform content with marketplace/external content into one warehouse-shaped frame','writeWarehouseParquetFiles writes org_hierarchy/event_details/event_enrolment_details straight to warehouseReportDir (a second, independent producer of the warehouse "content" table alongside courseReport.py — see Known Issues)'],
+  writes:{ parquet:['ALL_COURSE_PROGRAM_COMPUTED, RATING_SUMMARY_COMPUTED, RATING_COMPUTED, CONTENT_RATING_COMPUTED, EXTERNAL_CONTENT_COMPUTED, CONTENT_HIERARCHY_SELECT, CONTENT_COMPUTED, CONTENT_WAREHOUSE_COMPUTED'],
+       warehouse:['warehouse/org_hierarchy, warehouse/event_details, warehouse/event_enrolment_details (direct writes)'] },
+  downstream:'CONTENT_COMPUTED_PARQUET_FILE is read by ~18 Stage 2 jobs.' },
+
+{ id:'dfutil-enrolment', stage:1, group:'foundation', name:'dfutil/enrolment/enrolmentDFUtil.py', file:'dfutil/enrolment/enrolmentDFUtil.py', tags:['lib'],
+  purpose:'Builds the master enrolment table (platform completion status, batch, rating, karma) and the warehouse-facing enrolment frame used by dashboardSync.py\'s entire query library. 6 joins.',
+  reads:['PQ: ENROLMENT_PARQUET_FILE, BATCH_PARQUET_FILE, RATING_COMPUTED, USER_KARMA_POINTS, EXTERNAL_COURSE_ENROLMENTS, USER_ORG_COMPUTED_FILE, CONTENT_COMPUTED, EXTERNAL_ENROLMENT_COMPUTED, EXTERNAL_CONTENT_COMPUTED'],
+  joins:['LEFT · enrolment ⋈ batch on (courseID, batchID)','LEFT · + user rating on (userID, courseID)','LEFT · + karma points on (userID, courseID) — produces ENROLMENT_COMPUTED, the master enrolment table','LEFT · enrolment ⋈ content-org on courseID (shared preComputeUserOrgEnrolment helper)','LEFT · + user-org on userID','INNER · external content ⋈ external enrolment on content_id — unioned with the platform frame to produce ENROLMENT_WAREHOUSE_COMPUTED'],
+  proc:['Derives enrolment_status (enrolled/unenrolled) from Cassandra\'s "active" flag','preComputeUserOrgEnrolment (shared helper) derives completionPercentage, completionStatus and userCourseCompletionStatus — reused by courseReport.py, unenrollmentReport.py and userEnrolment.py'],
+  writes:{ parquet:['ENROLMENT_SELECT, BATCH_SELECT, ENROLMENT_COMPUTED, EXTERNAL_ENROLMENT_COMPUTED, ENROLMENT_WAREHOUSE_COMPUTED'] },
+  downstream:'ENROLMENT_WAREHOUSE_COMPUTED_PARQUET_FILE feeds the entire QueryConstants.py library used by dashboardSync.py.' },
+
+{ id:'dfutil-assessment', stage:1, group:'foundation', name:'dfutil/assessment/assessmentDFUtil.py', file:'dfutil/assessment/assessmentDFUtil.py', tags:['lib'],
+  purpose:'Assessment scoring engine — decides pass/fail using section-level or overall-result cutoffs, and holds the reusable join helpers most assessment report jobs call directly. 12 joins.',
+  reads:['PQr: QUESTIONSET_HIERARCHY, ASSESSMENT_DATA_RAW (userAssessmentRaw), OLD_ASSESSMENT','PQ: ALL_COURSE_PROGRAM_COMPUTED, USER_ORG_COMPUTED_FILE'],
+  joins:['LEFT · old-assessment ⋈ course on courseID','LEFT · + user-org on userID','LEFT · assessment ⋈ org on assessOrgID','LEFT · df ⋈ hierarchy on identifier (shared add_hierarchy_column helper — reused by 3+ report jobs)','INNER · user-attempt ⋈ assessment-children on assessChildID','LEFT · + assessment details on assessID','LEFT · + course details on courseID','LEFT · + user-org on userID','LEFT · course ⋈ rating on (courseID, categoryLower)','LEFT · course ⋈ org on courseOrgID','INNER · section-wise results ⋈ questionset hierarchy on assessChildID=questionsetID','LEFT · raw attempts ⋈ section-derived results on (assessChildID, userID, assessStartTimestamp) — deliberately LEFT not INNER, to keep every raw attempt even where section logic doesn\'t apply'],
+  proc:['Section-level cutoff: pass requires every section to pass. Overall-result cutoff: pass requires the overall score ≥ the configured minimum','Writes its output back into the RAW cache directory (userAssessment) rather than the computed/ dir — a deliberate "clean the raw cache in place" step'],
+  writes:{ parquet:['ALL_ASSESSMENT_COMPUTED, OLD_ASSESSMENT_COMPUTED', 'raw cache: userAssessment (cleaned)'] },
+  downstream:'assessmentReport.py, courseBasedAssessmentReport.py, l2Assessments.py and kcmReport.py all depend on the cleaned userAssessment cache.' },
+
+{ id:'dfutil-acbp', stage:1, group:'foundation', name:'dfutil/enrolment/acbp/acbpDFUtil_v3.py', file:'dfutil/enrolment/acbp/acbpDFUtil_v3.py', tags:['lib'],
+  purpose:'The ACBP allocation engine — resolves which users are mandated onto which competency-based training plan, matching 9 criteria types (org, designation, cadre, group, batch, service, custom fields…) against every active plan. Runs in DuckDB, not Spark, for scale.',
+  reads:['PQr: ACBP_PARQUET_FILE (raw Cassandra cbp_plan dump), userExtendedProfile', 'PQ: USER_ORG_COMPUTED_FILE'],
+  joins:['~40 SQL joins in DuckDB: for each of 9 criteria types, one INNER match join + one LEFT org-scoping-guard join, run twice (org-scoped plans + global plans), chunked 2M users at a time'],
+  proc:['AND-within-userGroup / OR-between-userGroups semantics: a user must satisfy every criterion in one group, but satisfying any one group on a plan is enough','acbpDFUtil.py (legacy, non-v3) is imported by dfexportutil.py but never actually called — dead code'],
+  writes:{ parquet:['ACBP_SELECT_FILE, ACBP_COMPUTED_FILE (final user × plan allocation list)'] },
+  downstream:'ACBP_COMPUTED_FILE is read by acbpReport.py, userEnrolment.py, unenrollmentReport.py and l2Assessments.py.' },
+
+{ id:'dfutil-export', stage:1, group:'foundation', name:'dfutil/dfexport/dfexportutil.py', file:'dfutil/dfexport/dfexportutil.py', tags:['lib'],
+  purpose:'The shared CSV-export layer used by ~15 report jobs. Decides, per organization, whether to write CSV directly via Spark or route through a DuckDB parquet→CSV conversion for very large orgs.',
+  reads:[], joins:[],
+  proc:['write_csv_per_mdo_id / write_csv_per_mdo_id_duckdb: hybrid strategy — orgs ≤100k rows written directly; larger orgs go through a temp partitioned-Parquet → DuckDB → CSV path, parallelized','write_single_csv_duckdb: one combined CSV for admin/central consumption','write_csv_combined: writes both a single combined CSV and per-org partitioned CSVs in one call','Produces the folder convention used everywhere: <output_dir>/mdoid=&lt;org_id&gt;/&lt;report&gt;.csv'],
+  writes:{ other:['This is the write mechanism itself — see individual report jobs for their output paths'] },
+  downstream:'Every per-MDO CSV report in this pipeline is written through this module.' },
+
+{ id:'dataWarehouse', stage:2, group:'warehouse-sync', name:'Data Warehouse Sync (Postgres, Spark/JDBC)', file:'jobs/stage-2/dataWarehouse.py', tags:['core'],
+  purpose:'Reads the local Parquet snapshots every report job stages under warehouseReportDir and JDBC-writes each straight into the Postgres warehouse schema — a full truncate-and-reload of every table, every run.',
+  reads:['PQw: warehouse/user_detail, content, assessment_detail, bp_enrolments, content_resource, cb_plan, org_hierarchy, kcm_content_mapping, kcm_dictionary, event_details, event_enrolment_details, user_enrolments (12 reads)'],
+  joins:['0 — this job does no dataframe joins at all; it is a pure read → cast → JDBC-overwrite pipeline'],
+  proc:['course_completion_survey_details is staged as Parquet by courseCompletionSurveyReport.py but its Postgres-push line here is commented out — not currently synced'],
+  writes:{ warehouse:['12 Postgres tables, mode=overwrite (full truncate + reload): user_detail, content, assessment_detail, bp_enrolments, content_resource, cb_plan, org_hierarchy, kcm_content_mapping, kcm_dictionary, events, events_enrolment, user_enrolments'] },
+  downstream:'This is the canonical Postgres warehouse-sync job. bq-scripts.sh then loads the same 12 (+2) local Parquet folders into BigQuery.' },
+
+{ id:'dataWarehouseBash', stage:2, group:'warehouse-sync', name:'Data Warehouse Sync (DuckDB, alternate implementation)', file:'jobs/stage-2/dataWarehouseBash.sh', tags:['dep'],
+  purpose:'A bash/DuckDB reimplementation of the exact same responsibility as dataWarehouse.py, with explicit column casts, dedup and NULL-FK filtering — more schema-safe than the Spark/JDBC version. Both exist in this branch; which one is actually cron-scheduled in production is not visible from the repo alone.',
+  reads:['PQw: the same 12(+1) warehouseReportDir Parquet folders, read via read_parquet(...) in DuckDB'],
+  joins:['0 — straight TRUNCATE + INSERT per table'],
+  proc:['Lightweight → heavyweight execution order; user_enrolments (~19GB) deliberately loaded last','Deduplicates `content` via ROW_NUMBER() before insert; filters NULL foreign keys on bp_enrolments/assessment_detail/user_enrolments before insert — schema-safety dataWarehouse.py lacks','Shells out to `python3 -c "from jobs.config import get_environment_config"` to read Postgres connection details'],
+  writes:{ warehouse:['Same 12 Postgres tables via DuckDB ATTACH ... TYPE postgres; TRUNCATE; INSERT'] },
+  downstream:'Same consumers as dataWarehouse.py.' },
+
+{ id:'dashboardSync', stage:2, group:'warehouse-sync', name:'Dashboard Sync (Redis-only)', file:'jobs/stage-2/dashboardSync.py', tags:['core'],
+  purpose:'The engine behind the live admin/learner dashboard. Runs ~15 metric phases against the warehouse-computed Parquet tables via DuckDB SQL, and writes every single result into Redis — never Postgres. This is what makes the dashboard feel real-time.',
+  reads:['PQw: ENROLMENT_WAREHOUSE_COMPUTED, USER_WAREHOUSE_COMPUTED, CONTENT_WAREHOUSE_COMPUTED, ORG_COMPUTED and ~15 more, all via QueryConstants.py DuckDB SQL'],
+  joins:['50+ SQL joins across ~40 named queries in constants/QueryConstants.py — a shared BASE_DATA_COMPLETE CTE (enrolment ⋈ user ⋈ content ⋈ org) is reused by 15 of them'],
+  proc:['Org/MDO-admin counts, enrolment/completion funnels (overall + per-MDO + per-CBP), top-5/top-10 leaderboards (users, courses, content, MDOs), trending courses/programs/events, NLW campaign metrics, competency coverage, learning-hours deltas, NPS score','Dispatches exactly one Kafka message per run (user course/program progress) — everything else goes to Redis'],
+  writes:{ redis:['50+ keys — dashboard_* org/enrolment/completion counters, top-5/top-10 leaderboard maps, trending/certification lists, NLW ticker, competency coverage'],
+           kafka:['userCourseProgramProgress topic, one message per run'] },
+  downstream:'Every real-time counter and leaderboard on the admin/learner dashboard UI reads directly from these Redis keys.' },
+
+{ id:'acbpReport', stage:2, group:'compliance', name:'ACBP Compliance Report', file:'jobs/stage-2/acbpReport.py', tags:[],
+  purpose:'Tracks which courses each employee was mandatorily assigned via an Annual Competency-Based Plan, and whether they finished before the due date. Also produces an APAR export linking completions to competency areas for HR appraisal.',
+  reads:['PQ: USER_ORG_COMPUTED_FILE, CONTENT_HIERARCHY_SELECT, ALL_COURSE_PROGRAM_COMPUTED, ORG_SELECT, ENROLMENT_COMPUTED, ACBP_COMPUTED_FILE, ACBP_SELECT_FILE','PQw: warehouse/kcm_dictionary, warehouse/kcm_content_mapping'],
+  joins:['LEFT · ACBP plans (exploded) ⋈ course details on courseID','LEFT · + enrolment on (courseID, userID)','LEFT · ACBP-select ⋈ course details on courseID','LEFT · KCM mapping ⋈ KCM dictionary on competency_area_id (×2, dedup pass)','LEFT · APAR-flagged rows ⋈ user additionalProperties on userID','LEFT · + competency-area result on courseID'],
+  proc:['SLA metric: completed AND courseCompletedTimestamp < completionDueDate + 1 day grace','Three-tier Ministry → Department → Organization fallback display logic, reused by blendedReport.py and courseBasedAssessmentReport.py','assignment_type_mapping translates ACBP\'s internal rule vocabulary (rootorgid, cadre, batch…) into warehouse-friendly names — the same vocabulary capAllotment.py reuses'],
+  writes:{ report:['CBPEnrollmentReport.csv + CBPUserSummaryReport.csv — combined and per-MDO, under acbpReportPath/{today}'],
+           warehouse:['cb_plan (synced to Postgres); cbp_enrollments and apar_cbp_enrollment (Parquet only — not yet wired into dataWarehouse.py)'] },
+  downstream:'cb_plan feeds Postgres dashboards via dataWarehouse.py. cbp-report-mdo-* folders are bundled by zipUpload.py.' },
+
+{ id:'assessmentReport', stage:2, group:'compliance', name:'Standalone Assessment Report', file:'jobs/stage-2/assessmentReport.py', tags:[],
+  purpose:'For assessments that stand on their own (not embedded in a course), reports each learner\'s latest attempt, score, pass/fail and attempt count.',
+  reads:['PQ: ALL_ASSESSMENT_COMPUTED (Standalone Assessment only), ORG_COMPUTED, CONTENT_COMPUTED, RATING_SUMMARY_COMPUTED, USER_ORG_COMPUTED_FILE','PQr: HIERARCHY_PARQUET_FILE, USER_ASSESSMENT_PARQUET_FILE'],
+  joins:['LEFT · assessment ⋈ hierarchy on assessID','LEFT · course ⋈ hierarchy on courseID','LEFT · course ⋈ org on courseOrgID','LEFT · course ⋈ rating on (courseID, categoryLower)','INNER · attempt ⋈ assessment-children on assessChildID','LEFT · + assessment details on assessID','LEFT · + course details on courseID','LEFT · + user-org on userID','INNER (broadcast) · + latest-attempt-per-user on (assessChildID, userID, assessEndTimestamp)'],
+  proc:['Picks each user\'s single most recent attempt and tags it with a separate total-attempt count'],
+  writes:{ report:['StandaloneAssessmentReport.csv per MDO, under standaloneAssessmentReportPath'] },
+  downstream:'user-assessment-report-cbp folder is bundled by zipUpload.py for content providers.' },
+
+{ id:'bharatKalpReport', stage:2, group:'compliance', name:'Bharat Kalp Enrolment Report', file:'jobs/stage-2/bharatKalpReport.py', tags:[],
+  purpose:'For the "Bharat Kalp" talks/podcast initiative, records which eligible members enrolled in which Bharat-Kalp-tagged courses and events. Warehouse-only — no CSV is produced.',
+  reads:['API: bharatKalpCoursesApiUrl — live CMS config for eligible courses + event tags','PQw: warehouse/user_enrolments, event_details, event_enrolment_details','PQ: USER_COMPUTED (isBharatKalpMember only)'],
+  joins:['INNER · event enrolments ⋈ eligible members (broadcast) on user_id','INNER · + events (tag-filtered) on event_id','INNER · course enrolments ⋈ eligible members (broadcast) on user_id','INNER · + Bharat Kalp course list (broadcast, from API) on content_id'],
+  proc:['Eligibility config is fetched live from a CMS API rather than hardcoded — the course/tag list can change without a deploy','Raises an error if the API returns zero courses or zero tags rather than silently producing an empty report'],
+  writes:{ warehouse:['bk_course_enrolments, bk_event_enrolments — Parquet only, not yet wired into dataWarehouse.py'] },
+  downstream:'A Bharat Kalp-specific dashboard, once these tables are wired into the Postgres sync.' },
+
+{ id:'blendedReport', stage:2, group:'compliance', name:'Blended Program Report', file:'jobs/stage-2/blendedReport.py', tags:[],
+  purpose:'For programs mixing online modules with in-person sessions, tracks progress and attendance at the level of individual components — including offline-session attendance, which page-view data can\'t capture.',
+  reads:['PQ: USER_ORG_COMPUTED_FILE, CONTENT_COMPUTED (Blended Program), BATCH_SELECT, ENROLMENT_COMPUTED, CONTENT_HIERARCHY_SELECT'],
+  joins:['12 joins: batch attach, coordinator name, program×batch enrolment scoping, user-org attach, program-hierarchy walk (broadcast), component-level batch/session resolution (×2), content-status-map attach — flattens arbitrarily nested Program → Course Unit → Learning Resource structures into one component list'],
+  proc:['Offline-session attendance derived from the physical session\'s start date, not a digital access timestamp','Splits into two audience-specific exports from the same rows: "-mdo" (learner\'s own org, unmasked PII) and "-cbp" (provider org, masked PII) — a real privacy rule'],
+  writes:{ report:['BlendedProgramReport.csv, two families (mdo + cbp variants)'],
+           warehouse:['bp_enrolments (synced to Postgres)'] },
+  downstream:'blended-program-report-mdo/-cbp folders bundled separately by zipUpload.py for learners\' orgs vs. content providers.' },
+
+{ id:'capAllotment', stage:2, group:'compliance', name:'CAP Access-Control Resolver', file:'jobs/stage-2/capAllotment.py', tags:[],
+  purpose:'Comprehensive Assessment Program content can be restricted by admin-configured rules (org + designation, OR cadre-batch tag, etc). This job resolves those abstract rules against the real user base — exactly who is allowed to see which CAP. Warehouse-only.',
+  reads:['PQw: warehouse/content — depends on courseReport.py running first','PQr: accessControlSettings','PGw: warehouse/user_detail, read via DuckDB directly'],
+  joins:['~11-way SQL fan-out in DuckDB across 11 criteria types (rootorgid, user/customuser/alluser, designation, group, tag, cadre, civil_service_type, service, batch, isoncentraldeputation, isprofileverified, profilestatus) — each an INNER match + LEFT org-scoping guard, same "AND-within-group" engine pattern as acbpDFUtil_v3'],
+  proc:['A regex pre-pass wraps bare scalar criteriaValue JSON fields into arrays before parsing — defends against an inconsistent upstream shape'],
+  writes:{ warehouse:['cap_allocation_meta, cap_allocation_user_wise — Parquet only, not yet wired into dataWarehouse.py (the newest/most in-progress feature in this group)'] },
+  downstream:'No consumer wired yet within this repo — appears to be an in-progress feature.' },
+
+{ id:'courseBasedAssessmentReport', stage:2, group:'compliance', name:'Course-Based Assessment Report', file:'jobs/stage-2/courseBasedAssessmentReport.py', tags:[],
+  purpose:'For assessments embedded inside a course (as opposed to standalone), reports each learner\'s best attempt, score, pass/fail and retakes — split into Government vs Non-Government exports.',
+  reads:['PQ: ALL_ASSESSMENT_COMPUTED, ORG_COMPUTED, CONTENT_COMPUTED, RATING_SUMMARY_COMPUTED, USER_ORG_COMPUTED_FILE, OLD_ASSESSMENT_COMPUTED','PQr: HIERARCHY_PARQUET_FILE, USER_ASSESSMENT_PARQUET_FILE (SUBMITTED only), FINAL_ASSESSMENT_PARQUET_FILE, esCourseAssessment'],
+  joins:['12 joins: hierarchy ×2, org, rating, best-attempt selection (two different tie-break windows depending on whether the assessment is sectional), retakes count, ES-final-assessment attach, live minimum-pass-percentage override, CAP sub-type detection'],
+  proc:['Best-attempt tie-break: basic assessments rank by overall score; sectional assessments rank by section marks instead — because sectional pass/fail can\'t be judged by overall percentage alone','Exact-match VOLUNTEER/Non-Govt split (same rule as userEnrolment.py/userReport.py): flags a designation or role equal to exactly "VOLUNTEER", deliberately not a substring match (avoids false-flagging "Civil Defence Volunteer")'],
+  writes:{ report:['UserAssessmentReport.csv — Govt and Non-Govt written separately'],
+           warehouse:['assessment_detail (synced to Postgres)'] },
+  downstream:'cba-report folder bundled by zipUpload.py. assessment_detail feeds Postgres/BigQuery.' },
+
+{ id:'courseCompletionSurveyReport', stage:2, group:'compliance', name:'Course Completion Survey Report', file:'jobs/stage-2/courseCompletionSurveyReport.py', tags:[],
+  purpose:'Turns raw end-of-course survey submissions (design/content/delivery/relevance ratings) into a readable one-row-per-submission report, plus a slim structured warehouse table.',
+  reads:['PQr: COURSE_COMPLETION_SURVEY_PARQUET_FILE, filtered to configured formIds'],
+  joins:['0 — single-source explode + pivot only'],
+  proc:['explode(responses) then groupBy+pivot("question") turns long EAV-shaped survey data back into a wide, one-row-per-submission report'],
+  writes:{ report:['completionSurvey.csv — the only job in the repo partitioned by formId rather than by org'],
+           warehouse:['course_completion_survey_details — written as Parquet, but its Postgres sync line in dataWarehouse.py is commented out'] },
+  downstream:'course-completion-survey-report folder bundled by zipUpload.py for content providers.' },
+
+{ id:'courseReport', stage:2, group:'compliance', name:'Course / Content Report', file:'jobs/stage-2/courseReport.py', tags:['core'],
+  purpose:'The master content-inventory report: metadata plus enrolment/completion/certificate counts for every course, program and marketplace item — what a content owner opens to see "how is my content doing."',
+  reads:['PQ: CONTENT_COMPUTED (14 categories), CONTENT_HIERARCHY_SELECT, ENROLMENT_COMPUTED, BATCH_SELECT, EXTERNAL_ENROLMENT_COMPUTED, EXTERNAL_CONTENT_COMPUTED, ORG_SELECT','PQr: FINAL_ASSESSMENT_PARQUET_FILE'],
+  joins:['8 joins: hierarchy scoping, resource-count attach, completion-aggregate attach, Blended-Program batch attach (broadcast), marketplace content×enrolment OUTER, SCORM-flag attach, ES-assessment×org'],
+  proc:['Resource extraction walks the raw content hierarchy JSON with category-specific logic — Programs are flat, but Courses can carry an extra "Course Unit" wrapper layer','SCORM detection flags content whose hierarchy contains an html-archive mimeType child'],
+  writes:{ report:['ContentReport.csv per MDO'],
+           warehouse:['content_resource, content — BOTH synced to Postgres. This "content" write is what capAllotment.py depends on, and is a second, independent producer of the same table Stage 1\'s contentDFUtil.preComputeContentWarehouseData also writes (see Known Issues)'] },
+  downstream:'capAllotment.py hard-depends on this job running first. course-report folder bundled by zipUpload.py.' },
+
+{ id:'dsrComputation', stage:2, group:'gamification', name:'Daily Summary Report (live)', file:'jobs/stage-2/dsrComputation.py', tags:['core'],
+  purpose:'Computes daily platform-wide KPIs (registrations, enrolments, completions, MAU/DAU, department onboarding) for the admin dashboard, explicitly excluding Volunteer/Non-Government users from every metric.',
+  reads:['PQr: USER_PARQUET_FILE','PQ: EVENT_ENROLMENT, ENROLMENT_WAREHOUSE_COMPUTED, EXTERNAL_ENROLMENT_COMPUTED, CONTENT_WAREHOUSE_COMPUTED','ES: org_v4/_count (direct REST, not Spark connector)','Druid: 30-day MAU, yesterday logins','PGw: dsr_metrics_history (read-before-write)'],
+  joins:['LEFT · user ⋈ VOLUNTEER-flag on user_id','INNER · events ⋈ govt-only users','INNER · enrolments ⋈ active users','LEFT · + content','INNER · + user-org','LEFT_ANTI · Druid MAU ⋈ volunteer user-ids','LEFT_ANTI · Druid DAU ⋈ volunteer user-ids'],
+  proc:['git history confirms this is the live/maintained job (15+ commits through mid-2026) vs. the abandoned dsrComputationUpdated.py','Indian-numbering formatter (comma every 2 digits, e.g. 12,34,567)','Hardcoded CENTRAL_MINISTRIES_COUNT=94, STATE_UT_COUNT=36'],
+  writes:{ redis:['~15 dashboard_*_updated_format keys'],
+           warehouse:['dsr_metrics_history — Postgres, full overwrite of history + today\'s new row, not in bq-scripts.sh'] },
+  downstream:'Admin dashboard summary cards.' },
+
+{ id:'dsrComputationUpdated', stage:2, group:'gamification', name:'Daily Summary Report (deprecated)', file:'jobs/stage-2/dsrComputationUpdated.py', tags:['dep','bug'],
+  purpose:'An abandoned rewrite computing a smaller subset of the same KPIs from a different set of upstream tables — no Volunteer filtering, no Postgres history, no MAU/DAU.',
+  reads:['PQr: USER_PARQUET_FILE (active), ESCONTENT_PARQUET_FILE','PQ: ENROLMENT_SELECT, EXTERNAL_COURSE_ENROLMENTS','API: live portal search API — hardcoded bearer token','Redis: external_course_count_current (yesterday-count proxy)'],
+  joins:['4 (2 duplicated pairs): content ⋈ enrolment (LEFT), ⋈ active users (INNER) — computed twice, once for enrolments once for completions'],
+  proc:['No Volunteer/Non-Govt exclusion anywhere — a regression versus dsrComputation.py','"Yesterday" external count approximated by caching today\'s count in Redis and reading it back next run'],
+  writes:{ redis:['overall_live_course_published, yesterday_live_course_published, external_course_count_current, overall/yesterday_course_enrolments, overall_course_completion, yerterday_course_completion (typo kept), overall_registered_users, sers_registered_yersterday (typo kept) — no overlap with dsrComputation.py\'s keys'] },
+  downstream:'None evident — consistent with an abandoned prototype.' },
+
+{ id:'gamificationDashboardEmpty', stage:2, group:'gamification', name:'Gamification Dashboard (empty file)', file:'jobs/stage-2/gamification/dashboard.py', tags:['dead'],
+  purpose:'This file is 0 bytes in this branch. No logic to describe.', reads:[], joins:[], proc:[], writes:{}, downstream:'' },
+
+{ id:'gamificationJob', stage:2, group:'gamification', name:'Gamification Badge KPIs', file:'jobs/stage-2/gamificationJob.py', tags:['bug'],
+  purpose:'Aggregates course-badge metadata with enrolment/completion data into badge-program KPIs (created, live, awarded, active learners, earning rate) with month-over-month trend, plus a per-MDO CSV.',
+  reads:['PQ: ENROLMENT_COMPUTED, EXTERNAL_ENROLMENT_COMPUTED, EXTERNAL_CONTENT_COMPUTED, ALL_COURSE_PROGRAM_COMPUTED, USER_ORG_COMPUTED_FILE'],
+  joins:['UNION · platform ⋈ external enrolment (schema-aligned)','UNION · internal ⋈ external content-badge metadata','LEFT (broadcast) · enrolment ⋈ content-badge metadata on content_id — primary enrichment','INNER · reporting ⋈ user-master on userID'],
+  proc:['SparkSession is built at module IMPORT time, not inside main() — importing this file anywhere eagerly launches a 90g-executor Spark session','imports broadcast() only from duckdb.experimental.spark.sql.functions, never from native pyspark','Badge leaderboard via dense_rank on award count; Active Learners = in-progress in a badge course; Badge-earned = completed + badge'],
+  writes:{ parquet:['GAMIFICATION_BADGE_USER_ENROLMENT_PARQUET_FILE — a hard dependency for gamificationNotificationProducer.py and userReport.py'],
+           report:['GamificationReport.csv per MDO'],
+           redis:['7 keys matching the gamification/prerequisites.md spec exactly (badge counts, earning rate, performance rate, content completion rate)'] },
+  downstream:'gamificationNotificationProducer.py and userReport.py both read the badge-enrolment Parquet this job writes.' },
+
+{ id:'gamificationNotificationConsumer', stage:2, group:'gamification', name:'Gamification Notification Consumer', file:'jobs/stage-2/gamificationNotificationConsumer.py', tags:['bug'],
+  purpose:'Delivers pending badge-reminder notifications by claiming a batch from a Postgres queue table and POSTing each to the Notification microservice. Despite the name, this is a Postgres outbox worker, not a Kafka consumer.',
+  reads:['PGw: config.dwnotificationQueue — SELECT ... FOR UPDATE SKIP LOCKED batch-claim'],
+  joins:['0'],
+  proc:['Pure Python, no Spark at all','Bug: config.dwnotificationQueue and gamificationNotificationBatchSize are not defined anywhere in config.py/default_config.py/config.py.j2 — would raise AttributeError unless supplied externally'],
+  writes:{ warehouse:['Updates status/error_message on the same Postgres queue table (no new rows)'], other:['HTTP POST to the Notification microservice bulk-create endpoint'] },
+  downstream:'The Notification microservice delivers the in-app push.' },
+
+{ id:'gamificationNotificationProducer', stage:2, group:'gamification', name:'Gamification Notification Producer', file:'jobs/stage-2/gamificationNotificationProducer.py', tags:[],
+  purpose:'Finds learners in-progress on a badge course whose earning deadline is exactly N days away, and inserts one reminder row per eligible user+course into the same Postgres queue the Consumer job drains.',
+  reads:['PQ: GAMIFICATION_BADGE_USER_ENROLMENT_PARQUET_FILE (in-progress + has deadline)','PGw: notification queue (for anti-join dedup)'],
+  joins:['LEFT_ANTI · eligible users ⋈ existing queue rows on notification_id'],
+  proc:['notification_id = md5(userID + content_id) — deterministic idempotency key','Fires on an exact-day match (today + configured lead time), not a rolling window'],
+  writes:{ warehouse:['INSERT into the Postgres notification queue (append)'] },
+  downstream:'gamificationNotificationConsumer.py polls this exact table.' },
+
+{ id:'inappReview', stage:2, group:'gamification', name:'In-App Review Nudge', file:'jobs/stage-2/inappReview.py', tags:[],
+  purpose:'Generates an in-app "rate the app" nudge for every user whose weekly-claps record updated today, expiring at end of the current week.',
+  reads:['PQr: CLAPS_PARQUET_FILE'], joins:['0'],
+  proc:['expireOn computed as end of the current ISO week (next Sunday)'],
+  writes:{ other:['Cassandra sunbird_notifications.notification_feed (append)'] },
+  downstream:'The app\'s in-app notification feed reads this directly.' },
+
+{ id:'karmaPoints', stage:2, group:'gamification', name:'Karma Points Ledger', file:'jobs/stage-2/karmaPoints.py', tags:[],
+  purpose:'Computes last month\'s karma-point reputation score for two actions — rating a course, and completing a course (with a bonus if it had a graded assessment) — then updates a running per-user total.',
+  reads:['PQr: RATING_PARQUET_FILE (Cassandra TimeUUID decoded), USER_ASSESSMENT_PARQUET_FILE','PQ: CONTENT_COMPUTED, ENROLMENT_COMPUTED, USER_KARMA_POINTS_SUMMARY_PARQUET_FILE (self-referencing feedback loop with its own Cassandra output)'],
+  joins:['LEFT · rating ⋈ course details','INNER · completion ⋈ course details','LEFT · + has-assessment flag','FULL OUTER · new points ⋈ existing running total on userid'],
+  proc:['+2 points per rating event; +10 per completion with a graded assessment, +5 without — capped at each user\'s first 4 completions of the month'],
+  writes:{ other:['Cassandra ×3: user_karma_points ledger, credit_lookup, summary (cumulative totals) — not the Postgres warehouse'] },
+  downstream:'The app reads karma totals from Cassandra directly; the same tables feed back into next month\'s Stage-0 cache.' },
+
+{ id:'kcmReport', stage:2, group:'gamification', name:'Knowledge &amp; Competency Mapping (Stage 2C)', file:'jobs/stage-2/kcmReport.py', tags:['core'],
+  purpose:'Links every course to its competency taxonomy (Area → Theme → Sub-theme), reconciling course-level tags against the KCM-v6 dictionary. Run both standalone and as jobs/main.py\'s "Stage 2C."',
+  reads:['PQ: CONTENT_COMPUTED (competency ref-id arrays)','PQr: KCMV6_PARQUET_FILE (nested Area/Theme/SubTheme hierarchy)'],
+  joins:['5: positional area/theme/subtheme realignment, content ⋈ competency-joined (LEFT), kcm_area OUTER kcm_theme, subtheme ⋈ area-theme (LEFT), final content ⋈ competency-details (INNER)'],
+  proc:['Positionally explodes parallel Area/Theme/SubTheme arrays so the Nth entry of each aligns for a given course','Reconciles the master sub-theme dictionary so every sub-theme appears even with zero mapped courses'],
+  writes:{ warehouse:['kcm_content_mapping, kcm_dictionary — both synced to Postgres AND BigQuery'],
+           report:['ContentCompetencyMapping.csv'] },
+  downstream:'l2Assessments.py hard-depends on both warehouse tables this job writes.' },
+
+{ id:'l2Assessments', stage:2, group:'gamification', name:'L2 / Comprehensive Assessment (APAR+CAP)', file:'jobs/stage-2/l2Assessments.py', tags:['bug'],
+  purpose:'A unified report combining APAR-mandated CBP course consumption with Comprehensive Assessment Program exam attempts — one schema showing whether mandated content was consumed and whether an assessment was passed.',
+  reads:['PQw: warehouse/kcm_dictionary, kcm_content_mapping (from kcmReport.py), user_enrolments, content, assessment_detail, org_hierarchy, user_detail, cb_plan','PQ: ACBP_COMPUTED_FILE','PQr: esCourseAssessment (ad hoc path, not a named constant)'],
+  joins:['12: user×org, live-ES-min-pass-% override, KCM reconciliation, APAR branch (5 joins: plan→enrolment→content→user→cbplan→competency), CAP branch (3 joins: content→enrolment→assessment→user)'],
+  proc:['CAP dedup keeps the best attempt per (user, content, assessment): highest score first, tie-broken Pass over Fail'],
+  writes:{ parquet:['A HARDCODED absolute path — /mount/data/analytics/igot-reports/assessment-report-apar/parquet — not built from config, unlike every other job in the repo'] },
+  downstream:'Not evident within this repo — the non-standard path suggests an external/manual pickup.' },
+
+{ id:'learnerLeaderboard', stage:2, group:'engagement', name:'Learner Leaderboard', file:'jobs/stage-2/learnerLeaderboard.py', tags:[],
+  purpose:'Monthly per-org "top learners" leaderboard ranked by karma points earned last month, with rank movement vs. last month.',
+  reads:['PQr: USER_KARMA_POINTS_PARQUET_FILE (previous month)','PQ: USER_ORG_COMPUTED_FILE','PQr: LEARNER_LEADERBOARD_PARQUET_FILE (prior Cassandra snapshot)'],
+  joins:['INNER · orgs with &gt;10 users only (privacy floor)','LEFT · org members ⋈ karma points','LEFT · current ⋈ prior rank on userid'],
+  proc:['dense_rank ties share a rank; row_number gives a deterministic Cassandra clustering order for pagination'],
+  writes:{ other:['Cassandra learner_leaderboard + learner_leaderboard_lookup (append)'] },
+  downstream:'The learner-facing app\'s "your org rank" widget.' },
+
+{ id:'ministryLeaderboard', stage:2, group:'engagement', name:'Ministry Leaderboard', file:'jobs/stage-2/ministryLeaderboard.py', tags:['bug'],
+  purpose:'Rolls up "top learners" to every level of the ministry/department/org hierarchy simultaneously, using an embedded DuckDB database for the hierarchy fan-out instead of Spark SQL.',
+  reads:['PQ: USER_ORG_COMPUTED_FILE','PQr: ORG_COMPLETE_HIERARCHY_PARQUET_FILE, USER_KARMA_POINTS_PARQUET_FILE (previous month, filtered in DuckDB)'],
+  joins:['5 DuckDB SQL joins: hierarchy×distinct-mdos, then a 3-level self-join chain rolling users up to MDO / department / ministry, then ×karma-aggregate'],
+  proc:['One row per user PER hierarchy level via UNION ALL, so one dense_rank() produces independent leaderboards at every level at once','Bug: log lines say "Writing to Cassandra" but the job actually writes to Postgres — stale comments, not a functional Cassandra path'],
+  writes:{ warehouse:['slw_mdo_top_learners — Postgres APP schema, JDBC overwrite+truncate'] },
+  downstream:'A ministry/department-level Top Learners dashboard widget.' },
+
+{ id:'ministryMetrics', stage:2, group:'engagement', name:'Ministry Metrics', file:'jobs/stage-2/ministryMetrics.py', tags:[],
+  purpose:'Refreshes four at-a-glance counters (24h active users, total registered, certificates issued, enrolments) rolled up to ministry, department and org level, for a fast admin dashboard.',
+  reads:['PQ: ENROLMENT_WAREHOUSE_COMPUTED, USER_COMPUTED (active)','PQr: ORG_HIERARCHY_PARQUET_FILE','Druid: 24h active users'],
+  joins:['11: active-users×Druid, ×org-hierarchy, enrolment×users×org-hierarchy, userCount computed 3× (ministry/dept/org) ×org-hierarchy, each metric ×ministryNames to resolve the Redis field key'],
+  proc:['"One code path, three grain levels" pattern: every metric computed identically at ministry/department/org grain then unioned'],
+  writes:{ redis:['4 hashes: dashboard_rolled_up_login_percent_last_24_hrs, _user_count, _certificates_generated_count, _enrolment_content_count'] },
+  downstream:'Ministry/MDO admin-dashboard summary cards.' },
+
+{ id:'nationalLearningWeek', stage:2, group:'engagement', name:'National Learning Week Leaderboard', file:'jobs/stage-2/nationalLearningWeek.py', tags:['bug'],
+  purpose:'For a fixed campaign window, computes a per-capita-karma-points leaderboard bucketed by org size, separately for "states" and "centre" MDOs, plus a live daily certificate/learning-hours ticker.',
+  reads:['PQw: warehouse/org_hierarchy','PQ: USER_ORG_COMPUTED_FILE, ENROLMENT_WAREHOUSE_COMPUTED, CONTENT_WAREHOUSE_COMPUTED, GAMIFICATION_BADGE_USER_ENROLMENT_PARQUET_FILE','PQr: USER_KARMA_POINTS_PARQUET_FILE, EVENT_PARQUET_FILE, eventEnrolmentDetails (read via literal path, not the shared constant)'],
+  joins:['16: content/event-hours attach, state-hierarchy resolution, karma+hours attach (state & centre separately), fixed-population override (per-state hardcoded target denominator overriding the actual registered-user count), org-name resolution, 4 sequential per-user stat joins'],
+  proc:['Fixed a real historical bug inline: a lowercase "xs" bucket fallback used to create a phantom rank-1 partition — documented in a code comment','Contains a leftover hardcoded single-user debug .show() call in the production path'],
+  writes:{ parquet:['warehouse/nlw_mdo_leaderboard'],
+           other:['Cassandra "nlw_mdo_leaderboard" (hardcoded literal, not config-driven); Postgres app-schema "nlw_user_leaderboard" (same caveat)'],
+           redis:['lhp_certifications, lhp_learningHours hashes — merge mode, using Redis itself as yesterday/today rollover memory'] },
+  downstream:'The NLW campaign UI leaderboards and a live daily-stats ticker.' },
+
+{ id:'npsUpgraded', stage:2, group:'engagement', name:'NPS Survey Trigger', file:'jobs/stage-2/npsUpgraded.py', tags:['bug'],
+  purpose:'Identifies users who should be prompted for the platform NPS/rating survey — anyone who enrolled, completed, or rated a course in the last 15 days and hasn\'t already seen the prompt.',
+  reads:['Druid: users who already saw the popup (15-day)','PQ: ENROLMENT_COMPUTED (15-day)','PQr: RATING_PARQUET_FILE (15-day, TimeUUID-decoded)','PGw: n/a — Cassandra user_feed (category=NPS2, existing)'],
+  joins:['0 conventional joins — eligibility is set algebra: union + dropDuplicates, then .subtract() for exclusions'],
+  proc:['Bug: the file has two consecutive if __name__=="__main__": main() blocks — the entire pipeline and its Cassandra writes run twice per invocation'],
+  writes:{ other:['Cassandra user_feed (NPS2 entries) + notification_feed_history audit copy'] },
+  downstream:'The in-app notification center surfaces the rating prompt.' },
+
+{ id:'odcsRecommendation', stage:2, group:'engagement', name:'ODCS Content Recommendation', file:'jobs/stage-2/odcsRecommendation.py', tags:[],
+  purpose:'Ranks each organization\'s own courses by completion rate, rating and volume, caching a top-15 list per org for a "recommended for your org" widget.',
+  reads:['PQ: ENROLMENT_WAREHOUSE_COMPUTED, CONTENT_WAREHOUSE_COMPUTED, USER_WAREHOUSE_COMPUTED','PQr: RATING_PARQUET_FILE (Course only)'],
+  joins:['4: enrolments×content, +user (mdo_id), +completion-%, +rating'],
+  proc:['Top-15 per org via row_number, tie-break: completion% then rating then volume'],
+  writes:{ redis:['odcs_course_recomendation (typo preserved from source), field=mdo_id'] },
+  downstream:'The homepage "recommended for your organization" carousel.' },
+
+{ id:'orgHierarchy', stage:2, group:'engagement', name:'Org Hierarchy Sync', file:'jobs/stage-2/org_hierarchy.py', tags:['bug'],
+  purpose:'Fully rebuilds the ministry/department/org hierarchy lookup in Postgres — the only job in this repo that is plain Python, not PySpark.',
+  reads:['ES: org_v4 index (hardcoded host)','API: external FRAC framework REST endpoint (hardcoded prod host + bearer token)'],
+  joins:['0 — row-by-row Python dict-walking, not Spark'],
+  proc:['Unconditionally TRUNCATEs 3 Postgres tables at the start of every run — full refresh, no incremental mode','Recursively collects every descendant org id (any depth) for "children of org X" lookups','Security flag: contains a hardcoded prod bearer token and a hardcoded Postgres password directly in source'],
+  writes:{ warehouse:['org_hierarchy_new, org_hierarchy_lookup, mdo_children_lookup — Postgres app schema'] },
+  downstream:'Other services needing "children of MDO X" lookups; not read by any other job in this repo (those read org hierarchy from Parquet caches instead).' },
+
+{ id:'peerValidationEligibleUsers', stage:2, group:'engagement', name:'Peer Validation — Eligible Users', file:'jobs/stage-2/peerValidationEligibleUsers.py', tags:[],
+  purpose:'Determines which learners should be asked to complete a peer-review survey for a course they just finished, and enqueues eligible (user, form) pairs into a Postgres notification queue.',
+  reads:['PGw: peer_validation_notification_queue (dedup), peer_validation_form_state (watermark)','ES: fs-forms-alias-v2 (peerValidationSurvey forms)','PQ: ENROLMENT_COMPUTED (certified+completed), USER_ORG_COMPUTED_FILE, CONTENT_COMPUTED'],
+  joins:['5: forms×history, enrolment×user-org, +forms(exploded) on course_id, +course-details, eligible LEFT_ANTI existing-queue'],
+  proc:['Incremental watermark window: first run scans a wide range, subsequent runs scan only since last_processed_date+1','notification_id = md5(user_id+form_id) idempotency key'],
+  writes:{ warehouse:['INSERT into peer_validation_notification_queue (dw schema, append)'] },
+  downstream:'peerValidationNotificationSender.py reads this exact table.' },
+
+{ id:'peerValidationNotificationSender', stage:2, group:'engagement', name:'Peer Validation — Notification Sender', file:'jobs/stage-2/peerValidationNotificationSender.py', tags:['bug'],
+  purpose:'Drains PENDING rows from the peer-validation queue, POSTs them in batches to the Notification API, and advances each form\'s watermark once its notifications are confirmed sent.',
+  reads:['PGw: peer_validation_notification_queue (PENDING), peer_validation_form_state'],
+  joins:['LEFT_ANTI · untouched forms ⋈ newly-advanced forms — preserves prior watermarks before the union+overwrite'],
+  proc:['Kill-switch config (apiBasedNotificationEnabled) allows dry-run mode','Config gap: Kafka broker config.kpBrokerList has no dev fallback default, unlike brokerList'],
+  writes:{ warehouse:['Per-row UPDATE of status on the queue; full OVERWRITE of form_state'],
+           kafka:['peerValidationKafkaTopic — one event per form with a sent-count increment'],
+           other:['HTTP POST to the Notification API'] },
+  downstream:'The Notification API delivers the prompt; the Kafka topic likely feeds a "surveys sent" metric.' },
+
+{ id:'programProgressSyncList_v5', stage:2, group:'engagement', name:'Content Status Validation (v5)', file:'jobs/stage-2/programProgressSyncList_v5.py', tags:['dead'],
+  purpose:'Designed to cross-check denormalized completion status against the row-level Cassandra consumption table and flag mismatches — but the entire validation pipeline is dead code in this branch.',
+  reads:['C: user_content_consumption_v2 — the only read that actually executes'],
+  joins:['0 live (the dormant code contains ~15 joins across PySpark and DuckDB, never called)'],
+  proc:['The real logic (lines ~839–933: course validation, DuckDB program validation, 3 cert-readiness metrics, all report writing) is wrapped in an unused Python triple-quoted string literal — syntactically valid, never executes','No _v1–_v4 files exist anywhere in the repo; this job is absent even from bq-scripts.sh'],
+  writes:{ parquet:['consumption_v2 — a refreshed cache of the Cassandra table; the only thing that actually happens'] },
+  downstream:'None active — the logic that would produce validation output is disabled.' },
+
+{ id:'surveyQuestionReport', stage:2, group:'export', name:'Survey Question Report', file:'jobs/stage-2/surveyQuestionReport.py', tags:[],
+  purpose:'Generates one CSV per survey "solution" with every question response, enriched with respondent profile fields. Column layout is driven entirely by a MongoDB config document.',
+  reads:['Mongo: reportConfigCollection (dynamic column config), solutions (end-dates)','Druid: sl-survey — distinct submission IDs, then batched row data'],
+  joins:['0 — Druid filtering substitutes for joins'],
+  proc:['Batches Druid queries by submission ID to avoid overloading Druid','Column set, profile fields and sort order all come from Mongo — ops can add columns without a code change'],
+  writes:{ report:['One CSV per solution, zipped and synced to GCS under standalone-reports/ml-report'] },
+  downstream:'Zipped CSVs land in blob storage for direct download.' },
+
+{ id:'surveyStatusReport', stage:2, group:'export', name:'Survey Status Report', file:'jobs/stage-2/surveyStatusReport.py', tags:['bug'],
+  purpose:'Intended to report survey completion status — but is a near byte-for-byte copy of surveyQuestionReport.py.',
+  reads:['Mongo: reportConfigCollection — still queries the config document named "surveyQuestionReport", not "surveyStatusReport"','Druid: same sl-survey queries'],
+  joins:['0'],
+  proc:['Still uses SurveyQuestionReportBatchSize instead of the dedicated SurveyStatusReportBatchSize that exists in config','Writes to the identical output folder name "SurveyQuestionsReport" as the question report'],
+  writes:{ report:['Same path as surveyQuestionReport.py — running both on the same day targets the same folder'] },
+  downstream:'None distinct from the question report.' },
+
+{ id:'unenrollmentReport', stage:2, group:'export', name:'Unenrolment Report', file:'jobs/stage-2/unenrollmentReport.py', tags:[],
+  purpose:'Per-org report of every user unenrolled from a course, with who unenrolled them, when, why, and how far they\'d progressed.',
+  reads:['PQr: UNENROLMENT_AUDIT_PARQUET_FILE (UNENROLL only)','PQ: ENROLMENT_COMPUTED (enrolled), USER_ORG_COMPUTED_FILE, CONTENT_COMPUTED, ACBP_COMPUTED_FILE'],
+  joins:['4: enrolment×content, +user-org, +ACBP-mandate flag, +unenrolment-audit (INNER — this join IS the row filter limiting to actually-unenrolled rows)'],
+  proc:['Same 3-tier Ministry/Department/Org fallback display logic used across the compliance-report group'],
+  writes:{ report:['UnenrollmentReport.csv per MDO'],
+           warehouse:['unenrolled_user_audit — Parquet, not yet in dataWarehouse.py\'s sync list'] },
+  downstream:'BI tooling outside this repo\'s Stage 2 batch, presumably.' },
+
+{ id:'userActivity', stage:2, group:'export', name:'User Activity Fact Table', file:'jobs/stage-2/userActivity.py', tags:[],
+  purpose:'Builds one unified "what did this user consume and when" fact table combining content and event activity. Warehouse-only, no CSV.',
+  reads:['PQ: USER_ORG_COMPUTED_FILE (3 other reads are unused/dead in this file)','PQw: warehouse/content, warehouse/user_enrolments (cross-job dependency on userEnrolment.py)','PQr: EVENT_PARQUET_FILE, EVENT_ENROLMENT_PARQUET_FILE'],
+  joins:['3: event-enrolments×events (broadcast), +user-org (broadcast), enrolments×content (broadcast)'],
+  proc:['Two branches (event-based, content-based) synthesized into one schema and unioned'],
+  writes:{ warehouse:['user_activity — Parquet, not currently synced by dataWarehouse.py'] },
+  downstream:'Depends on userEnrolment.py running first (reads its warehouse/user_enrolments output).' },
+
+{ id:'userDataToRedis', stage:2, group:'export', name:'User Data → Redis', file:'jobs/stage-2/userDataToRedis.py', tags:['bug'],
+  purpose:'Pushes a lightweight per-user profile snapshot into Redis so front-end services can render user cards without hitting Cassandra/Postgres on every request.',
+  reads:['PQ: USER_SELECT_PARQUET_FILE'], joins:['0'],
+  proc:['repartition(500) + foreachPartition with pipelined batched SET (25,000/batch)','Bug: uses a plain redis.Redis client without selecting config.redisDB — always writes DB 0 regardless of the configured DB index'],
+  writes:{ redis:['user:{user_id} → JSON profile snapshot, overwritten every run, no TTL'] },
+  downstream:'The front-end/API layer reads these keys directly.' },
+
+{ id:'userEnrolment', stage:2, group:'export', name:'User Enrolment Report (Stage 2D)', file:'jobs/stage-2/userEnrolment.py', tags:['core'],
+  purpose:'The canonical "who is enrolled in what, with what progress/certificate status" report for every org — platform and marketplace content combined, split Govt vs. Non-Govt. Part of jobs/main.py\'s orchestrated pipeline.',
+  reads:['PQr: UNENROLMENT_AUDIT (deduped via a row_number window — an explicit fan-out-prevention fix)','PQ: ENROLMENT_COMPUTED, USER_ORG_COMPUTED_FILE, CONTENT_COMPUTED, EXTERNAL_ENROLMENT_COMPUTED, EXTERNAL_CONTENT_COMPUTED, ACBP_COMPUTED_FILE'],
+  joins:['6: enrolment×content, +user-org, external-content×external-enrolment (INNER), +user-org, +ACBP-mandate, +unenrolment-audit (LEFT, not INNER — keeps both enrolled and unenrolled rows, unlike unenrollmentReport.py)'],
+  proc:['Govt/Non-Govt split by exact-match VOLUNTEER designation/role; orgs with both cohorts get two output folders'],
+  writes:{ report:['ConsumptionReport.csv ×2 (Govt + Non-Govt)'],
+           warehouse:['user_enrolments (synced to Postgres) — read by userActivity.py, dsrComputation.py, nationalLearningWeek.py, odcsRecommendation.py, ministryMetrics.py, dashboardSync.py'] },
+  downstream:'One of the most widely-depended-on outputs in the entire pipeline. Bundled by zipUpload.py.' },
+
+{ id:'userReport', stage:2, group:'export', name:'User Report (Stage 2A)', file:'jobs/stage-2/userReport.py', tags:['core','bug'],
+  purpose:'The canonical per-user profile+activity report for every org — karma points, badges, enrolment/completion counts, learning hours, and dynamically-pivoted org-specific custom fields. Part of jobs/main.py\'s orchestrated pipeline.',
+  reads:['PQ: USER_ORG_COMPUTED_FILE, ENROLMENT_WAREHOUSE_COMPUTED, GAMIFICATION_BADGE_USER_ENROLMENT_PARQUET_FILE, CONTENT_COMPUTED (Course only)','PQr: EVENT_ENROLMENT_PARQUET_FILE, USER_EXTENDED_PROFILE (org custom fields)'],
+  joins:['4 core + a per-org pivot join: content-duration attach, +event-details, +badges, org-scoped custom-field pivot per org'],
+  proc:['SparkSession built at module IMPORT time (same unusual pattern as gamificationJob.py)','Explicit perf-optimization split (fixing a documented 30-min → 3-hour regression): orgs WITH custom fields go through an expensive per-org pivot path (8 parallel workers); orgs WITHOUT go through a fast bulk path','Config gap: production config.py\'s zip-bundle list is missing "user-custom-report" that exists in the local-dev fallback list'],
+  writes:{ report:['UserReport.csv ×2 (Govt + Non-Govt)'],
+           warehouse:['user_detail (synced), userCustomFields, per-org user_custom_report/&lt;org&gt;_custom_report.parquet'] },
+  downstream:'Bundled by zipUpload.py — though the custom-report output may not be, per the config gap above.' },
+
+{ id:'weeklyClaps', stage:2, group:'export', name:'Weekly Claps (engagement streak)', file:'jobs/stage-2/weeklyClaps.py', tags:[],
+  purpose:'A streak mechanic: if a user\'s weekly time-on-app crosses a threshold, they earn a "clap" for the week, tracked in a rolling 4-week window.',
+  reads:['PQr: CLAPS_PARQUET_FILE (prior state, itself sourced from Postgres learner_stats via Stage 0)','Druid: this week\'s engagement time'],
+  joins:['FULL OUTER · existing claps ⋈ this-week engagement on userid — brand-new users still get a row'],
+  proc:['Monday-rollover state machine shifts the w1–w4 window and finalizes last week\'s clap based on whether the cutoff (default 60 min) was crossed'],
+  writes:{ warehouse:['learner_stats — Postgres APP schema, overwrite+truncate. A closed read-modify-write loop: this job writes what Stage 0 reads again next run'] },
+  downstream:'Feeds back into Stage 0\'s own next-run cache.' },
+
+{ id:'workFlowSummarizer', stage:2, group:'export', name:'Workflow Summarizer', file:'jobs/stage-2/workFlowSummarizer.py', tags:['dead'],
+  purpose:'A Python re-implementation of a Scala telemetry-session-summarization model — but its main() only exercises the algorithm against an empty test RDD. No real data source is wired up in this branch.',
+  reads:['None in practice — sc.parallelize([]) empty test input'], joins:['0'],
+  proc:['The state-machine session reconstruction (idle-time/session-break detection) is fully implemented as a library, just never called with real data here'],
+  writes:{}, downstream:'None currently.' },
+
+{ id:'zipUpload', stage:2, group:'export', name:'Zip, Password &amp; Upload', file:'jobs/stage-2/zipUpload.py', tags:['core','bug'],
+  purpose:'The terminal packaging step: gathers every report job\'s per-org CSV output, generates one password-protected ZIP per org (shared across a ministry), stores the passwords in Redis, and uploads everything to GCS.',
+  reads:['PQw: warehouse/org_hierarchy (drives password grouping)','filesystem: every report job\'s dated mdoid=&lt;org&gt; output folder, per config\'s bundle lists'],
+  joins:['0 — Spark only reads org_hierarchy; the rest is filesystem/OS work'],
+  proc:['Password grouping priority: ministry &gt; department &gt; individual org — orgs under the same ministry share one password','Bug: the disabled createFullReport branch references two undefined names (password, part2_start) — a NameError risk, currently inert only because the flag defaults False everywhere'],
+  writes:{ other:['Password-protected reports.zip per org, uploaded to GCS'],
+           redis:['CB_EXT_{mdoid}_password → the password string, read by the notification/portal layer'] },
+  downstream:'The fan-in consumer of userReport.py and userEnrolment.py\'s CSV outputs, among others.' },
+];
+
+const WAREHOUSE_TABLES = [
+  ['user_detail','userReport.py (Stage 2A)','Yes — overwrite','Yes','Full user profile: karma points, badges, learning hours, custom fields'],
+  ['content','courseReport.py + Stage-1 contentDFUtil (two producers)','Yes — overwrite','Yes','Course/program/marketplace catalog with ratings, SCORM flag'],
+  ['content_resource','courseReport.py','Yes — overwrite','Yes','Flattened resource-level rows per course/program'],
+  ['assessment_detail','courseBasedAssessmentReport.py','Yes — overwrite','Yes','Best attempt, score, pass/fail per user × assessment'],
+  ['bp_enrolments','blendedReport.py','Yes — overwrite','Yes','Component/session-level Blended Program attendance'],
+  ['cb_plan','acbpReport.py','Yes — overwrite','Yes','ACBP plan-level metadata'],
+  ['org_hierarchy','Stage-1 contentDFUtil.writeWarehouseParquetFiles','Yes — overwrite','Yes','Ministry → Department → MDO hierarchy'],
+  ['kcm_content_mapping','kcmReport.py','Yes — overwrite','Yes','Course → competency-area mapping'],
+  ['kcm_dictionary','kcmReport.py','Yes — overwrite','Yes','Area/Theme/SubTheme competency dictionary'],
+  ['events (event_details)','Stage-1 contentDFUtil.writeWarehouseParquetFiles','Yes — overwrite','Yes','Live-session event catalog'],
+  ['events_enrolment (event_enrolment_details)','Stage-1 contentDFUtil.writeWarehouseParquetFiles','Yes — overwrite','Yes','Per-user event attendance + karma points'],
+  ['user_enrolments','userEnrolment.py (Stage 2D)','Yes — overwrite','Yes','Platform + marketplace enrolment/completion facts'],
+  ['course_completion_survey_details','courseCompletionSurveyReport.py','No — sync line commented out','No','End-of-course survey ratings'],
+  ['dsr_metrics_history','dsrComputation.py (writes directly)','Yes — own JDBC write','No','Daily platform KPI history'],
+  ['user_activity','userActivity.py','No — not wired','No','Unified content+event activity fact table'],
+  ['unenrolled_user_audit','unenrollmentReport.py','No — not wired','No','Unenrolment audit trail'],
+  ['userCustomFields / user_custom_report','userReport.py','No — not wired','No','Per-org custom profile field pivots'],
+  ['bk_course_enrolments / bk_event_enrolments','bharatKalpReport.py','No — not wired','No','Bharat Kalp initiative enrolments'],
+  ['cap_allocation_meta / cap_allocation_user_wise','capAllotment.py','No — not wired','No','CAP access-control resolution results'],
+  ['cbp_enrollments / apar_cbp_enrollment','acbpReport.py','No — not wired','No','ACBP enrolment detail + APAR export'],
+  ['nlw_mdo_leaderboard','nationalLearningWeek.py','Yes — app-schema, own job','No','Campaign leaderboard snapshot'],
+  ['slw_mdo_top_learners','ministryLeaderboard.py','Yes — app-schema, own job','No','Ministry-rollup top learners'],
+];
+
+const RAW_TABLES = [
+  ['ACBP_PARQUET_FILE','acbp/','Cassandra acbpTable'],['BATCH_PARQUET_FILE','batch/','Cassandra courseBatchTable'],
+  ['ENROLMENT_PARQUET_FILE','enrolment/','Cassandra userEnrolmentsTable'],['ESCONTENT_PARQUET_FILE','esContent/','Elasticsearch compositesearch'],
+  ['EXTERNAL_COURSE_ENROLMENTS_PARQUET_FILE','externalCourseEnrolments/','Cassandra sunbird_courses.user_external_enrolments'],
+  ['EXTERNAL_CONTENT_PARQUET_FILE','externalContent/','Postgres app cios_content_entity'],
+  ['EVENT_PARQUET_FILE','eventDetails/','Elasticsearch compositesearch (Event)'],
+  ['EVENT_ENROLMENT_PARQUET_FILE','eventEnrolmentDetails/','Cassandra user_entity_enrolments (joined w/ events)'],
+  ['HIERARCHY_PARQUET_FILE','hierarchy/','Cassandra contentHierarchyTable'],
+  ['KCMV6_PARQUET_FILE','kcmV6/','Cassandra frameworkHierarchyTable (kcmfinal_fw)'],
+  ['LEARNER_LEADERBOARD_PARQUET_FILE','learnerLeaderBoard/','Cassandra learnerLeaderBoardTable'],
+  ['NLW_CONTENT_CERTIFICATE_GENERATED_COUNT_PARQUET_FILE','nlwContentCertificateGeneratedCount/','Defined but not observed read/written in this branch'],
+  ['NLW_CONTENT_LEARNING_HOURS_PARQUET_FILE','nlwContentLearningHours/','Defined but not observed read/written in this branch'],
+  ['ORG_PARQUET_FILE','org/','Cassandra orgTable'],
+  ['ORG_COMPLETE_HIERARCHY_PARQUET_FILE','orgCompleteHierarchy/','Postgres app org_hierarchy_v4 (raw)'],
+  ['ORG_HIERARCHY_PARQUET_FILE','orgHierarchy/','Cassandra org ⋈ Postgres org_hierarchy_v4'],
+  ['RATING_PARQUET_FILE','rating/','Cassandra ratingsTable'],['RATING_SUMMARY_PARQUET_FILE','ratingSummary/','Cassandra ratingSummaryTable'],
+  ['ROLE_PARQUET_FILE','role/','Cassandra userRolesTable'],['USER_PARQUET_FILE','user/','Cassandra userTable'],
+  ['CLAPS_PARQUET_FILE','weeklyClaps/','Postgres app learner_stats'],
+  ['USER_KARMA_POINTS_PARQUET_FILE','userKarmaPoints/','Cassandra karmaPointsTable'],
+  ['USER_KARMA_POINTS_SUMMARY_PARQUET_FILE','userKarmaPointsSummary/','Cassandra karmaPointsSummaryTable'],
+  ['USER_ASSESSMENT_PARQUET_FILE','userAssessment/','Cleaned in-place by assessmentDFUtil.parse_raw_assessment_data (Stage 1)'],
+  ['OLD_ASSESSMENT_PARQUET_FILE','oldAssessmentDetails/','Cassandra oldAssesmentTable (safe-columns read)'],
+  ['USER_EXTENDED_PROFILE','userExtendedProfile/','Cassandra userExtendedProfileTable'],
+  ['FINAL_ASSESSMENT_PARQUET_FILE','esFinalAssessment/','Elasticsearch compositesearch (Course+Final Program Assessment)'],
+  ['COURSE_COMPLETION_SURVEY_PARQUET_FILE','courseCompletionSurvey/','Elasticsearch fs-forms-data-alias-v2'],
+  ['PEER_VALIDATION_FORMS_PARQUET_FILE','peerValidationSurveys/','Defined but not observed read/written in this branch'],
+  ['PEER_VALIDATION_ELIGIBLE_USERS_PARQUET_FILE','peerValidationEligibleUsers/','Defined but not observed read/written in this branch'],
+  ['QUESTIONSET_HIERARCHY_PARQUET_FILE','questionsetHierarchy/','Cassandra questionSetHierarchyTable'],
+  ['ASSESSMENT_DATA_RAW_PARQUET_FILE','userAssessmentRaw/','Cassandra userAssessmentTable'],
+  ['UNENROLMENT_AUDIT_PARQUET_FILE','unenrolledUserAudit/','Cassandra sunbird_courses.enrollment_history_by_action'],
+];
+
+const COMPUTED_TABLES = [
+  ['USER_SELECT_PARQUET_FILE','user-select/','userDFUtil.preComputeUser (mid-step)'],
+  ['ACBP_SELECT_FILE','acbp-select/','acbpDFUtil_v3.preComputeACBPData'],
+  ['ENROLMENT_SELECT_PARQUET_FILE','enrolment-select/','enrolmentDFUtil.preComputeEnrolment (mid-step)'],
+  ['ENROLMENT_COMPUTED_PARQUET_FILE','enrolment-computed/','enrolmentDFUtil.preComputeEnrolment — the master enrolment table'],
+  ['EXTERNAL_ENROLMENT_COMPUTED_PARQUET_FILE','external-enrolment-computed/','enrolmentDFUtil.preComputeExternalEnrolment'],
+  ['EXTERNAL_CONTENT_COMPUTED_PARQUET_FILE','external-content-computed/','contentDFUtil.preComputeExternalContentDataFrame'],
+  ['RATING_SELECT_PARQUET_FILE','rating-select/','Defined but not observed read/written in this branch'],
+  ['CONTENT_COMPUTED_PARQUET_FILE','content-computed/','contentDFUtil.preComputeContentDataFrame — the master content table'],
+  ['USER_COMPUTED_PARQUET_FILE','user-computed','userDFUtil.preComputeUser'],
+  ['ORG_SELECT_PARQUET_FILE','org-select/','userDFUtil.preComputeOrgWithHierarchy (mid-step)'],
+  ['ORG_HIERARCHY_SELECT_PARQUET_FILE','org-hierarchy-select/','userDFUtil.preComputeOrgWithHierarchy (mid-step)'],
+  ['ORG_COMPUTED_PARQUET_FILE','org-computed/','userDFUtil.preComputeOrgWithHierarchy'],
+  ['USER_ORG_COMPUTED_FILE','user-org-computed/','userDFUtil.preComputeOrgHierarchyWithUser — the single most-read table in the repo'],
+  ['ALL_COURSE_PROGRAM_COMPUTED_PARQUET_FILE','all-course-program-computed/','contentDFUtil.preComputeAllCourseProgramESDataFrame'],
+  ['ALL_ASSESSMENT_COMPUTED_PARQUET_FILE','all-assessment-computed/','assessmentDFUtil.precomputeAssessmentEsDataframe'],
+  ['ACBP_COMPUTED_FILE','acbp-computed','acbpDFUtil_v3.preComputeACBPData — final user × plan allocation'],
+  ['RATING_SUMMARY_COMPUTED_PARQUET_FILE','rating-summary-computed/','contentDFUtil.preComputeRatingAndSummaryDataFrame'],
+  ['RATING_COMPUTED_PARQUET_FILE','rating-computed/','contentDFUtil.preComputeRatingAndSummaryDataFrame'],
+  ['CONTENT_RATING_COMPUTED_PARQUET_FILE','content-rating-computed/','contentDFUtil.preComputeRatingAndSummaryDataFrame'],
+  ['TEMP_COMPUTE_FILE','temp-computed/','Scratch constant, not a durable output'],
+  ['CONTENT_HIERARCHY_SELECT_PARQUET_FILE','content-hierarchy-select/','contentDFUtil.precomputeContentHierarchyDataFrame'],
+  ['BATCH_SELECT_PARQUET_FILE','batch-select/','enrolmentDFUtil.preComputeEnrolment (mid-step)'],
+  ['OLD_ASSESSMENT_COMPUTED_PARQUET_FILE','old-assessment/','assessmentDFUtil.precomputeOldAssessmentDataframe'],
+  ['ENROLMENT_WAREHOUSE_COMPUTED_PARQUET_FILE','enrolment-warehouse-computed/','enrolmentDFUtil.preComputeUserEnrolmentWarehouseData — feeds all of QueryConstants.py'],
+  ['USER_WAREHOUSE_COMPUTED_PARQUET_FILE','user-warehouse-computed/','userDFUtil.preComputeUserWarehouseData'],
+  ['CONTENT_WAREHOUSE_COMPUTED_PARQUET_FILE','content-warehouse-computed/','contentDFUtil.preComputeContentWarehouseData'],
+  ['GAMIFICATION_BADGE_USER_ENROLMENT_PARQUET_FILE','user_enrolment_badge_computed/','gamificationJob.py (Stage 2, not Stage 1)'],
+];
+
+const DEPLOY_STEPS = [
+  ['Commit &amp; build','A commit triggers the root <code>Jenkinsfile</code> on a build-slave agent, which zips the entire repo (excluding <code>ansible/</code>, <code>pipelines/</code>, <code>.git</code>) into a versioned artifact and archives it.', ''],
+  ['Deploy job runs','<code>pipelines/deploy/data-products/Jenkinsfile</code> downloads that artifact from GCS, unzips it into <code>ansible/pyspark-data/</code>, and runs <code>ansible-playbook lpa_data-products_deploy.yml --extra-vars remote=&lt;target&gt;</code>.', ''],
+  ['Ansible pushes to the server','Creates the <code>analytics</code> OS user if needed, copies the whole code bundle to <code>/home/analytics/pyspark/</code>, writes a GCP service-account credential, and templates <code>config.py.j2</code> into <code>jobs/config.py</code> with real environment values.', 'No packages are installed and no service/cron job is (re)started — purely a file-drop.'],
+  ['External scheduler triggers the run','Something outside this repository — most likely Airflow, per <code>gamification/prerequisites.md</code> — kicks off Stage 0 → Stage 1 → Stage 2 on whatever cadence is configured there. No cron/systemd/Airflow DAG file exists in this repo.', 'Not determined from this repo.'],
+  ['Stage 0 → Stage 1 → Stage 2 execute','dataExhaust.py extracts, prejoinData.py pre-joins, then the ~40 Stage 2 jobs run — producing CSV reports under <code>standalone-reports/</code> and warehouse-ready Parquet under <code>warehouse/&lt;table&gt;/</code>.', ''],
+  ['Warehouse sync','<code>dataWarehouse.py</code> (or its DuckDB sibling <code>dataWarehouseBash.sh</code>) truncates and reloads 12 Postgres tables from the local Parquet snapshots.', ''],
+  ['BigQuery sync','<code>bq-scripts.sh</code> stages the same Parquet files to GCS, then drops, recreates and reloads the matching BigQuery tables — feeding Looker Studio dashboards.', ''],
+  ['Package &amp; deliver','<code>zipUpload.py</code> merges every report job\'s CSVs, password-protects one ZIP per organization (shared per ministry), stores the passwords in Redis, and uploads to GCS.', ''],
+  ['Cleanup','<code>cleanup.sh</code> purges yesterday\'s dated report folders (1-day retention) and wipes the merged/full-report scratch directories.', 'Trigger for this script is also not visible in this repo.'],
+];
+
+const ISSUES = [
+  ['critical', 'programProgressSyncList_v5.py\'s entire validation pipeline is wrapped in an unused Python string literal — only a Cassandra→Parquet cache refresh actually runs; no mismatch or cert-readiness reports are produced despite the file being 994 lines.'],
+  ['critical', 'org_hierarchy.py contains a hardcoded production bearer token and a hardcoded Postgres password directly in source, and is not even a PySpark job.'],
+  ['serious', 'surveyStatusReport.py is a functional duplicate of surveyQuestionReport.py — wrong Mongo config name, wrong batch-size config key, and both jobs write to the identical output folder.'],
+  ['serious', 'npsUpgraded.py has two consecutive <code>if __name__=="__main__"</code> blocks — the whole pipeline and its Cassandra writes run twice per invocation.'],
+  ['serious', 'gamificationNotificationConsumer.py / gamificationNotificationProducer.py reference config keys (<code>dwnotificationQueue</code>, <code>gamificationNotificationBatchSize</code>, <code>gamificationNotificationEligibilityDays</code>) that don\'t exist anywhere in <code>config.py</code>, <code>default_config.py</code>, or the Ansible template.'],
+  ['serious', 'l2Assessments.py writes to a hardcoded absolute filesystem path (<code>/mount/data/analytics/igot-reports/...</code>) instead of the config-driven convention every other job follows.'],
+  ['warning', 'userDataToRedis.py always writes to Redis DB 0 — it never selects <code>config.redisDB</code>.'],
+  ['warning', 'ministryLeaderboard.py\'s own log lines say "Writing to Cassandra" but the job actually writes to Postgres.'],
+  ['warning', 'zipUpload.py\'s disabled <code>createFullReport</code> branch references two undefined names (<code>password</code>, <code>part2_start</code>) — a NameError risk if that flag is ever turned on.'],
+  ['warning', 'dsrComputationUpdated.py (deprecated) contains a hardcoded bearer token for a live external portal API call.'],
+  ['warning', 'peerValidationNotificationSender.py\'s Kafka broker config (<code>kpBrokerList</code>) has no fallback default in <code>default_config.py</code>, unlike <code>brokerList</code> — it can silently fail outside a fully templated deployment.'],
+  ['info', 'Two parallel implementations exist for the same warehouse-sync responsibility — <code>dataWarehouse.py</code> (Spark/JDBC overwrite) and <code>dataWarehouseBash.sh</code> (DuckDB, more schema-safe) — which one runs in production isn\'t visible from the repo alone.'],
+  ['info', 'The Postgres <code>content</code> warehouse table has two independent producers — Stage 1\'s <code>contentDFUtil.preComputeContentWarehouseData</code> and Stage 2\'s <code>courseReport.py</code> — the latter is the one <code>capAllotment.py</code> and the sync jobs actually depend on.'],
+  ['info', 'Several newer warehouse outputs (<code>cbp_enrollments</code>, <code>apar_cbp_enrollment</code>, <code>bk_course_enrolments</code>/<code>bk_event_enrolments</code>, <code>cap_allocation_meta</code>/<code>cap_allocation_user_wise</code>) are written as Parquet but not yet wired into <code>dataWarehouse.py</code>\'s Postgres sync — likely in-progress features.'],
+  ['info', '<code>course_completion_survey_details</code>\'s Postgres sync line exists in <code>dataWarehouse.py</code> but is commented out — Parquet-only in practice today.'],
+  ['info', 'userReport.py\'s "user-custom-report" output exists in <code>default_config.py</code>\'s zip-bundle fallback list but is missing from the templated production <code>config.py</code> list — may not get bundled in a real deployment.'],
+];
+
+/* ============================================================================
+   RENDER
+============================================================================= */
+const STAGE_LABEL = {0:'Stage 0', 1:'Stage 1', 2:'Stage 2'};
+const STAGE_VAR = {0:'var(--stage0)', 1:'var(--stage1)', 2:'var(--stage2)'};
+const GROUP_LABEL = { foundation:'Foundation', 'warehouse-sync':'Warehouse sync', compliance:'Compliance', gamification:'Gamification', engagement:'Leaderboards & campaigns', export:'Surveys & export' };
+const TAG_LABEL = { core:'Core pipeline', dep:'Deprecated', dead:'Dead / unused', bug:'Known issue', lib:'Shared library' };
+
+function tagpills(tags) {
+  if (!tags || !tags.length) return '';
+  return `<div class="tagset">${tags.map(t=>`<span class="tagpill ${t}">${TAG_LABEL[t]||t}</span>`).join('')}</div>`;
+}
+function listOrNone(items, cls) {
+  if (!items || !items.length) return `<li style="color:var(--text-muted)">None</li>`;
+  return items.map(i => cls === 'src' ? srcBadge(i) : `<li>${i}</li>`).join('');
+}
+function writesBlock(w) {
+  if (!w) return '';
+  const rows = [
+    ['Parquet', w.parquet], ['Report / CSV', w.report], ['Warehouse (Postgres/BigQuery)', w.warehouse],
+    ['Redis', w.redis], ['Kafka', w.kafka], ['Other', w.other]
+  ];
+  return rows.filter(([,v]) => v && v.length).map(([k,v]) => `
+    <div class="write-block"><div class="k">${k}</div><div class="v">${v.join('<br>')}</div></div>
+  `).join('') || `<div class="write-block"><div class="v" style="color:var(--text-muted)">No writes — read-only against upstream data.</div></div>`;
+}
+
+function jobCardHTML(job) {
+  const stageColor = STAGE_VAR[job.stage];
+  const readCount = job.reads.length, joinCount = job.joins.length;
+  const isEmpty = job.tags.includes('dead') && !job.reads.length && !job.proc.length;
+  return `
+  <article class="job-card" data-stage="${job.stage}" data-group="${job.group}" data-search="${(job.name+' '+job.file+' '+job.purpose).toLowerCase()}">
+    <div class="job-head" onclick="this.closest('.job-card').classList.toggle('open')">
+      <div class="stagebar" style="background:${job.group==='foundation' && job.tags.includes('lib') ? 'var(--shared)' : stageColor}"></div>
+      <div class="job-main">
+        <div class="job-title-row"><h4>${job.name}</h4></div>
+        <div class="job-file">${job.file}</div>
+        <div class="job-purpose">${job.purpose}</div>
+        ${isEmpty ? '' : `<div class="job-quickstats">
+          <span class="qs">Reads <b>${readCount}</b></span>
+          <span class="qs">Joins <b>${joinCount}</b></span>
+        </div>`}
+        ${tagpills(job.tags)}
+      </div>
+      <svg class="chev" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M9 6l6 6-6 6"/></svg>
+    </div>
+    ${isEmpty ? '' : `
+    <div class="job-body">
+      <div class="job-body-grid">
+        <div>
+          <div class="jb-h">Reads (${readCount})</div>
+          <ul class="jb-list">${listOrNone(job.reads,'src')}</ul>
+          <div class="jb-h">Joins (${joinCount})</div>
+          <ul class="jb-list">${listOrNone(job.joins)}</ul>
+        </div>
+        <div>
+          <div class="jb-h">Processing</div>
+          <ul class="jb-list proc-list">${listOrNone(job.proc)}</ul>
+          <div class="jb-h">Writes</div>
+          ${writesBlock(job.writes)}
+        </div>
+      </div>
+      ${job.downstream ? `<div class="downstream-note"><b>Downstream:</b> ${job.downstream}</div>` : ''}
+    </div>`}
+  </article>`;
+}
+
+function render() {
+  document.getElementById('jobGrid').innerHTML = JOBS.map(jobCardHTML).join('');
+
+  document.getElementById('warehouseTable').querySelector('tbody').innerHTML = WAREHOUSE_TABLES.map(r => `
+    <tr><td class="mono">${r[0]}</td><td>${r[1]}</td>
+    <td>${r[2].startsWith('Yes') ? `<span class="status-dot" style="background:var(--good)"></span>` : `<span class="status-dot" style="background:var(--text-muted)"></span>`}${r[2]}</td>
+    <td>${r[3]==='Yes' ? `<span class="status-dot" style="background:var(--good)"></span>Yes` : `<span class="status-dot" style="background:var(--text-muted)"></span>No`}</td>
+    <td>${r[4]}</td></tr>`).join('');
+
+  document.getElementById('rawTable').querySelector('tbody').innerHTML = RAW_TABLES.map(r => `
+    <tr><td class="mono">${r[0]}</td><td class="mono">${r[1]}</td><td>${r[2]}</td></tr>`).join('');
+
+  document.getElementById('computedTable').querySelector('tbody').innerHTML = COMPUTED_TABLES.map(r => `
+    <tr><td class="mono">${r[0]}</td><td class="mono">${r[1]}</td><td>${r[2]}</td></tr>`).join('');
+
+  document.getElementById('deployTimeline').innerHTML = DEPLOY_STEPS.map((s,i) => `
+    <div class="tl-step" data-n="${i+1}"><h4>${s[0]}</h4><p>${s[1]}</p>${s[2] ? `<div class="note">${s[2]}</div>` : ''}</div>`).join('');
+
+  const sevColor = { critical:'var(--critical)', serious:'var(--serious)', warning:'var(--warning)', info:'var(--shared)' };
+  document.getElementById('issueList').innerHTML = ISSUES.map(([sev, text]) => `
+    <div class="issue"><span class="sev" style="background:color-mix(in srgb, ${sevColor[sev]} 20%, transparent); color:${sevColor[sev]}">${sev}</span><p>${text}</p></div>`).join('');
+}
+render();
+
+/* ============================================================================
+   FILTER + SEARCH
+============================================================================= */
+let activeFilter = 'all';
+function applyFilters() {
+  const q = document.getElementById('searchInput').value.trim().toLowerCase();
+  const cards = document.querySelectorAll('.job-card');
+  let shown = 0;
+  cards.forEach(c => {
+    const stage = c.dataset.stage, group = c.dataset.group;
+    let matchFilter = activeFilter === 'all' || stage === activeFilter || group === activeFilter;
+    let matchSearch = !q || c.dataset.search.includes(q);
+    const show = matchFilter && matchSearch;
+    c.classList.toggle('hidden', !show);
+    if (show) shown++;
+  });
+  document.getElementById('resultCount').textContent = shown + ' of ' + cards.length + ' jobs';
+}
+document.getElementById('filterBar').addEventListener('click', (e) => {
+  const chip = e.target.closest('.chip');
+  if (!chip) return;
+  document.querySelectorAll('#filterBar .chip').forEach(c => c.classList.remove('active'));
+  chip.classList.add('active');
+  activeFilter = chip.dataset.filter;
+  applyFilters();
+});
+document.getElementById('searchInput').addEventListener('input', () => {
+  if (document.getElementById('searchInput').value.trim()) {
+    document.getElementById('index').scrollIntoView({behavior:'smooth', block:'start'});
+  }
+  applyFilters();
+});
+applyFilters();
+</script>
