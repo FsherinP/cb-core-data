@@ -1,4 +1,4 @@
-<title>cb-core-data — Pipeline Schematic</title>
+<title>cb-core-data — Pipeline Schematic (cbrelease-4.8.39.3)</title>
 <meta name="viewport" content="width=device-width, initial-scale=1" />
 <style>
   /* ============================= TOKENS ============================= */
@@ -133,45 +133,68 @@
     * { animation-duration: 0.001ms !important; animation-iteration-count: 1 !important; transition-duration: 0.001ms !important; }
   }
 
-  /* ============================= SHELL ============================= */
-  .shell { display: grid; grid-template-columns: 258px 1fr; min-height: 100vh; }
+  /* ============================= SHELL / ROUTED VIEWS ============================= */
+  .shell { display: grid; grid-template-columns: 258px 1fr; height: 100vh; overflow: hidden; }
   .rail {
-    position: sticky; top: 0; align-self: start; height: 100vh;
+    height: 100%; overflow-y: auto;
     border-right: 1px solid var(--border);
     background: var(--surface-raised);
     display: flex; flex-direction: column;
     padding: 22px 18px 18px;
-    overflow-y: auto;
   }
   .rail-brand { display: flex; align-items: baseline; gap: 8px; margin-bottom: 4px; }
   .rail-brand .mark { font-family: var(--font-display); font-weight: 800; font-size: 19px; letter-spacing: -0.02em; }
   .rail-brand .tag { font-family: var(--font-mono); font-size: 10.5px; color: var(--text-muted); }
   .rail-sub { font-size: 12px; color: var(--text-muted); margin: 2px 0 18px; }
-  .search-box { position: relative; margin-bottom: 18px; }
-  .search-box input {
-    width: 100%; padding: 9px 12px 9px 30px; border-radius: 8px;
-    border: 1px solid var(--border-strong); background: var(--surface);
-    color: var(--text-primary); font-family: var(--font-body); font-size: 13.5px;
-  }
-  .search-box input::placeholder { color: var(--text-muted); }
-  .search-box svg { position: absolute; left: 9px; top: 50%; transform: translateY(-50%); width: 14px; height: 14px; stroke: var(--text-muted); }
   .rail nav { display: flex; flex-direction: column; gap: 1px; margin-bottom: 20px; }
   .rail nav a {
     color: var(--text-secondary); font-family: var(--font-display); font-size: 13px; font-weight: 600;
     padding: 7px 9px; border-radius: 6px; text-decoration: none;
   }
   .rail nav a:hover { background: var(--surface-sunken); color: var(--text-primary); }
+  .rail nav a.active { background: color-mix(in srgb, var(--accent) 16%, transparent); color: var(--accent); }
   .rail-legend { border-top: 1px solid var(--border); padding-top: 14px; margin-top: auto; }
   .rail-legend .eyebrow { margin-bottom: 9px; display: block; }
   .legend-row { display: flex; align-items: center; gap: 8px; font-size: 12px; color: var(--text-secondary); padding: 3px 0; }
   .legend-dot { width: 9px; height: 9px; border-radius: 50%; flex: none; }
-  main { min-width: 0; padding: 0 0 80px; }
+  main { height: 100%; overflow-y: auto; }
+
+  .view { display: none; }
+  .view.active { display: block; }
 
   @media (max-width: 900px) {
-    .shell { grid-template-columns: 1fr; }
-    .rail { position: static; height: auto; border-right: none; border-bottom: 1px solid var(--border); }
+    .shell { grid-template-columns: 1fr; height: auto; overflow: visible; display: block; }
+    .rail { height: auto; overflow: visible; border-right: none; border-bottom: 1px solid var(--border); }
+    main { height: auto; overflow: visible; }
     .rail-legend { margin-top: 14px; }
   }
+
+  /* ============================= SEARCH (shared component, 3 sizes) ============================= */
+  .searchbar { position: relative; }
+  .searchbar .sicon { position: absolute; top: 50%; transform: translateY(-50%); stroke: var(--text-muted); fill: none; stroke-width: 2; pointer-events: none; }
+  .searchbar input { width: 100%; font-family: var(--font-body); border: 1px solid var(--border-strong); background: var(--surface-raised); color: var(--text-primary); }
+  .searchbar input::placeholder { color: var(--text-muted); }
+  .searchbar input:focus { outline: 2px solid var(--accent); outline-offset: 1px; }
+  .searchbar.sm { margin-bottom: 18px; }
+  .searchbar.sm input { padding: 9px 12px 9px 30px; border-radius: 8px; font-size: 13.5px; background: var(--surface); }
+  .searchbar.sm .sicon { left: 9px; width: 14px; height: 14px; }
+  .searchbar.md input { padding: 11px 15px 11px 38px; border-radius: 10px; font-size: 14.5px; }
+  .searchbar.md .sicon { left: 12px; width: 15px; height: 15px; }
+  .searchbar.lg { max-width: 640px; margin: 0 auto; }
+  .searchbar.lg input { padding: 16px 20px 16px 48px; border-radius: 14px; font-size: 17px; box-shadow: var(--shadow); }
+  .searchbar.lg .sicon { left: 18px; width: 19px; height: 19px; }
+  .suggestions {
+    position: absolute; top: calc(100% + 6px); left: 0; right: 0; background: var(--surface-raised);
+    border: 1px solid var(--border); border-radius: 12px; box-shadow: var(--shadow); z-index: 40;
+    max-height: 360px; overflow-y: auto; display: none;
+  }
+  .suggestions.open { display: block; }
+  .suggestion-item { padding: 10px 16px; cursor: pointer; display: flex; flex-direction: column; gap: 2px; border-bottom: 1px solid var(--border); }
+  .suggestion-item:last-child { border-bottom: none; }
+  .suggestion-item:hover, .suggestion-item.active { background: var(--surface-sunken); }
+  .suggestion-item .sname { font-family: var(--font-display); font-weight: 700; font-size: 13.5px; color: var(--text-primary); }
+  .suggestion-item .sfile { font-family: var(--font-mono); font-size: 11px; color: var(--text-muted); }
+  .suggestion-empty { padding: 14px 16px; font-size: 12.5px; color: var(--text-muted); }
 
   /* ============================= HERO ============================= */
   .hero { padding: 54px 48px 40px; max-width: 1180px; }
@@ -187,6 +210,8 @@
     background: var(--surface-raised); border: 1px solid var(--border); border-radius: 10px;
     padding: 16px 16px 14px; box-shadow: var(--shadow);
   }
+  .stat-tile.linkable { cursor: pointer; transition: border-color .12s; }
+  .stat-tile.linkable:hover { border-color: var(--accent); }
   .stat-tile .num {
     font-family: var(--font-display); font-weight: 800; font-size: 27px; letter-spacing: -0.02em;
     font-variant-numeric: tabular-nums; color: var(--text-primary);
@@ -195,11 +220,11 @@
   @media (max-width: 1100px) { .stat-grid { grid-template-columns: repeat(2, 1fr); } .hero { padding: 40px 24px; } }
 
   /* ============================= SECTIONS ============================= */
-  section.block { padding: 10px 48px 56px; max-width: 1180px; }
-  section.block > .head { margin-bottom: 22px; }
-  section.block > .head h2 { font-size: 25px; }
-  section.block > .head .desc { color: var(--text-secondary); font-size: 14.5px; margin-top: 7px; max-width: 68ch; }
-  @media (max-width: 1100px) { section.block { padding: 10px 24px 48px; } }
+  .page-inner { padding: 44px 48px 56px; max-width: 1180px; }
+  .page-inner > .head { margin-bottom: 22px; }
+  .page-inner > .head h2 { font-size: 25px; }
+  .page-inner > .head .desc { color: var(--text-secondary); font-size: 14.5px; margin-top: 7px; max-width: 68ch; }
+  @media (max-width: 1100px) { .page-inner { padding: 32px 24px 48px; } }
 
   /* ============================= SCHEMATIC ============================= */
   .flow { display: flex; flex-direction: column; align-items: center; gap: 0; }
@@ -233,12 +258,15 @@
   .stage2-cat {
     border-top: 4px solid var(--stage2); border-radius: 10px; padding: 12px 14px; background: var(--surface-raised);
     border: 1px solid var(--border); border-top-width: 4px; box-shadow: var(--shadow); text-align: left;
+    cursor: pointer; transition: border-color .12s;
   }
+  .stage2-cat:hover { border-color: var(--accent); }
   .stage2-cat .n { font-family: var(--font-display); font-weight: 800; font-size: 20px; }
   .stage2-cat .l { font-size: 12px; color: var(--text-secondary); margin-top: 2px; }
   @media (max-width: 900px) { .stage2-fan { grid-template-columns: repeat(2,1fr); } }
 
-  /* ============================= FILTER BAR ============================= */
+  /* ============================= JOB INDEX (dedicated page) ============================= */
+  .jobs-search-block { margin: 4px 0 26px; }
   .filter-bar { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; margin-bottom: 22px; }
   .chip {
     font-family: var(--font-display); font-size: 12.5px; font-weight: 600; padding: 6px 13px; border-radius: 999px;
@@ -252,23 +280,23 @@
   .chip.active .dot { filter: brightness(1.3); }
   .result-count { font-size: 12.5px; color: var(--text-muted); margin-left: auto; font-family: var(--font-mono); }
 
-  /* ============================= JOB CARDS ============================= */
   .job-grid { display: flex; flex-direction: column; gap: 10px; }
-  .job-card {
+  .job-row {
     border: 1px solid var(--border); border-radius: 11px; background: var(--surface-raised);
-    box-shadow: var(--shadow); overflow: hidden;
+    box-shadow: var(--shadow); display: flex; align-items: flex-start; gap: 14px; padding: 15px 18px;
+    cursor: pointer; transition: border-color .12s;
   }
-  .job-head { display: flex; align-items: flex-start; gap: 14px; padding: 15px 18px; cursor: pointer; }
-  .job-head .stagebar { width: 4px; border-radius: 3px; align-self: stretch; flex: none; }
+  .job-row:hover { border-color: var(--accent); }
+  .job-row .stagebar { width: 4px; border-radius: 3px; align-self: stretch; flex: none; }
+  .job-main { flex: 1; min-width: 0; }
   .job-title-row { display: flex; align-items: baseline; gap: 10px; flex-wrap: wrap; }
   .job-title-row h4 { font-size: 15.5px; }
   .job-file { font-family: var(--font-mono); font-size: 11.5px; color: var(--text-muted); }
   .job-purpose { font-size: 13.5px; color: var(--text-secondary); margin-top: 5px; max-width: 74ch; }
-  .job-main { flex: 1; min-width: 0; }
   .job-quickstats { display: flex; gap: 14px; margin-top: 9px; flex-wrap: wrap; }
   .qs { font-family: var(--font-mono); font-size: 11.5px; color: var(--text-muted); display: flex; gap: 5px; align-items: center; }
   .qs b { color: var(--text-primary); font-weight: 700; }
-  .tagset { display: flex; gap: 6px; flex-wrap: wrap; margin-top: 2px; }
+  .tagset { display: flex; gap: 6px; flex-wrap: wrap; margin-top: 8px; }
   .tagpill {
     font-family: var(--font-display); font-size: 10.5px; font-weight: 700; letter-spacing: .03em; text-transform: uppercase;
     padding: 2px 8px; border-radius: 5px; white-space: nowrap;
@@ -277,28 +305,42 @@
   .tagpill.dep    { background: color-mix(in srgb, var(--warning) 20%, transparent); color: var(--warning); }
   .tagpill.dead   { background: color-mix(in srgb, var(--critical) 18%, transparent); color: var(--critical); }
   .tagpill.bug    { background: color-mix(in srgb, var(--serious) 20%, transparent); color: var(--serious); }
+  .tagpill.partial{ background: color-mix(in srgb, var(--warning) 18%, transparent); color: var(--warning); }
   .tagpill.lib    { background: color-mix(in srgb, var(--shared) 22%, transparent); color: var(--shared); }
-  .chev { flex: none; margin-top: 3px; width: 16px; height: 16px; color: var(--text-muted); transition: transform .15s; }
-  .job-card.open .chev { transform: rotate(90deg); }
-  .job-body { display: none; padding: 0 18px 20px 18px; border-top: 1px solid var(--border); }
-  .job-card.open .job-body { display: block; }
-  .job-body-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 22px; margin-top: 16px; }
+  .row-arrow { flex: none; margin-top: 3px; width: 16px; height: 16px; color: var(--text-muted); }
+
+  /* ============================= JOB DETAIL (dedicated page) ============================= */
+  .breadcrumb { margin-bottom: 18px; font-size: 13px; }
+  .breadcrumb a { font-family: var(--font-display); font-weight: 600; }
+  .job-detail-header { display: flex; gap: 16px; align-items: flex-start; }
+  .stagebar-lg { width: 5px; border-radius: 4px; align-self: stretch; min-height: 52px; flex: none; }
+  .job-detail-header h2 { font-size: 24px; }
+  .job-detail-header .job-file { font-size: 12.5px; margin-top: 4px; }
+  .job-purpose-lg { font-size: 15px; color: var(--text-secondary); max-width: 74ch; margin: 16px 0 22px; }
+  .job-body-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 22px; margin-top: 6px; }
   @media (max-width: 800px) { .job-body-grid { grid-template-columns: 1fr; } }
   .jb-h { font-family: var(--font-display); font-size: 11px; font-weight: 700; letter-spacing: .08em; text-transform: uppercase; color: var(--text-muted); margin-bottom: 8px; }
-  .jb-list { list-style: none; margin: 0 0 16px; padding: 0; display: flex; flex-direction: column; gap: 6px; }
-  .jb-list li { font-size: 12.8px; color: var(--text-secondary); display: flex; gap: 7px; align-items: flex-start; line-height: 1.45; }
+  .jb-list { list-style: none; margin: 0 0 20px; padding: 0; display: flex; flex-direction: column; gap: 7px; }
+  .jb-list li { font-size: 13px; color: var(--text-secondary); display: flex; gap: 8px; align-items: flex-start; line-height: 1.5; }
   .src-badge {
-    font-family: var(--font-mono); font-size: 9.5px; font-weight: 700; padding: 1.5px 5px; border-radius: 4px;
+    font-family: var(--font-mono); font-size: 9.5px; font-weight: 700; padding: 2px 6px; border-radius: 4px;
     flex: none; margin-top: 2px; white-space: nowrap; letter-spacing: .02em;
   }
   .jb-list code { font-size: 12px; background: var(--surface-sunken); padding: 1px 4px; border-radius: 4px; }
   .proc-list li::before { content: "—"; color: var(--text-muted); flex: none; }
-  .write-block { margin-bottom: 10px; }
+  .write-block { margin-bottom: 12px; }
   .write-block .k { font-family: var(--font-mono); font-size: 10.5px; font-weight: 700; text-transform: uppercase; color: var(--text-muted); letter-spacing: .05em; }
-  .write-block .v { font-size: 12.8px; color: var(--text-secondary); margin-top: 2px; }
+  .write-block .v { font-size: 13px; color: var(--text-secondary); margin-top: 3px; }
   .write-block .v code { font-size: 12px; }
-  .downstream-note { margin-top: 4px; font-size: 12.8px; color: var(--text-secondary); border-top: 1px dashed var(--border); padding-top: 12px; }
+  .downstream-note { margin-top: 8px; font-size: 13px; color: var(--text-secondary); border-top: 1px dashed var(--border); padding-top: 14px; }
   .downstream-note b { color: var(--text-primary); }
+  .job-nav-buttons { display: flex; justify-content: space-between; gap: 12px; margin-top: 34px; padding-top: 18px; border-top: 1px solid var(--border); }
+  .nav-btn {
+    font-family: var(--font-display); font-size: 12.5px; font-weight: 600; color: var(--text-secondary);
+    padding: 9px 15px; border: 1px solid var(--border-strong); border-radius: 9px; max-width: 46%;
+    overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+  }
+  .nav-btn:hover { background: var(--surface-sunken); color: var(--text-primary); text-decoration: none; border-color: var(--accent); }
 
   /* ============================= DICTIONARY TABLES ============================= */
   .table-wrap { overflow-x: auto; border: 1px solid var(--border); border-radius: 10px; background: var(--surface-raised); box-shadow: var(--shadow); }
@@ -330,12 +372,20 @@
   .tl-step .note { font-family: var(--font-mono); font-size: 11.5px; color: var(--text-muted); margin-top: 5px; }
 
   /* ============================= ISSUES ============================= */
+  .verify-note {
+    font-size: 12.5px; color: var(--text-muted); background: var(--surface-raised); border: 1px solid var(--border);
+    border-radius: 9px; padding: 10px 14px; margin-bottom: 20px; font-family: var(--font-mono);
+  }
   .issue-list { display: flex; flex-direction: column; gap: 8px; }
   .issue {
     display: flex; gap: 12px; padding: 12px 16px; border-radius: 9px; border: 1px solid var(--border);
     background: var(--surface-raised); align-items: flex-start;
   }
-  .issue .sev { flex: none; font-family: var(--font-mono); font-size: 10px; font-weight: 700; padding: 3px 7px; border-radius: 5px; margin-top: 1px; text-transform: uppercase; letter-spacing: .04em; }
+  .issue .pills { flex: none; display: flex; flex-direction: column; gap: 4px; margin-top: 1px; }
+  .issue .sev, .issue .status-pill {
+    font-family: var(--font-mono); font-size: 10px; font-weight: 700; padding: 3px 7px; border-radius: 5px;
+    text-transform: uppercase; letter-spacing: .04em; text-align: center;
+  }
   .issue p { font-size: 13px; color: var(--text-secondary); margin: 0; max-width: none; }
   .issue p code { font-size: 12px; }
   .issue p b { color: var(--text-primary); }
@@ -345,24 +395,20 @@
     font-size: 12.5px; color: var(--text-muted);
   }
   @media (max-width: 1100px) { footer.page-footer { padding: 30px 24px 60px; } }
-  .hidden { display: none !important; }
 </style>
 
 <div class="shell">
   <aside class="rail">
-    <div class="rail-brand"><span class="mark">cb-core-data</span><span class="tag">v4.8.39.1-hotfix</span></div>
+    <div class="rail-brand"><span class="mark">cb-core-data</span><span class="tag">v4.8.39.3</span></div>
     <div class="rail-sub">Karmayogi Bharat analytics pipeline</div>
-    <div class="search-box">
-      <svg viewBox="0 0 24 24" fill="none" stroke-width="2"><circle cx="11" cy="11" r="7"/><path d="M21 21l-4.3-4.3"/></svg>
-      <input id="searchInput" type="text" placeholder="Search jobs, tables, paths…" autocomplete="off" />
-    </div>
+    <div id="railSearchMount"></div>
     <nav>
-      <a href="#overview">Overview</a>
-      <a href="#schematic">Pipeline map</a>
-      <a href="#index">Job index</a>
-      <a href="#dictionary">Data dictionary</a>
-      <a href="#deploy">Deployment flow</a>
-      <a href="#issues">Known issues</a>
+      <a href="#/overview" data-page="overview">Overview</a>
+      <a href="#/schematic" data-page="schematic">Pipeline map</a>
+      <a href="#/jobs" data-page="jobs">Job index</a>
+      <a href="#/dictionary" data-page="dictionary">Data dictionary</a>
+      <a href="#/deploy" data-page="deploy">Deployment flow</a>
+      <a href="#/issues" data-page="issues">Known issues</a>
     </nav>
     <div class="rail-legend">
       <span class="eyebrow">Stage legend</span>
@@ -374,147 +420,178 @@
   </aside>
 
   <main>
-    <header class="hero" id="overview">
-      <span class="eyebrow">Engineering reference · branch cbrelease-4.8.39.1-hotfix</span>
-      <h1>Every job in the Karmayogi Bharat data pipeline, mapped end to end.</h1>
-      <p class="lede">
-        A three-stage PySpark + DuckDB batch pipeline that turns raw platform activity
-        (Cassandra, Elasticsearch, Redis, MongoDB, Druid, Postgres) into 40 requirement-specific
-        reports, a Postgres/BigQuery data warehouse, and the live Redis cache behind the admin
-        dashboard. This page inventories what every job reads, joins, computes and writes —
-        built for someone opening this repository for the first time.
-      </p>
-      <div class="branch-note">
-        Reflects <b style="color:var(--text-secondary)">cbrelease-4.8.39.1-hotfix</b> — the pipeline logic before
-        the performance-profiling/phase-clock instrumentation added in later branches. That
-        instrumentation wraps timing around these same jobs; it changes nothing described here.
-      </div>
-      <div class="stat-grid">
-        <div class="stat-tile"><div class="num">42</div><div class="lbl">pipeline jobs across 3 stages</div></div>
-        <div class="stat-tile"><div class="num">9</div><div class="lbl">external systems read (Cassandra, ES, Redis, Mongo, Druid, 2×Postgres, Kafka, REST)</div></div>
-        <div class="stat-tile"><div class="num">58</div><div class="lbl">named Parquet datasets (31 raw + 27 computed)</div></div>
-        <div class="stat-tile"><div class="num">12</div><div class="lbl">warehouse tables synced to Postgres + BigQuery</div></div>
-        <div class="stat-tile"><div class="num">16</div><div class="lbl">engineering issues flagged in this read</div></div>
-      </div>
-    </header>
+    <!-- ============================= OVERVIEW ============================= -->
+    <section class="view" id="view-overview">
+      <header class="hero">
+        <span class="eyebrow">Engineering reference · branch cbrelease-4.8.39.3</span>
+        <h1>Every job in the Karmayogi Bharat data pipeline, mapped end to end.</h1>
+        <p class="lede">
+          A three-stage PySpark + DuckDB batch pipeline that turns raw platform activity
+          (Cassandra, Elasticsearch, Redis, MongoDB, Druid, Postgres) into 43 requirement-specific
+          reports, a Postgres/BigQuery data warehouse, and the live Redis cache behind the admin
+          dashboard. This page inventories what every job reads, joins, computes and writes —
+          built for someone opening this repository for the first time.
+        </p>
+        <div class="branch-note">
+          Reflects the current <b style="color:var(--text-secondary)">cbrelease-4.8.39.3</b> branch (as of 2026-08-24),
+          built on top of the earlier <code>cbrelease-4.8.39.1-hotfix</code> analysis with 3 new org-hierarchy/warehouse
+          utility jobs and 9 files updated in between. One clarification worth having: a performance-profiling /
+          phase-clocking instrumentation layer exists, but only on a separate <code>cbrelease-4.8.39.1-profiling</code>
+          branch that was <b style="color:var(--text-secondary)">never merged</b> into this lineage — it is not present
+          anywhere in this branch, so nothing was excluded here.
+        </div>
+        <div class="stat-grid">
+          <div class="stat-tile linkable" data-goto="jobs"><div class="num">45</div><div class="lbl">pipeline jobs across 3 stages</div></div>
+          <div class="stat-tile"><div class="num">9</div><div class="lbl">external systems read (Cassandra, ES, Redis, Mongo, Druid, 2×Postgres, Kafka, REST)</div></div>
+          <div class="stat-tile linkable" data-goto="dictionary"><div class="num">59</div><div class="lbl">named Parquet datasets (31 raw + 28 computed)</div></div>
+          <div class="stat-tile linkable" data-goto="dictionary"><div class="num">12</div><div class="lbl">warehouse tables synced to Postgres + BigQuery</div></div>
+          <div class="stat-tile linkable" data-goto="issues"><div class="num">17</div><div class="lbl">issues flagged — 1 partially fixed</div></div>
+        </div>
+      </header>
+    </section>
 
-    <section class="block" id="schematic">
-      <div class="head">
-        <h2>How data moves through the system</h2>
-        <p class="desc">Stage 0 pulls everything raw into Parquet caches. Stage 1 joins those caches into a handful of reusable "computed" tables. Stage 2 is ~40 independent jobs, each reading the computed tables to build one report, warehouse table, or cache entry.</p>
-      </div>
-      <div class="flow">
-        <div class="flow-row">
-          <span class="flow-chip">Cassandra</span><span class="flow-chip">Elasticsearch</span>
-          <span class="flow-chip">Postgres (app)</span><span class="flow-chip">MongoDB</span>
-          <span class="flow-chip">Druid</span><span class="flow-chip">External REST APIs</span>
+    <!-- ============================= SCHEMATIC ============================= -->
+    <section class="view" id="view-schematic">
+      <div class="page-inner">
+        <div class="head">
+          <h2>How data moves through the system</h2>
+          <p class="desc">Stage 0 pulls everything raw into Parquet caches. Stage 1 joins those caches into a handful of reusable "computed" tables. Stage 2 is ~40 independent jobs, each reading the computed tables to build one report, warehouse table, or cache entry. Click any box to jump to its detail.</p>
         </div>
-        <div class="flow-connector animated" style="--flow-col:var(--stage0)"></div>
-        <div class="stage-box stage0-box">
-          <div class="tag" style="color:var(--stage0)">Stage 0 · Extract</div>
-          <h3>dataExhaust.py</h3>
-          <div class="file">jobs/stage-0/dataExhaust.py</div>
-          <div class="meta">~29 reads → 27 raw Parquet caches · 4 joins</div>
-        </div>
-        <div class="flow-connector animated" style="--flow-col:var(--stage1)"></div>
-        <div class="stage-box stage1-box">
-          <div class="tag" style="color:var(--stage1)">Stage 1 · Prejoin</div>
-          <h3>prejoinData.py</h3>
-          <div class="file">jobs/stage-1/prejoinData.py + 7 dfutil modules</div>
-          <div class="meta">18 orchestrated steps → ~27 computed Parquet tables · 45+ joins</div>
-        </div>
-        <div class="flow-connector animated" style="--flow-col:var(--stage2)"></div>
-        <div class="stage2-fan">
-          <div class="stage2-cat"><div class="n">3</div><div class="l">Warehouse &amp; dashboard sync</div></div>
-          <div class="stage2-cat"><div class="n">8</div><div class="l">Compliance &amp; enrolment reports</div></div>
-          <div class="stage2-cat"><div class="n">10</div><div class="l">Gamification &amp; scoring</div></div>
-          <div class="stage2-cat"><div class="n">10</div><div class="l">Leaderboards, metrics &amp; campaigns</div></div>
-          <div class="stage2-cat"><div class="n">10</div><div class="l">Surveys, user reports &amp; export</div></div>
-        </div>
-        <div class="flow-connector animated"></div>
-        <div class="flow-row">
-          <span class="flow-chip">Postgres warehouse</span><span class="flow-chip">BigQuery</span>
-          <span class="flow-chip">Redis (dashboard)</span><span class="flow-chip">Cassandra</span>
-          <span class="flow-chip">Kafka</span><span class="flow-chip">GCS (zipped reports)</span>
+        <div class="flow">
+          <div class="flow-row">
+            <span class="flow-chip">Cassandra</span><span class="flow-chip">Elasticsearch</span>
+            <span class="flow-chip">Postgres (app)</span><span class="flow-chip">MongoDB</span>
+            <span class="flow-chip">Druid</span><span class="flow-chip">External REST APIs</span>
+          </div>
+          <div class="flow-connector animated" style="--flow-col:var(--stage0)"></div>
+          <div class="stage-box stage0-box" style="cursor:pointer" data-goto-job="dataExhaust">
+            <div class="tag" style="color:var(--stage0)">Stage 0 · Extract</div>
+            <h3>dataExhaust.py</h3>
+            <div class="file">jobs/stage-0/dataExhaust.py</div>
+            <div class="meta">~29 reads → 27 raw Parquet caches · 4 joins</div>
+          </div>
+          <div class="flow-connector animated" style="--flow-col:var(--stage1)"></div>
+          <div class="stage-box stage1-box" style="cursor:pointer" data-goto-job="prejoinData">
+            <div class="tag" style="color:var(--stage1)">Stage 1 · Prejoin</div>
+            <h3>prejoinData.py</h3>
+            <div class="file">jobs/stage-1/prejoinData.py + 7 dfutil modules</div>
+            <div class="meta">18 orchestrated steps → ~27 computed Parquet tables · 45+ joins</div>
+          </div>
+          <div class="flow-connector animated" style="--flow-col:var(--stage2)"></div>
+          <div class="stage2-fan">
+            <div class="stage2-cat" data-goto-filter="warehouse-sync"><div class="n">4</div><div class="l">Warehouse &amp; dashboard sync</div></div>
+            <div class="stage2-cat" data-goto-filter="compliance"><div class="n">8</div><div class="l">Compliance &amp; enrolment reports</div></div>
+            <div class="stage2-cat" data-goto-filter="gamification"><div class="n">10</div><div class="l">Gamification &amp; scoring</div></div>
+            <div class="stage2-cat" data-goto-filter="engagement"><div class="n">12</div><div class="l">Leaderboards, metrics &amp; campaigns</div></div>
+            <div class="stage2-cat" data-goto-filter="export"><div class="n">10</div><div class="l">Surveys, user reports &amp; export</div></div>
+          </div>
+          <div class="flow-connector animated"></div>
+          <div class="flow-row">
+            <span class="flow-chip">Postgres warehouse</span><span class="flow-chip">BigQuery</span>
+            <span class="flow-chip">Redis (dashboard)</span><span class="flow-chip">Cassandra</span>
+            <span class="flow-chip">Kafka</span><span class="flow-chip">GCS (zipped reports)</span>
+          </div>
         </div>
       </div>
     </section>
 
-    <section class="block" id="index">
-      <div class="head">
-        <h2>Job index</h2>
-        <p class="desc">Every job, filterable by stage and searchable by name, file or table. Click a card to see exactly what it reads, joins, computes and writes.</p>
+    <!-- ============================= JOB INDEX ============================= -->
+    <section class="view" id="view-jobs">
+      <div class="page-inner">
+        <div class="head">
+          <h2>Job index</h2>
+          <p class="desc">Every job, searchable with autocomplete and filterable by category. Select a suggestion or a card to open its dedicated detail page.</p>
+        </div>
+        <div class="jobs-search-block" id="jobsSearchMount"></div>
+        <div class="filter-bar" id="filterBar">
+          <span class="chip active" data-filter="all">All</span>
+          <span class="chip" data-filter="0"><span class="dot" style="background:var(--stage0)"></span>Stage 0</span>
+          <span class="chip" data-filter="1"><span class="dot" style="background:var(--stage1)"></span>Stage 1</span>
+          <span class="chip" data-filter="warehouse-sync"><span class="dot" style="background:var(--stage2)"></span>Warehouse sync</span>
+          <span class="chip" data-filter="compliance"><span class="dot" style="background:var(--stage2)"></span>Compliance</span>
+          <span class="chip" data-filter="gamification"><span class="dot" style="background:var(--stage2)"></span>Gamification</span>
+          <span class="chip" data-filter="engagement"><span class="dot" style="background:var(--stage2)"></span>Leaderboards &amp; campaigns</span>
+          <span class="chip" data-filter="export"><span class="dot" style="background:var(--stage2)"></span>Surveys &amp; export</span>
+          <span class="result-count" id="resultCount"></span>
+        </div>
+        <div class="job-grid" id="jobGrid"></div>
       </div>
-      <div class="filter-bar" id="filterBar">
-        <span class="chip active" data-filter="all">All</span>
-        <span class="chip" data-filter="0"><span class="dot" style="background:var(--stage0)"></span>Stage 0</span>
-        <span class="chip" data-filter="1"><span class="dot" style="background:var(--stage1)"></span>Stage 1</span>
-        <span class="chip" data-filter="warehouse-sync"><span class="dot" style="background:var(--stage2)"></span>Warehouse sync</span>
-        <span class="chip" data-filter="compliance"><span class="dot" style="background:var(--stage2)"></span>Compliance</span>
-        <span class="chip" data-filter="gamification"><span class="dot" style="background:var(--stage2)"></span>Gamification</span>
-        <span class="chip" data-filter="engagement"><span class="dot" style="background:var(--stage2)"></span>Leaderboards &amp; campaigns</span>
-        <span class="chip" data-filter="export"><span class="dot" style="background:var(--stage2)"></span>Surveys &amp; export</span>
-        <span class="result-count" id="resultCount"></span>
-      </div>
-      <div class="job-grid" id="jobGrid"></div>
     </section>
 
-    <section class="block" id="dictionary">
-      <div class="head">
-        <h2>Data dictionary</h2>
-        <p class="desc">The authoritative name for every dataset in the pipeline, sourced from <code>constants/ParquetFileConstants.py</code> and the warehouse-sync jobs.</p>
+    <!-- ============================= JOB DETAIL ============================= -->
+    <section class="view" id="view-job">
+      <div class="page-inner">
+        <div id="jobDetailSearchMount" style="max-width:520px; margin-bottom:20px;"></div>
+        <div id="jobDetailBody"></div>
       </div>
-
-      <div class="dict-sub">
-        <h3>Warehouse tables — Postgres &amp; BigQuery</h3>
-        <p class="desc">Written locally as Parquet under <code>warehouseReportDir</code>, then pushed by <code>dataWarehouse.py</code> / <code>dataWarehouseBash.sh</code> (Postgres, full truncate + reload every run) and <code>bq-scripts.sh</code> (BigQuery, full drop + recreate + load every run).</p>
-      </div>
-      <div class="table-wrap"><table class="data-table" id="warehouseTable">
-        <thead><tr><th>Table</th><th>Populated by</th><th>Postgres</th><th>BigQuery</th><th>Content</th></tr></thead>
-        <tbody></tbody>
-      </table></div>
-
-      <div class="dict-sub">
-        <h3>Raw Parquet caches — written by Stage 0</h3>
-        <p class="desc">Live under <code>data-res/pq_files/cache_pq/&lt;name&gt;/</code>. One folder per Cassandra table, Elasticsearch query, or Postgres table pulled straight from source.</p>
-      </div>
-      <div class="table-wrap"><table class="data-table" id="rawTable">
-        <thead><tr><th>Constant</th><th>Folder</th><th>Source</th></tr></thead>
-        <tbody></tbody>
-      </table></div>
-
-      <div class="dict-sub">
-        <h3>Computed Parquet tables — written by Stage 1</h3>
-        <p class="desc">Live under <code>output/computed/&lt;name&gt;/</code>. These are the tables almost every Stage 2 job reads from.</p>
-      </div>
-      <div class="table-wrap"><table class="data-table" id="computedTable">
-        <thead><tr><th>Constant</th><th>Folder</th><th>Built by</th></tr></thead>
-        <tbody></tbody>
-      </table></div>
     </section>
 
-    <section class="block" id="deploy">
-      <div class="head">
-        <h2>From commit to running pipeline</h2>
-        <p class="desc">The deployment path is fully visible in this repo; the run-time <em>schedule</em> is not — no cron or Airflow DAG file lives here. <code>gamification/prerequisites.md</code> and an <code>airflowData/</code> path constant both point to an external Airflow instance as the real scheduler.</p>
+    <!-- ============================= DATA DICTIONARY ============================= -->
+    <section class="view" id="view-dictionary">
+      <div class="page-inner">
+        <div class="head">
+          <h2>Data dictionary</h2>
+          <p class="desc">The authoritative name for every dataset in the pipeline, sourced from <code>constants/ParquetFileConstants.py</code> and the warehouse-sync jobs.</p>
+        </div>
+
+        <div class="dict-sub">
+          <h3>Warehouse tables — Postgres &amp; BigQuery</h3>
+          <p class="desc">Written locally as Parquet under <code>warehouseReportDir</code>, then pushed by <code>dataWarehouse.py</code> / <code>dataWarehouseBash.sh</code> (Postgres, full truncate + reload every run) and <code>bq-scripts.sh</code> (BigQuery, full drop + recreate + load every run).</p>
+        </div>
+        <div class="table-wrap"><table class="data-table" id="warehouseTable">
+          <thead><tr><th>Table</th><th>Populated by</th><th>Postgres</th><th>BigQuery</th><th>Content</th></tr></thead>
+          <tbody></tbody>
+        </table></div>
+
+        <div class="dict-sub">
+          <h3>Raw Parquet caches — written by Stage 0</h3>
+          <p class="desc">Live under <code>data-res/pq_files/cache_pq/&lt;name&gt;/</code>. One folder per Cassandra table, Elasticsearch query, or Postgres table pulled straight from source.</p>
+        </div>
+        <div class="table-wrap"><table class="data-table" id="rawTable">
+          <thead><tr><th>Constant</th><th>Folder</th><th>Source</th></tr></thead>
+          <tbody></tbody>
+        </table></div>
+
+        <div class="dict-sub">
+          <h3>Computed Parquet tables — written by Stage 1</h3>
+          <p class="desc">Live under <code>output/computed/&lt;name&gt;/</code>. These are the tables almost every Stage 2 job reads from.</p>
+        </div>
+        <div class="table-wrap"><table class="data-table" id="computedTable">
+          <thead><tr><th>Constant</th><th>Folder</th><th>Built by</th></tr></thead>
+          <tbody></tbody>
+        </table></div>
       </div>
-      <div class="timeline" id="deployTimeline"></div>
     </section>
 
-    <section class="block" id="issues">
-      <div class="head">
-        <h2>Known issues found while reading the code</h2>
-        <p class="desc">Flagged for engineering awareness during this read-only analysis — nothing here was changed.</p>
+    <!-- ============================= DEPLOYMENT FLOW ============================= -->
+    <section class="view" id="view-deploy">
+      <div class="page-inner">
+        <div class="head">
+          <h2>From commit to running pipeline</h2>
+          <p class="desc">The deployment path is fully visible in this repo; the run-time <em>schedule</em> is not — no cron or Airflow DAG file lives here. <code>gamification/prerequisites.md</code> and an <code>airflowData/</code> path constant both point to an external Airflow instance as the real scheduler.</p>
+        </div>
+        <div class="timeline" id="deployTimeline"></div>
       </div>
-      <div class="issue-list" id="issueList"></div>
+    </section>
+
+    <!-- ============================= KNOWN ISSUES ============================= -->
+    <section class="view" id="view-issues">
+      <div class="page-inner">
+        <div class="head">
+          <h2>Known issues found while reading the code</h2>
+          <p class="desc">Flagged during a read-only analysis, originally of <code>cbrelease-4.8.39.1-hotfix</code> and now checked directly against <code>cbrelease-4.8.39.3</code>.</p>
+        </div>
+        <div class="verify-note">✓ Verified directly against <code>cbrelease-4.8.39.3</code> on 2026-08-24, file by file. Result: 15 of 17 still present exactly as described; 1 partially fixed; 1 new observation surfaced by the org-hierarchy jobs added on this branch (marked below).</div>
+        <div class="issue-list" id="issueList"></div>
+      </div>
     </section>
 
     <footer class="page-footer">
-      Generated from a direct read of <code>cbrelease-4.8.39.1-hotfix</code> (all 42 jobs, every <code>dfutil</code> helper,
-      every deployment script). The current working branch adds a performance-profiling/phase-clock layer around these
-      same jobs — intentionally excluded here per the request that produced this page. See
-      <code>docs/ARCHITECTURE.md</code>, <code>docs/JOB_DETAILS.md</code> and <code>docs/DATA_DICTIONARY.md</code> for the
-      full written reference.
+      Generated from a direct read of <code>cbrelease-4.8.39.3</code> (all 45 jobs, every <code>dfutil</code> helper,
+      every deployment script). The performance-profiling/phase-clock instrumentation seen elsewhere lives only on
+      the separate, never-merged <code>cbrelease-4.8.39.1-profiling</code> branch — it isn't part of this branch, so
+      there was nothing to exclude here. See <code>docs/ARCHITECTURE.md</code>, <code>docs/JOB_DETAILS.md</code> and
+      <code>docs/DATA_DICTIONARY.md</code> for the full written reference.
     </footer>
   </main>
 </div>
@@ -577,18 +654,18 @@ const JOBS = [
   downstream:'USER_ORG_COMPUTED_FILE is read directly by ~20 of the 40 Stage 2 jobs.' },
 
 { id:'dfutil-content', stage:1, group:'foundation', name:'dfutil/content/contentDFUtil.py', file:'dfutil/content/contentDFUtil.py', tags:['lib'],
-  purpose:'Builds the master content catalog (course/program metadata + ratings + org) and the content-warehouse table. 11 joins.',
+  purpose:'Builds the master content catalog (course/program metadata + ratings + org) and the content-warehouse table. Gained a new capability on this branch: flattening the raw content hierarchy up to 4 levels deep into one wide table, used by userReport.py\'s reworked learning-hours calculation. 11 joins.',
   reads:['PQ: ESCONTENT, RATING_SUMMARY, RATING, ALL_COURSE_PROGRAM_COMPUTED, CONTENT_RATING_COMPUTED, ORG_COMPUTED, EXTERNAL_CONTENT, HIERARCHY, ENROLMENT_COMPUTED, BATCH_SELECT, EXTERNAL_ENROLMENT_COMPUTED, EXTERNAL_CONTENT_COMPUTED'],
   joins:['LEFT · content ⋈ content-rating on courseID','LEFT · + org on courseOrgID — produces CONTENT_COMPUTED, the master content table','LEFT · enrolment ⋈ resource-count on courseID','LEFT · content ⋈ completion-aggregates on courseID','INNER then broadcast LEFT · Blended-Program subset ⋈ batch data on courseID','OUTER · marketplace content ⋈ marketplace enrolment-aggregates on content_id','LEFT · + SCORM-detection flags on courseID','LEFT · event-enrolments ⋈ karma points on (user_id, event_id)'],
-  proc:['preComputeContentWarehouseData unions platform content with marketplace/external content into one warehouse-shaped frame','writeWarehouseParquetFiles writes org_hierarchy/event_details/event_enrolment_details straight to warehouseReportDir (a second, independent producer of the warehouse "content" table alongside courseReport.py — see Known Issues)'],
-  writes:{ parquet:['ALL_COURSE_PROGRAM_COMPUTED, RATING_SUMMARY_COMPUTED, RATING_COMPUTED, CONTENT_RATING_COMPUTED, EXTERNAL_CONTENT_COMPUTED, CONTENT_HIERARCHY_SELECT, CONTENT_COMPUTED, CONTENT_WAREHOUSE_COMPUTED'],
+  proc:['NEW on this branch: precomputeContentHierarchyDataFrame now also infers the ES hierarchy JSON schema dynamically (sampling 30% of rows) and flattens parent + 4 child levels into one wide row per content id — writes CONTENT_HIERARCHY_FLATTENED_PARQUET_FILE','preComputeContentWarehouseData unions platform content with marketplace/external content into one warehouse-shaped frame','writeWarehouseParquetFiles writes org_hierarchy/event_details/event_enrolment_details straight to warehouseReportDir (a second, independent producer of the warehouse "content" table alongside courseReport.py — see Known Issues)','Minor curiosity: the new helper functions (infer_hierarchy_schema, safe_field, get_struct_type, has_children) are decorated @staticmethod at module level with no enclosing class — a no-op decorator, harmless but likely copy-pasted from a class-based draft'],
+  writes:{ parquet:['ALL_COURSE_PROGRAM_COMPUTED, RATING_SUMMARY_COMPUTED, RATING_COMPUTED, CONTENT_RATING_COMPUTED, EXTERNAL_CONTENT_COMPUTED, CONTENT_HIERARCHY_SELECT, CONTENT_COMPUTED, CONTENT_WAREHOUSE_COMPUTED, CONTENT_HIERARCHY_FLATTENED (new)'],
        warehouse:['warehouse/org_hierarchy, warehouse/event_details, warehouse/event_enrolment_details (direct writes)'] },
-  downstream:'CONTENT_COMPUTED_PARQUET_FILE is read by ~18 Stage 2 jobs.' },
+  downstream:'CONTENT_COMPUTED_PARQUET_FILE is read by ~18 Stage 2 jobs. CONTENT_HIERARCHY_FLATTENED_PARQUET_FILE is a new hard dependency for userReport.py.' },
 
 { id:'dfutil-enrolment', stage:1, group:'foundation', name:'dfutil/enrolment/enrolmentDFUtil.py', file:'dfutil/enrolment/enrolmentDFUtil.py', tags:['lib'],
   purpose:'Builds the master enrolment table (platform completion status, batch, rating, karma) and the warehouse-facing enrolment frame used by dashboardSync.py\'s entire query library. 6 joins.',
   reads:['PQ: ENROLMENT_PARQUET_FILE, BATCH_PARQUET_FILE, RATING_COMPUTED, USER_KARMA_POINTS, EXTERNAL_COURSE_ENROLMENTS, USER_ORG_COMPUTED_FILE, CONTENT_COMPUTED, EXTERNAL_ENROLMENT_COMPUTED, EXTERNAL_CONTENT_COMPUTED'],
-  joins:['LEFT · enrolment ⋈ batch on (courseID, batchID)','LEFT · + user rating on (userID, courseID)','LEFT · + karma points on (userID, courseID) — produces ENROLMENT_COMPUTED, the master enrolment table','LEFT · enrolment ⋈ content-org on courseID (shared preComputeUserOrgEnrolment helper)','LEFT · + user-org on userID','INNER · external content ⋈ external enrolment on content_id — unioned with the platform frame to produce ENROLMENT_WAREHOUSE_COMPUTED'],
+  joins:['LEFT · enrolment ⋈ batch on (courseID, batchID)','LEFT · + user rating on (userID, courseID)','LEFT · + karma points on (userID, courseID) — produces ENROLMENT_COMPUTED_PARQUET_FILE','LEFT · enrolment ⋈ content-org on courseID (shared preComputeUserOrgEnrolment helper)','LEFT · + user-org on userID','INNER · external content ⋈ external enrolment on content_id — unioned with the platform frame to produce ENROLMENT_WAREHOUSE_COMPUTED'],
   proc:['Derives enrolment_status (enrolled/unenrolled) from Cassandra\'s "active" flag','preComputeUserOrgEnrolment (shared helper) derives completionPercentage, completionStatus and userCourseCompletionStatus — reused by courseReport.py, unenrollmentReport.py and userEnrolment.py'],
   writes:{ parquet:['ENROLMENT_SELECT, BATCH_SELECT, ENROLMENT_COMPUTED, EXTERNAL_ENROLMENT_COMPUTED, ENROLMENT_WAREHOUSE_COMPUTED'] },
   downstream:'ENROLMENT_WAREHOUSE_COMPUTED_PARQUET_FILE feeds the entire QueryConstants.py library used by dashboardSync.py.' },
@@ -628,15 +705,15 @@ const JOBS = [
   purpose:'A bash/DuckDB reimplementation of the exact same responsibility as dataWarehouse.py, with explicit column casts, dedup and NULL-FK filtering — more schema-safe than the Spark/JDBC version. Both exist in this branch; which one is actually cron-scheduled in production is not visible from the repo alone.',
   reads:['PQw: the same 12(+1) warehouseReportDir Parquet folders, read via read_parquet(...) in DuckDB'],
   joins:['0 — straight TRUNCATE + INSERT per table'],
-  proc:['Lightweight → heavyweight execution order; user_enrolments (~19GB) deliberately loaded last','Deduplicates `content` via ROW_NUMBER() before insert; filters NULL foreign keys on bp_enrolments/assessment_detail/user_enrolments before insert — schema-safety dataWarehouse.py lacks','Shells out to `python3 -c "from jobs.config import get_environment_config"` to read Postgres connection details'],
+  proc:['Lightweight → heavyweight execution order; user_enrolments (~19GB) deliberately loaded last','Deduplicates `content` via ROW_NUMBER() before insert — NOW with an explicit `ORDER BY last_published_on DESC` (fixed on this branch; previously unordered, so which duplicate row survived was nondeterministic)','Filters NULL foreign keys on bp_enrolments/assessment_detail/user_enrolments before insert — schema-safety dataWarehouse.py lacks','Shells out to `python3 -c "from jobs.config import get_environment_config"` to read Postgres connection details','NEW on this branch: per-table and total execution timing, logged to stdout with a summary table at the end — lightweight bash-level instrumentation, unrelated to the separate (never-merged) Python profiling branch'],
   writes:{ warehouse:['Same 12 Postgres tables via DuckDB ATTACH ... TYPE postgres; TRUNCATE; INSERT'] },
   downstream:'Same consumers as dataWarehouse.py.' },
 
 { id:'dashboardSync', stage:2, group:'warehouse-sync', name:'Dashboard Sync (Redis-only)', file:'jobs/stage-2/dashboardSync.py', tags:['core'],
-  purpose:'The engine behind the live admin/learner dashboard. Runs ~15 metric phases against the warehouse-computed Parquet tables via DuckDB SQL, and writes every single result into Redis — never Postgres. This is what makes the dashboard feel real-time.',
+  purpose:'The engine behind the live admin/learner dashboard. Runs ~15 metric phases against the warehouse-computed Parquet tables via DuckDB SQL, and writes every result into Redis — never Postgres. This is what makes the dashboard feel real-time.',
   reads:['PQw: ENROLMENT_WAREHOUSE_COMPUTED, USER_WAREHOUSE_COMPUTED, CONTENT_WAREHOUSE_COMPUTED, ORG_COMPUTED and ~15 more, all via QueryConstants.py DuckDB SQL'],
-  joins:['50+ SQL joins across ~40 named queries in constants/QueryConstants.py — a shared BASE_DATA_COMPLETE CTE (enrolment ⋈ user ⋈ content ⋈ org) is reused by 15 of them'],
-  proc:['Org/MDO-admin counts, enrolment/completion funnels (overall + per-MDO + per-CBP), top-5/top-10 leaderboards (users, courses, content, MDOs), trending courses/programs/events, NLW campaign metrics, competency coverage, learning-hours deltas, NPS score','Dispatches exactly one Kafka message per run (user course/program progress) — everything else goes to Redis'],
+  joins:['50+ SQL joins across ~40 named queries in constants/QueryConstants.py — a shared BASE_DATA_COMPLETE CTE is reused by 15 of them'],
+  proc:['Org/MDO-admin counts, enrolment/completion funnels (overall + per-MDO + per-CBP), top-5/top-10 leaderboards (users, courses, content, MDOs), trending courses/events, NLW campaign metrics, competency coverage, learning-hours deltas, NPS score','Dispatches exactly one Kafka message per run (user course/program progress) — everything else goes to Redis','CHANGED on this branch: process_trending now restricts trending courses to enrolments from the last 7 days (previously all-time), and the entire "Trending Programs" calculation is commented out — the code comment cites "the new UI/UX implementation considers only context_type = Course," so program trending is no longer computed or written to Redis at all'],
   writes:{ redis:['50+ keys — dashboard_* org/enrolment/completion counters, top-5/top-10 leaderboard maps, trending/certification lists, NLW ticker, competency coverage'],
            kafka:['userCourseProgramProgress topic, one message per run'] },
   downstream:'Every real-time counter and leaderboard on the admin/learner dashboard UI reads directly from these Redis keys.' },
@@ -654,7 +731,7 @@ const JOBS = [
   purpose:'For assessments that stand on their own (not embedded in a course), reports each learner\'s latest attempt, score, pass/fail and attempt count.',
   reads:['PQ: ALL_ASSESSMENT_COMPUTED (Standalone Assessment only), ORG_COMPUTED, CONTENT_COMPUTED, RATING_SUMMARY_COMPUTED, USER_ORG_COMPUTED_FILE','PQr: HIERARCHY_PARQUET_FILE, USER_ASSESSMENT_PARQUET_FILE'],
   joins:['LEFT · assessment ⋈ hierarchy on assessID','LEFT · course ⋈ hierarchy on courseID','LEFT · course ⋈ org on courseOrgID','LEFT · course ⋈ rating on (courseID, categoryLower)','INNER · attempt ⋈ assessment-children on assessChildID','LEFT · + assessment details on assessID','LEFT · + course details on courseID','LEFT · + user-org on userID','INNER (broadcast) · + latest-attempt-per-user on (assessChildID, userID, assessEndTimestamp)'],
-  proc:['Picks each user\'s single most recent attempt and tags it with a separate total-attempt count'],
+  proc:['Picks each user\'s single most recent attempt and tags it with a separate total-attempt count','FIXED on this branch: the "Percentage_Of_Score" column now correctly reads from assessOverallResult instead of assessPassPercentage — those are different numbers (achieved score vs. the pass threshold), so the report was showing the wrong value before this fix'],
   writes:{ report:['StandaloneAssessmentReport.csv per MDO, under standaloneAssessmentReportPath'] },
   downstream:'user-assessment-report-cbp folder is bundled by zipUpload.py for content providers.' },
 
@@ -687,7 +764,7 @@ const JOBS = [
   purpose:'For assessments embedded inside a course (as opposed to standalone), reports each learner\'s best attempt, score, pass/fail and retakes — split into Government vs Non-Government exports.',
   reads:['PQ: ALL_ASSESSMENT_COMPUTED, ORG_COMPUTED, CONTENT_COMPUTED, RATING_SUMMARY_COMPUTED, USER_ORG_COMPUTED_FILE, OLD_ASSESSMENT_COMPUTED','PQr: HIERARCHY_PARQUET_FILE, USER_ASSESSMENT_PARQUET_FILE (SUBMITTED only), FINAL_ASSESSMENT_PARQUET_FILE, esCourseAssessment'],
   joins:['12 joins: hierarchy ×2, org, rating, best-attempt selection (two different tie-break windows depending on whether the assessment is sectional), retakes count, ES-final-assessment attach, live minimum-pass-percentage override, CAP sub-type detection'],
-  proc:['Best-attempt tie-break: basic assessments rank by overall score; sectional assessments rank by section marks instead — because sectional pass/fail can\'t be judged by overall percentage alone','Exact-match VOLUNTEER/Non-Govt split (same rule as userEnrolment.py/userReport.py): flags a designation or role equal to exactly "VOLUNTEER", deliberately not a substring match (avoids false-flagging "Civil Defence Volunteer")'],
+  proc:['Best-attempt tie-break: basic assessments rank by overall score; sectional assessments rank by section marks instead — because sectional pass/fail can\'t be judged by overall percentage','Exact-match VOLUNTEER/Non-Govt split (same rule as userEnrolment.py/userReport.py): flags a designation or role equal to exactly "VOLUNTEER", deliberately not a substring match (avoids false-flagging "Civil Defence Volunteer")'],
   writes:{ report:['UserAssessmentReport.csv — Govt and Non-Govt written separately'],
            warehouse:['assessment_detail (synced to Postgres)'] },
   downstream:'cba-report folder bundled by zipUpload.py. assessment_detail feeds Postgres/BigQuery.' },
@@ -791,42 +868,42 @@ const JOBS = [
 { id:'learnerLeaderboard', stage:2, group:'engagement', name:'Learner Leaderboard', file:'jobs/stage-2/learnerLeaderboard.py', tags:[],
   purpose:'Monthly per-org "top learners" leaderboard ranked by karma points earned last month, with rank movement vs. last month.',
   reads:['PQr: USER_KARMA_POINTS_PARQUET_FILE (previous month)','PQ: USER_ORG_COMPUTED_FILE','PQr: LEARNER_LEADERBOARD_PARQUET_FILE (prior Cassandra snapshot)'],
-  joins:['INNER · orgs with &gt;10 users only (privacy floor)','LEFT · org members ⋈ karma points','LEFT · current ⋈ prior rank on userid'],
-  proc:['dense_rank ties share a rank; row_number gives a deterministic Cassandra clustering order for pagination'],
+  joins:['INNER · orgs with &gt;10 users only (privacy floor)','LEFT · org members ⋈ karma points','LEFT · current ⋈ prior rank'],
+  proc:['dense_rank ties share a rank; row_number gives a deterministic Cassandra clustering order for pagination','NEW on this branch: adds a job_execution_datetime audit column (current_timestamp) to the final Cassandra write'],
   writes:{ other:['Cassandra learner_leaderboard + learner_leaderboard_lookup (append)'] },
   downstream:'The learner-facing app\'s "your org rank" widget.' },
 
 { id:'ministryLeaderboard', stage:2, group:'engagement', name:'Ministry Leaderboard', file:'jobs/stage-2/ministryLeaderboard.py', tags:['bug'],
-  purpose:'Rolls up "top learners" to every level of the ministry/department/org hierarchy simultaneously, using an embedded DuckDB database for the hierarchy fan-out instead of Spark SQL.',
+  purpose:'Rolls up "top learners" to every level of the ministry/department/org hierarchy simultaneously, using an embedded DuckDB database for the hierarchy fan-out.',
   reads:['PQ: USER_ORG_COMPUTED_FILE','PQr: ORG_COMPLETE_HIERARCHY_PARQUET_FILE, USER_KARMA_POINTS_PARQUET_FILE (previous month, filtered in DuckDB)'],
   joins:['5 DuckDB SQL joins: hierarchy×distinct-mdos, then a 3-level self-join chain rolling users up to MDO / department / ministry, then ×karma-aggregate'],
-  proc:['One row per user PER hierarchy level via UNION ALL, so one dense_rank() produces independent leaderboards at every level at once','Bug: log lines say "Writing to Cassandra" but the job actually writes to Postgres — stale comments, not a functional Cassandra path'],
+  proc:['One row per user PER hierarchy level via UNION ALL, so one dense_rank() produces independent leaderboards at every level at once','Bug: log lines say "Writing to Cassandra" but the job actually writes to Postgres — stale comments, not a functional Cassandra path. Verified still present.'],
   writes:{ warehouse:['slw_mdo_top_learners — Postgres APP schema, JDBC overwrite+truncate'] },
   downstream:'A ministry/department-level Top Learners dashboard widget.' },
 
 { id:'ministryMetrics', stage:2, group:'engagement', name:'Ministry Metrics', file:'jobs/stage-2/ministryMetrics.py', tags:[],
   purpose:'Refreshes four at-a-glance counters (24h active users, total registered, certificates issued, enrolments) rolled up to ministry, department and org level, for a fast admin dashboard.',
   reads:['PQ: ENROLMENT_WAREHOUSE_COMPUTED, USER_COMPUTED (active)','PQr: ORG_HIERARCHY_PARQUET_FILE','Druid: 24h active users'],
-  joins:['11: active-users×Druid, ×org-hierarchy, enrolment×users×org-hierarchy, userCount computed 3× (ministry/dept/org) ×org-hierarchy, each metric ×ministryNames to resolve the Redis field key'],
-  proc:['"One code path, three grain levels" pattern: every metric computed identically at ministry/department/org grain then unioned'],
+  joins:['11, incl. 3× repeated user-org join for 3 rollup levels'],
+  proc:['"One code path, three grain levels" pattern (ministry/department/org all computed identically then unioned)'],
   writes:{ redis:['4 hashes: dashboard_rolled_up_login_percent_last_24_hrs, _user_count, _certificates_generated_count, _enrolment_content_count'] },
   downstream:'Ministry/MDO admin-dashboard summary cards.' },
 
 { id:'nationalLearningWeek', stage:2, group:'engagement', name:'National Learning Week Leaderboard', file:'jobs/stage-2/nationalLearningWeek.py', tags:['bug'],
   purpose:'For a fixed campaign window, computes a per-capita-karma-points leaderboard bucketed by org size, separately for "states" and "centre" MDOs, plus a live daily certificate/learning-hours ticker.',
   reads:['PQw: warehouse/org_hierarchy','PQ: USER_ORG_COMPUTED_FILE, ENROLMENT_WAREHOUSE_COMPUTED, CONTENT_WAREHOUSE_COMPUTED, GAMIFICATION_BADGE_USER_ENROLMENT_PARQUET_FILE','PQr: USER_KARMA_POINTS_PARQUET_FILE, EVENT_PARQUET_FILE, eventEnrolmentDetails (read via literal path, not the shared constant)'],
-  joins:['16: content/event-hours attach, state-hierarchy resolution, karma+hours attach (state & centre separately), fixed-population override (per-state hardcoded target denominator overriding the actual registered-user count), org-name resolution, 4 sequential per-user stat joins'],
-  proc:['Fixed a real historical bug inline: a lowercase "xs" bucket fallback used to create a phantom rank-1 partition — documented in a code comment','Contains a leftover hardcoded single-user debug .show() call in the production path'],
+  joins:['16: content/event completions x master LEFT/INNER (hours calc), state-hierarchy resolution INNER x2, karma+hours attach LEFT x4 (state+centre), fixed-population override LEFT (per-state hardcoded target denominator overriding actual registered-user count!), org-name resolution LEFT, final per-user stat build via 4 sequential LEFT joins'],
+  proc:['Fixed a real historical bug inline: a lowercase "xs" fallback bucket used to create a phantom rank-1 partition — documented in a code comment','Contains a leftover hardcoded single-user debug .show() call in the production path'],
   writes:{ parquet:['warehouse/nlw_mdo_leaderboard'],
            other:['Cassandra "nlw_mdo_leaderboard" (hardcoded literal, not config-driven); Postgres app-schema "nlw_user_leaderboard" (same caveat)'],
-           redis:['lhp_certifications, lhp_learningHours hashes — merge mode, using Redis itself as yesterday/today rollover memory'] },
+           redis:['lhp_certifications/lhp_learningHours hashes — merge mode, using Redis itself as yesterday/today rollover memory'] },
   downstream:'The NLW campaign UI leaderboards and a live daily-stats ticker.' },
 
 { id:'npsUpgraded', stage:2, group:'engagement', name:'NPS Survey Trigger', file:'jobs/stage-2/npsUpgraded.py', tags:['bug'],
   purpose:'Identifies users who should be prompted for the platform NPS/rating survey — anyone who enrolled, completed, or rated a course in the last 15 days and hasn\'t already seen the prompt.',
-  reads:['Druid: users who already saw the popup (15-day)','PQ: ENROLMENT_COMPUTED (15-day)','PQr: RATING_PARQUET_FILE (15-day, TimeUUID-decoded)','PGw: n/a — Cassandra user_feed (category=NPS2, existing)'],
+  reads:['Druid: users who already saw the popup (15-day)','PQ: ENROLMENT_COMPUTED (15-day)','PQr: RATING_PARQUET_FILE (15-day, TimeUUID-decoded)','Cassandra: user_feed (category=NPS2, existing)'],
   joins:['0 conventional joins — eligibility is set algebra: union + dropDuplicates, then .subtract() for exclusions'],
-  proc:['Bug: the file has two consecutive if __name__=="__main__": main() blocks — the entire pipeline and its Cassandra writes run twice per invocation'],
+  proc:['Bug: the file has two consecutive if __name__=="__main__": main() blocks — the entire pipeline and its Cassandra writes run twice per invocation. Verified still present.'],
   writes:{ other:['Cassandra user_feed (NPS2 entries) + notification_feed_history audit copy'] },
   downstream:'The in-app notification center surfaces the rating prompt.' },
 
@@ -838,13 +915,37 @@ const JOBS = [
   writes:{ redis:['odcs_course_recomendation (typo preserved from source), field=mdo_id'] },
   downstream:'The homepage "recommended for your organization" carousel.' },
 
-{ id:'orgHierarchy', stage:2, group:'engagement', name:'Org Hierarchy Sync', file:'jobs/stage-2/org_hierarchy.py', tags:['bug'],
-  purpose:'Fully rebuilds the ministry/department/org hierarchy lookup in Postgres — the only job in this repo that is plain Python, not PySpark.',
-  reads:['ES: org_v4 index (hardcoded host)','API: external FRAC framework REST endpoint (hardcoded prod host + bearer token)'],
+{ id:'orgHierarchy', stage:2, group:'engagement', name:'Org Hierarchy Sync (original)', file:'jobs/stage-2/org_hierarchy.py', tags:['partial'],
+  purpose:'Fully rebuilds the ministry/department/org hierarchy lookup in Postgres — the only job in this repo that is plain Python, not PySpark. Now one of three coexisting variants of this job (see the two entries below) — added together in the same commit ("Added org hierarchy and logging for datawarehouse").',
+  reads:['ES: org_v4 index (hardcoded host)','API: external FRAC framework REST endpoint (hardcoded prod host)'],
   joins:['0 — row-by-row Python dict-walking, not Spark'],
-  proc:['Unconditionally TRUNCATEs 3 Postgres tables at the start of every run — full refresh, no incremental mode','Recursively collects every descendant org id (any depth) for "children of org X" lookups','Security flag: contains a hardcoded prod bearer token and a hardcoded Postgres password directly in source'],
+  proc:['Unconditionally TRUNCATEs 3 Postgres tables at the start of every run — full refresh, no incremental mode','Recursively collects every descendant org id (any depth) for "children of org X" lookups','Security flag — PARTIALLY FIXED on this branch: the hardcoded live bearer token was removed and replaced with a commented-out placeholder, and the stray cookie header was deleted. The hardcoded Postgres password ("password123") and both the Elasticsearch (10.175.5.10) and Postgres (10.175.5.15) hostnames remain hardcoded in source.'],
   writes:{ warehouse:['org_hierarchy_new, org_hierarchy_lookup, mdo_children_lookup — Postgres app schema'] },
   downstream:'Other services needing "children of MDO X" lookups; not read by any other job in this repo (those read org hierarchy from Parquet caches instead).' },
+
+{ id:'orgHierarchyAll', stage:2, group:'engagement', name:'Org Hierarchy Sync (config-driven rewrite)', file:'jobs/stage-2/orgHierarchyAll.py', tags:[],
+  purpose:'A fully config-driven rewrite of org_hierarchy.py\'s exact same responsibility — same functions, same 3 target tables — but with every hardcoded value replaced by a config lookup. This is the version that actually resolves the credential-hygiene issue, not just the bearer-token half of it.',
+  reads:['ES: org_v4 index, via config.sparkElasticsearchConnectionHost/Port','API: config.api_url_template (no hardcoded host or token)'],
+  joins:['0 — row-by-row Python dict-walking, not Spark'],
+  proc:['Postgres connection uses config.dwPostgresHost/appPostgresSchema/appPostgresUsername/appPostgresCredential — no hardcoded credentials anywhere in this file','Same TRUNCATE-then-rebuild logic, same recursive descendant-map builder as org_hierarchy.py','Worth noting: the framework API call sends no Authorization header at all (requests.get(url) with no headers) — unclear whether the endpoint genuinely needs no auth or this is a side-effect of removing the hardcoded token without replacing it with a config-driven one'],
+  writes:{ warehouse:['org_hierarchy_new, org_hierarchy_lookup, mdo_children_lookup — Postgres app schema (same 3 tables as org_hierarchy.py)'] },
+  downstream:'Same as org_hierarchy.py — not clear from the repo which of the two is the one actually scheduled in production.' },
+
+{ id:'orgHierarchyEmpty', stage:2, group:'engagement', name:'Org Hierarchy Sync (empty-framework patch)', file:'jobs/stage-2/orgHerarchyUpdatedEmpty.py', tags:[],
+  purpose:'A narrower variant that additionally queries two specific hardcoded org IDs directly (comment references "karmayogi bharat" and "karyogi prorambh trainee"), and — the "Empty" in the filename — inserts a default all-null hierarchy row for any org whose framework has no LevelOne terms, instead of silently skipping it as the other two variants do.',
+  reads:['ES: org_v4 index (config-driven), plus a second scroll query filtered to 2 hardcoded org identifiers','API: config.api_url_template'],
+  joins:['0 — row-by-row Python dict-walking, not Spark'],
+  proc:['Unions the state/ministry query results with the 2 hardcoded-org query results, deduplicating by identifier','Only TRUNCATEs and writes org_hierarchy_new — the calls that would populate org_hierarchy_lookup and mdo_children_lookup are commented out in this variant, so those two tables are left untouched by this job'],
+  writes:{ warehouse:['org_hierarchy_new only — Postgres app schema'] },
+  downstream:'Likely run as a targeted patch alongside org_hierarchy.py/orgHierarchyAll.py rather than standalone, given its narrower single-table scope.' },
+
+{ id:'postgresToParquet', stage:2, group:'warehouse-sync', name:'Postgres → Parquet Exporter', file:'jobs/stage-2/postgresToParquet.py', tags:[],
+  purpose:'A small CLI utility running the warehouse flow in reverse — reads a Postgres table (defaults to org_hierarchy_new, the table the org-hierarchy jobs above just rebuilt) and writes it back out to a local Parquet file. Likely used to snapshot/inspect/backup the freshly-rebuilt hierarchy table, or to feed it into a downstream Parquet-consuming step.',
+  reads:['PGa: any table via --table/--schema CLI args, default org_hierarchy_new / public'],
+  joins:['0'],
+  proc:['Fully config-driven Postgres connection (config.dwPostgresHost/appPostgresSchema/appPostgresUsername/appPostgresCredential) — no hardcoded credentials','argparse CLI: --table, --schema, --output-dir, --filename, --chunk-size (for large tables), --compression (snappy/gzip/brotli/lz4/zstd/none)','Logs table shape, column list, dtypes and null-counts-per-column before writing — a diagnostic/export tool, not a scheduled pipeline step in the usual sense'],
+  writes:{ parquet:['<output-dir>/<table>.parquet — defaults to ./output/org_hierarchy_new.parquet'] },
+  downstream:'Not referenced by any other job in this repo — appears to be an ops/diagnostic utility rather than a wired pipeline dependency.' },
 
 { id:'peerValidationEligibleUsers', stage:2, group:'engagement', name:'Peer Validation — Eligible Users', file:'jobs/stage-2/peerValidationEligibleUsers.py', tags:[],
   purpose:'Determines which learners should be asked to complete a peer-review survey for a course they just finished, and enqueues eligible (user, form) pairs into a Postgres notification queue.',
@@ -858,7 +959,7 @@ const JOBS = [
   purpose:'Drains PENDING rows from the peer-validation queue, POSTs them in batches to the Notification API, and advances each form\'s watermark once its notifications are confirmed sent.',
   reads:['PGw: peer_validation_notification_queue (PENDING), peer_validation_form_state'],
   joins:['LEFT_ANTI · untouched forms ⋈ newly-advanced forms — preserves prior watermarks before the union+overwrite'],
-  proc:['Kill-switch config (apiBasedNotificationEnabled) allows dry-run mode','Config gap: Kafka broker config.kpBrokerList has no dev fallback default, unlike brokerList'],
+  proc:['Kill-switch config (apiBasedNotificationEnabled) allows dry-run mode','Config gap: Kafka broker config.kpBrokerList has no dev fallback default in default_config.py, unlike brokerList — verified still absent'],
   writes:{ warehouse:['Per-row UPDATE of status on the queue; full OVERWRITE of form_state'],
            kafka:['peerValidationKafkaTopic — one event per form with a sent-count increment'],
            other:['HTTP POST to the Notification API'] },
@@ -868,7 +969,7 @@ const JOBS = [
   purpose:'Designed to cross-check denormalized completion status against the row-level Cassandra consumption table and flag mismatches — but the entire validation pipeline is dead code in this branch.',
   reads:['C: user_content_consumption_v2 — the only read that actually executes'],
   joins:['0 live (the dormant code contains ~15 joins across PySpark and DuckDB, never called)'],
-  proc:['The real logic (lines ~839–933: course validation, DuckDB program validation, 3 cert-readiness metrics, all report writing) is wrapped in an unused Python triple-quoted string literal — syntactically valid, never executes','No _v1–_v4 files exist anywhere in the repo; this job is absent even from bq-scripts.sh'],
+  proc:['The real logic (lines ~839–933: course validation, DuckDB program validation, 3 cert-readiness metrics, all report writing) is wrapped in an unused Python triple-quoted string literal — syntactically valid, never executes. Verified still true.','No _v1–_v4 files exist anywhere in the repo; this job is absent even from bq-scripts.sh'],
   writes:{ parquet:['consumption_v2 — a refreshed cache of the Cassandra table; the only thing that actually happens'] },
   downstream:'None active — the logic that would produce validation output is disabled.' },
 
@@ -876,20 +977,20 @@ const JOBS = [
   purpose:'Generates one CSV per survey "solution" with every question response, enriched with respondent profile fields. Column layout is driven entirely by a MongoDB config document.',
   reads:['Mongo: reportConfigCollection (dynamic column config), solutions (end-dates)','Druid: sl-survey — distinct submission IDs, then batched row data'],
   joins:['0 — Druid filtering substitutes for joins'],
-  proc:['Batches Druid queries by submission ID to avoid overloading Druid','Column set, profile fields and sort order all come from Mongo — ops can add columns without a code change'],
+  proc:['Batches Druid queries by submission ID to avoid overloading Druid. Column set, profile fields and sort order all come from Mongo — ops can add columns without a code change'],
   writes:{ report:['One CSV per solution, zipped and synced to GCS under standalone-reports/ml-report'] },
   downstream:'Zipped CSVs land in blob storage for direct download.' },
 
 { id:'surveyStatusReport', stage:2, group:'export', name:'Survey Status Report', file:'jobs/stage-2/surveyStatusReport.py', tags:['bug'],
-  purpose:'Intended to report survey completion status — but is a near byte-for-byte copy of surveyQuestionReport.py.',
+  purpose:'Intended to report survey completion status, but is a near byte-for-byte copy of surveyQuestionReport.py.',
   reads:['Mongo: reportConfigCollection — still queries the config document named "surveyQuestionReport", not "surveyStatusReport"','Druid: same sl-survey queries'],
   joins:['0'],
-  proc:['Still uses SurveyQuestionReportBatchSize instead of the dedicated SurveyStatusReportBatchSize that exists in config','Writes to the identical output folder name "SurveyQuestionsReport" as the question report'],
+  proc:['Still uses SurveyQuestionReportBatchSize instead of the dedicated SurveyStatusReportBatchSize that exists in config — verified still true','Writes to the identical output folder name "SurveyQuestionsReport" as the question report'],
   writes:{ report:['Same path as surveyQuestionReport.py — running both on the same day targets the same folder'] },
   downstream:'None distinct from the question report.' },
 
 { id:'unenrollmentReport', stage:2, group:'export', name:'Unenrolment Report', file:'jobs/stage-2/unenrollmentReport.py', tags:[],
-  purpose:'Per-org report of every user unenrolled from a course, with who unenrolled them, when, why, and how far they\'d progressed.',
+  purpose:'Per-org report of every user unenrolled from a course — who unenrolled them, when, why, and how far they\'d progressed.',
   reads:['PQr: UNENROLMENT_AUDIT_PARQUET_FILE (UNENROLL only)','PQ: ENROLMENT_COMPUTED (enrolled), USER_ORG_COMPUTED_FILE, CONTENT_COMPUTED, ACBP_COMPUTED_FILE'],
   joins:['4: enrolment×content, +user-org, +ACBP-mandate flag, +unenrolment-audit (INNER — this join IS the row filter limiting to actually-unenrolled rows)'],
   proc:['Same 3-tier Ministry/Department/Org fallback display logic used across the compliance-report group'],
@@ -908,34 +1009,34 @@ const JOBS = [
 { id:'userDataToRedis', stage:2, group:'export', name:'User Data → Redis', file:'jobs/stage-2/userDataToRedis.py', tags:['bug'],
   purpose:'Pushes a lightweight per-user profile snapshot into Redis so front-end services can render user cards without hitting Cassandra/Postgres on every request.',
   reads:['PQ: USER_SELECT_PARQUET_FILE'], joins:['0'],
-  proc:['repartition(500) + foreachPartition with pipelined batched SET (25,000/batch)','Bug: uses a plain redis.Redis client without selecting config.redisDB — always writes DB 0 regardless of the configured DB index'],
+  proc:['repartition(500) + foreachPartition with pipelined batched SET (25,000/batch)','Bug: uses a plain redis.Redis client without selecting config.redisDB — always writes DB 0 regardless of the configured DB index. Verified still present.'],
   writes:{ redis:['user:{user_id} → JSON profile snapshot, overwritten every run, no TTL'] },
   downstream:'The front-end/API layer reads these keys directly.' },
 
 { id:'userEnrolment', stage:2, group:'export', name:'User Enrolment Report (Stage 2D)', file:'jobs/stage-2/userEnrolment.py', tags:['core'],
   purpose:'The canonical "who is enrolled in what, with what progress/certificate status" report for every org — platform and marketplace content combined, split Govt vs. Non-Govt. Part of jobs/main.py\'s orchestrated pipeline.',
   reads:['PQr: UNENROLMENT_AUDIT (deduped via a row_number window — an explicit fan-out-prevention fix)','PQ: ENROLMENT_COMPUTED, USER_ORG_COMPUTED_FILE, CONTENT_COMPUTED, EXTERNAL_ENROLMENT_COMPUTED, EXTERNAL_CONTENT_COMPUTED, ACBP_COMPUTED_FILE'],
-  joins:['6: enrolment×content, +user-org, external-content×external-enrolment (INNER), +user-org, +ACBP-mandate, +unenrolment-audit (LEFT, not INNER — keeps both enrolled and unenrolled rows, unlike unenrollmentReport.py)'],
+  joins:['6: enrolment×content LEFT; +user-org LEFT; external-content×external-enrolment INNER; +user-org LEFT; +ACBP-mandate LEFT; +unenrolment-audit LEFT (LEFT not INNER unlike unenrollmentReport.py — keeps both enrolled and unenrolled rows)'],
   proc:['Govt/Non-Govt split by exact-match VOLUNTEER designation/role; orgs with both cohorts get two output folders'],
   writes:{ report:['ConsumptionReport.csv ×2 (Govt + Non-Govt)'],
-           warehouse:['user_enrolments (synced to Postgres) — read by userActivity.py, dsrComputation.py, nationalLearningWeek.py, odcsRecommendation.py, ministryMetrics.py, dashboardSync.py'] },
+           warehouse:['user_enrolments (synced) — read by userActivity.py, dsrComputation.py, nationalLearningWeek.py, odcsRecommendation.py, ministryMetrics.py, dashboardSync.py'] },
   downstream:'One of the most widely-depended-on outputs in the entire pipeline. Bundled by zipUpload.py.' },
 
 { id:'userReport', stage:2, group:'export', name:'User Report (Stage 2A)', file:'jobs/stage-2/userReport.py', tags:['core','bug'],
-  purpose:'The canonical per-user profile+activity report for every org — karma points, badges, enrolment/completion counts, learning hours, and dynamically-pivoted org-specific custom fields. Part of jobs/main.py\'s orchestrated pipeline.',
-  reads:['PQ: USER_ORG_COMPUTED_FILE, ENROLMENT_WAREHOUSE_COMPUTED, GAMIFICATION_BADGE_USER_ENROLMENT_PARQUET_FILE, CONTENT_COMPUTED (Course only)','PQr: EVENT_ENROLMENT_PARQUET_FILE, USER_EXTENDED_PROFILE (org custom fields)'],
-  joins:['4 core + a per-org pivot join: content-duration attach, +event-details, +badges, org-scoped custom-field pivot per org'],
-  proc:['SparkSession built at module IMPORT time (same unusual pattern as gamificationJob.py)','Explicit perf-optimization split (fixing a documented 30-min → 3-hour regression): orgs WITH custom fields go through an expensive per-org pivot path (8 parallel workers); orgs WITHOUT go through a fast bulk path','Config gap: production config.py\'s zip-bundle list is missing "user-custom-report" that exists in the local-dev fallback list'],
+  purpose:'The canonical per-user profile+activity report for every org — karma points, badges, enrolment/completion counts, learning hours, and dynamically-pivoted org-specific custom fields. Part of jobs/main.py\'s orchestrated pipeline. Learning-hours calculation and a DOB field were reworked on this branch.',
+  reads:['PQ: USER_ORG_COMPUTED_FILE, ENROLMENT_WAREHOUSE_COMPUTED, GAMIFICATION_BADGE_USER_ENROLMENT_PARQUET_FILE, CONTENT_HIERARCHY_FLATTENED (replaces the old CONTENT_COMPUTED read for duration)','PQr: EVENT_ENROLMENT_PARQUET_FILE, USER_EXTENDED_PROFILE (org custom fields), EXTERNAL_CONTENT_PARQUET_FILE (new), EXTERNAL_COURSE_ENROLMENTS_PARQUET_FILE (new)'],
+  joins:['6: external enrolments ⋈ external content LEFT on content_id (NEW — builds per-user external-content duration); + external duration LEFT on userID (NEW); content-duration attach LEFT (helper); + event-details LEFT (helper); + badges LEFT; org-scoped custom-field pivot LEFT (per org)'],
+  proc:['SparkSession built at module IMPORT time (same unusual pattern as gamificationJob.py)','REWORKED on this branch: course duration for Blended Program / Comprehensive Assessment Program / Curated Program is now summed from eligible first-level children (via the new CONTENT_HIERARCHY_FLATTENED table) instead of using a single flat parent-level duration — a real accuracy fix for multi-component content types','Total_Learning_Hours now also includes marketplace/external content duration (previously excluded entirely)','Added a DOB (date of birth) column to the report output','Explicit perf-optimization split (documented as fixing a 30-min → 3-hour regression): orgs with custom fields go through an expensive per-org pivot path (8 parallel workers); orgs without go through a fast bulk path'],
   writes:{ report:['UserReport.csv ×2 (Govt + Non-Govt)'],
-           warehouse:['user_detail (synced), userCustomFields, per-org user_custom_report/&lt;org&gt;_custom_report.parquet'] },
-  downstream:'Bundled by zipUpload.py — though the custom-report output may not be, per the config gap above.' },
+           warehouse:['user_detail (synced), userCustomFields, per-org user_custom_report/<org>_custom_report.parquet'] },
+  downstream:'Bundled by zipUpload.py — though the custom-report output may not be, per the config-list gap in Known Issues (verified still present: jobs/config.py\'s pysparkCBPDirectoriesToSelect list is still missing "user-custom-report"). Now also depends on contentDFUtil\'s new CONTENT_HIERARCHY_FLATTENED_PARQUET_FILE output.' },
 
 { id:'weeklyClaps', stage:2, group:'export', name:'Weekly Claps (engagement streak)', file:'jobs/stage-2/weeklyClaps.py', tags:[],
   purpose:'A streak mechanic: if a user\'s weekly time-on-app crosses a threshold, they earn a "clap" for the week, tracked in a rolling 4-week window.',
   reads:['PQr: CLAPS_PARQUET_FILE (prior state, itself sourced from Postgres learner_stats via Stage 0)','Druid: this week\'s engagement time'],
   joins:['FULL OUTER · existing claps ⋈ this-week engagement on userid — brand-new users still get a row'],
   proc:['Monday-rollover state machine shifts the w1–w4 window and finalizes last week\'s clap based on whether the cutoff (default 60 min) was crossed'],
-  writes:{ warehouse:['learner_stats — Postgres APP schema, overwrite+truncate. A closed read-modify-write loop: this job writes what Stage 0 reads again next run'] },
+  writes:{ warehouse:['learner_stats — Postgres app schema, overwrite+truncate. A closed read-modify-write loop: this job writes what Stage 0 reads again next run'] },
   downstream:'Feeds back into Stage 0\'s own next-run cache.' },
 
 { id:'workFlowSummarizer', stage:2, group:'export', name:'Workflow Summarizer', file:'jobs/stage-2/workFlowSummarizer.py', tags:['dead'],
@@ -948,7 +1049,7 @@ const JOBS = [
   purpose:'The terminal packaging step: gathers every report job\'s per-org CSV output, generates one password-protected ZIP per org (shared across a ministry), stores the passwords in Redis, and uploads everything to GCS.',
   reads:['PQw: warehouse/org_hierarchy (drives password grouping)','filesystem: every report job\'s dated mdoid=&lt;org&gt; output folder, per config\'s bundle lists'],
   joins:['0 — Spark only reads org_hierarchy; the rest is filesystem/OS work'],
-  proc:['Password grouping priority: ministry &gt; department &gt; individual org — orgs under the same ministry share one password','Bug: the disabled createFullReport branch references two undefined names (password, part2_start) — a NameError risk, currently inert only because the flag defaults False everywhere'],
+  proc:['Password grouping priority: ministry &gt; department &gt; individual org — orgs under the same ministry share one password','Bug: the disabled createFullReport branch references two undefined names (password, part2_start) — a NameError risk, currently inert only because the flag defaults False everywhere. Verified still present at line ~488.'],
   writes:{ other:['Password-protected reports.zip per org, uploaded to GCS'],
            redis:['CB_EXT_{mdoid}_password → the password string, read by the notification/portal layer'] },
   downstream:'The fan-in consumer of userReport.py and userEnrolment.py\'s CSV outputs, among others.' },
@@ -1039,6 +1140,7 @@ const COMPUTED_TABLES = [
   ['USER_WAREHOUSE_COMPUTED_PARQUET_FILE','user-warehouse-computed/','userDFUtil.preComputeUserWarehouseData'],
   ['CONTENT_WAREHOUSE_COMPUTED_PARQUET_FILE','content-warehouse-computed/','contentDFUtil.preComputeContentWarehouseData'],
   ['GAMIFICATION_BADGE_USER_ENROLMENT_PARQUET_FILE','user_enrolment_badge_computed/','gamificationJob.py (Stage 2, not Stage 1)'],
+  ['CONTENT_HIERARCHY_FLATTENED_PARQUET_FILE','content_hierarchy_flattened','contentDFUtil.precomputeContentHierarchyDataFrame — NEW on this branch; parent + 4 child levels flattened wide, feeds userReport.py\'s learning-hours calculation'],
 ];
 
 const DEPLOY_STEPS = [
@@ -1053,33 +1155,36 @@ const DEPLOY_STEPS = [
   ['Cleanup','<code>cleanup.sh</code> purges yesterday\'s dated report folders (1-day retention) and wipes the merged/full-report scratch directories.', 'Trigger for this script is also not visible in this repo.'],
 ];
 
+// status: 'open' (verified still present) | 'partial' (partially fixed) | 'fixed' (resolved)
 const ISSUES = [
-  ['critical', 'programProgressSyncList_v5.py\'s entire validation pipeline is wrapped in an unused Python string literal — only a Cassandra→Parquet cache refresh actually runs; no mismatch or cert-readiness reports are produced despite the file being 994 lines.'],
-  ['critical', 'org_hierarchy.py contains a hardcoded production bearer token and a hardcoded Postgres password directly in source, and is not even a PySpark job.'],
-  ['serious', 'surveyStatusReport.py is a functional duplicate of surveyQuestionReport.py — wrong Mongo config name, wrong batch-size config key, and both jobs write to the identical output folder.'],
-  ['serious', 'npsUpgraded.py has two consecutive <code>if __name__=="__main__"</code> blocks — the whole pipeline and its Cassandra writes run twice per invocation.'],
-  ['serious', 'gamificationNotificationConsumer.py / gamificationNotificationProducer.py reference config keys (<code>dwnotificationQueue</code>, <code>gamificationNotificationBatchSize</code>, <code>gamificationNotificationEligibilityDays</code>) that don\'t exist anywhere in <code>config.py</code>, <code>default_config.py</code>, or the Ansible template.'],
-  ['serious', 'l2Assessments.py writes to a hardcoded absolute filesystem path (<code>/mount/data/analytics/igot-reports/...</code>) instead of the config-driven convention every other job follows.'],
-  ['warning', 'userDataToRedis.py always writes to Redis DB 0 — it never selects <code>config.redisDB</code>.'],
-  ['warning', 'ministryLeaderboard.py\'s own log lines say "Writing to Cassandra" but the job actually writes to Postgres.'],
-  ['warning', 'zipUpload.py\'s disabled <code>createFullReport</code> branch references two undefined names (<code>password</code>, <code>part2_start</code>) — a NameError risk if that flag is ever turned on.'],
-  ['warning', 'dsrComputationUpdated.py (deprecated) contains a hardcoded bearer token for a live external portal API call.'],
-  ['warning', 'peerValidationNotificationSender.py\'s Kafka broker config (<code>kpBrokerList</code>) has no fallback default in <code>default_config.py</code>, unlike <code>brokerList</code> — it can silently fail outside a fully templated deployment.'],
-  ['info', 'Two parallel implementations exist for the same warehouse-sync responsibility — <code>dataWarehouse.py</code> (Spark/JDBC overwrite) and <code>dataWarehouseBash.sh</code> (DuckDB, more schema-safe) — which one runs in production isn\'t visible from the repo alone.'],
-  ['info', 'The Postgres <code>content</code> warehouse table has two independent producers — Stage 1\'s <code>contentDFUtil.preComputeContentWarehouseData</code> and Stage 2\'s <code>courseReport.py</code> — the latter is the one <code>capAllotment.py</code> and the sync jobs actually depend on.'],
-  ['info', 'Several newer warehouse outputs (<code>cbp_enrollments</code>, <code>apar_cbp_enrollment</code>, <code>bk_course_enrolments</code>/<code>bk_event_enrolments</code>, <code>cap_allocation_meta</code>/<code>cap_allocation_user_wise</code>) are written as Parquet but not yet wired into <code>dataWarehouse.py</code>\'s Postgres sync — likely in-progress features.'],
-  ['info', '<code>course_completion_survey_details</code>\'s Postgres sync line exists in <code>dataWarehouse.py</code> but is commented out — Parquet-only in practice today.'],
-  ['info', 'userReport.py\'s "user-custom-report" output exists in <code>default_config.py</code>\'s zip-bundle fallback list but is missing from the templated production <code>config.py</code> list — may not get bundled in a real deployment.'],
+  { sev:'critical', status:'open', text:'programProgressSyncList_v5.py\'s entire validation pipeline is wrapped in an unused Python string literal — only a Cassandra→Parquet cache refresh actually runs; no mismatch or cert-readiness reports are produced despite the file being 994 lines.' },
+  { sev:'critical', status:'partial', text:'org_hierarchy.py — the hardcoded framework-API bearer token has been removed (replaced with a commented-out placeholder) on this branch. However the hardcoded Postgres password and both the Elasticsearch/Postgres hostnames are still hardcoded directly in source. A sibling job, orgHierarchyAll.py, does fully resolve this by reading everything from config — but org_hierarchy.py itself still has the gap.' },
+  { sev:'serious', status:'open', text:'surveyStatusReport.py is a functional duplicate of surveyQuestionReport.py — wrong Mongo config name, wrong batch-size config key, and both jobs write to the identical output folder.' },
+  { sev:'serious', status:'open', text:'npsUpgraded.py has two consecutive <code>if __name__=="__main__"</code> blocks — the whole pipeline and its Cassandra writes run twice per invocation.' },
+  { sev:'serious', status:'open', text:'gamificationNotificationConsumer.py / gamificationNotificationProducer.py reference config keys (<code>dwnotificationQueue</code>, <code>gamificationNotificationBatchSize</code>, <code>gamificationNotificationEligibilityDays</code>) that don\'t exist anywhere in <code>config.py</code>, <code>default_config.py</code>, or the Ansible template.' },
+  { sev:'serious', status:'open', text:'l2Assessments.py writes to a hardcoded absolute filesystem path (<code>/mount/data/analytics/igot-reports/...</code>) instead of the config-driven convention every other job follows.' },
+  { sev:'warning', status:'open', text:'userDataToRedis.py always writes to Redis DB 0 — it never selects <code>config.redisDB</code>.' },
+  { sev:'warning', status:'open', text:'ministryLeaderboard.py\'s own log lines say "Writing to Cassandra" but the job actually writes to Postgres.' },
+  { sev:'warning', status:'open', text:'zipUpload.py\'s disabled <code>createFullReport</code> branch references two undefined names (<code>password</code>, <code>part2_start</code>) — a NameError risk if that flag is ever turned on.' },
+  { sev:'warning', status:'open', text:'dsrComputationUpdated.py (deprecated) contains a hardcoded bearer token for a live external portal API call.' },
+  { sev:'warning', status:'open', text:'peerValidationNotificationSender.py\'s Kafka broker config (<code>kpBrokerList</code>) has no fallback default in <code>default_config.py</code>, unlike <code>brokerList</code> — it can silently fail outside a fully templated deployment.' },
+  { sev:'info', status:'open', text:'Two parallel implementations exist for the same warehouse-sync responsibility — <code>dataWarehouse.py</code> (Spark/JDBC overwrite) and <code>dataWarehouseBash.sh</code> (DuckDB, more schema-safe) — which one runs in production isn\'t visible from the repo alone.' },
+  { sev:'info', status:'open', text:'The Postgres <code>content</code> warehouse table has two independent producers — Stage 1\'s <code>contentDFUtil.preComputeContentWarehouseData</code> and Stage 2\'s <code>courseReport.py</code> — the latter is the one <code>capAllotment.py</code> and the sync jobs actually depend on.' },
+  { sev:'info', status:'open', text:'Several newer warehouse outputs (<code>cbp_enrollments</code>, <code>apar_cbp_enrollment</code>, <code>bk_course_enrolments</code>/<code>bk_event_enrolments</code>, <code>cap_allocation_meta</code>/<code>cap_allocation_user_wise</code>) are written as Parquet but not yet wired into <code>dataWarehouse.py</code>\'s Postgres sync — likely in-progress features.' },
+  { sev:'info', status:'open', text:'<code>course_completion_survey_details</code>\'s Postgres sync line exists in <code>dataWarehouse.py</code> but is commented out — Parquet-only in practice today.' },
+  { sev:'info', status:'open', text:'userReport.py\'s "user-custom-report" output exists in <code>default_config.py</code>\'s zip-bundle fallback list but is missing from the templated production <code>config.py</code> list — may not get bundled in a real deployment.' },
+  { sev:'info', status:'open', text:'Three coexisting org-hierarchy jobs now exist (<code>org_hierarchy.py</code>, <code>orgHierarchyAll.py</code>, <code>orgHerarchyUpdatedEmpty.py</code>) with near-identical logic and no cross-references — which one is actually scheduled in production isn\'t determinable from the repo. <code>orgHierarchyAll.py</code>\'s framework-API call also sends no Authorization header at all, unlike the original\'s (now-disabled) bearer token — unclear if the endpoint needs none or this was dropped along with the hardcoded credential.' },
 ];
 
 /* ============================================================================
-   RENDER
+   RENDER HELPERS
 ============================================================================= */
 const STAGE_LABEL = {0:'Stage 0', 1:'Stage 1', 2:'Stage 2'};
 const STAGE_VAR = {0:'var(--stage0)', 1:'var(--stage1)', 2:'var(--stage2)'};
 const GROUP_LABEL = { foundation:'Foundation', 'warehouse-sync':'Warehouse sync', compliance:'Compliance', gamification:'Gamification', engagement:'Leaderboards & campaigns', export:'Surveys & export' };
-const TAG_LABEL = { core:'Core pipeline', dep:'Deprecated', dead:'Dead / unused', bug:'Known issue', lib:'Shared library' };
+const TAG_LABEL = { core:'Core pipeline', dep:'Deprecated', dead:'Dead / unused', bug:'Known issue', partial:'Partially fixed', lib:'Shared library' };
 
+function jobStageColor(job) { return (job.group === 'foundation' && job.tags.includes('lib')) ? 'var(--shared)' : STAGE_VAR[job.stage]; }
 function tagpills(tags) {
   if (!tags || !tags.length) return '';
   return `<div class="tagset">${tags.map(t=>`<span class="tagpill ${t}">${TAG_LABEL[t]||t}</span>`).join('')}</div>`;
@@ -1094,38 +1199,208 @@ function writesBlock(w) {
     ['Parquet', w.parquet], ['Report / CSV', w.report], ['Warehouse (Postgres/BigQuery)', w.warehouse],
     ['Redis', w.redis], ['Kafka', w.kafka], ['Other', w.other]
   ];
-  return rows.filter(([,v]) => v && v.length).map(([k,v]) => `
+  const out = rows.filter(([,v]) => v && v.length).map(([k,v]) => `
     <div class="write-block"><div class="k">${k}</div><div class="v">${v.join('<br>')}</div></div>
-  `).join('') || `<div class="write-block"><div class="v" style="color:var(--text-muted)">No writes — read-only against upstream data.</div></div>`;
+  `).join('');
+  return out || `<div class="write-block"><div class="v" style="color:var(--text-muted)">No writes — read-only against upstream data.</div></div>`;
+}
+function jobById(id) { return JOBS.find(j => j.id === id); }
+function matchJob(job, ql) {
+  const hay = (job.name + ' ' + job.file + ' ' + job.purpose + ' ' + (GROUP_LABEL[job.group]||'')).toLowerCase();
+  return hay.includes(ql);
 }
 
-function jobCardHTML(job) {
-  const stageColor = STAGE_VAR[job.stage];
-  const readCount = job.reads.length, joinCount = job.joins.length;
+/* ============================================================================
+   SEARCH BAR COMPONENT (reused: rail / job-index / job-detail)
+============================================================================= */
+let lastQuery = (function(){ try { return sessionStorage.getItem('cb_search_q') || ''; } catch(e){ return ''; } })();
+function persistQuery(q) { lastQuery = q; try { sessionStorage.setItem('cb_search_q', q); } catch(e){} }
+
+function mountSearchBar(mountId, opts) {
+  const mount = document.getElementById(mountId);
+  if (!mount) return;
+  mount.innerHTML = `
+    <div class="searchbar ${opts.size}">
+      <svg class="sicon" viewBox="0 0 24 24" fill="none" stroke-width="2"><circle cx="11" cy="11" r="7"/><path d="M21 21l-4.3-4.3"/></svg>
+      <input type="text" class="search-input" placeholder="${opts.placeholder}" autocomplete="off" />
+      <div class="suggestions"></div>
+    </div>`;
+  const input = mount.querySelector('.search-input');
+  const suggestBox = mount.querySelector('.suggestions');
+  input.value = opts.value || '';
+  let items = [], activeIdx = -1;
+
+  function renderSuggestions(q) {
+    if (!q) { suggestBox.classList.remove('open'); suggestBox.innerHTML = ''; items = []; activeIdx = -1; return; }
+    const ql = q.toLowerCase();
+    items = JOBS.filter(j => matchJob(j, ql)).slice(0, 8);
+    if (!items.length) {
+      suggestBox.innerHTML = `<div class="suggestion-empty">No jobs match &ldquo;${q}&rdquo; — press Enter to search the full index</div>`;
+      suggestBox.classList.add('open'); activeIdx = -1; return;
+    }
+    suggestBox.innerHTML = items.map((j,i) => `
+      <div class="suggestion-item${i===activeIdx?' active':''}" data-idx="${i}">
+        <span class="sname">${j.name}</span>
+        <span class="sfile">${j.file}</span>
+      </div>`).join('');
+    suggestBox.classList.add('open');
+    suggestBox.querySelectorAll('.suggestion-item').forEach(el => {
+      el.addEventListener('mouseenter', () => { activeIdx = +el.dataset.idx; highlight(); });
+      el.addEventListener('mousedown', (e) => { e.preventDefault(); selectItem(+el.dataset.idx); });
+    });
+  }
+  function highlight() {
+    suggestBox.querySelectorAll('.suggestion-item').forEach(el => el.classList.toggle('active', +el.dataset.idx === activeIdx));
+  }
+  function selectItem(idx) {
+    const job = items[idx];
+    if (!job) return;
+    const q = input.value.trim();
+    persistQuery(q);
+    suggestBox.classList.remove('open');
+    goTo('job', job.id, q);
+  }
+  input.addEventListener('input', () => { persistQuery(input.value.trim()); renderSuggestions(input.value.trim()); });
+  input.addEventListener('keydown', (e) => {
+    if (e.key === 'ArrowDown') { e.preventDefault(); if (items.length) { activeIdx = (activeIdx+1) % items.length; highlight(); } }
+    else if (e.key === 'ArrowUp') { e.preventDefault(); if (items.length) { activeIdx = (activeIdx-1+items.length) % items.length; highlight(); } }
+    else if (e.key === 'Enter') {
+      e.preventDefault();
+      if (activeIdx >= 0 && items[activeIdx]) selectItem(activeIdx);
+      else { const q = input.value.trim(); persistQuery(q); suggestBox.classList.remove('open'); goTo('jobs', null, q); }
+    } else if (e.key === 'Escape') { suggestBox.classList.remove('open'); }
+  });
+  input.addEventListener('focus', () => { if (input.value.trim()) renderSuggestions(input.value.trim()); });
+  input.addEventListener('blur', () => setTimeout(() => suggestBox.classList.remove('open'), 140));
+  if (opts.autofocus) setTimeout(() => input.focus(), 30);
+  return input;
+}
+
+/* ============================================================================
+   ROUTER
+============================================================================= */
+function parseHash() {
+  const raw = (location.hash || '').replace(/^#/, '') || '/overview';
+  const [pathPart, queryPart] = raw.split('?');
+  const segs = pathPart.split('/').filter(Boolean);
+  const params = new URLSearchParams(queryPart || '');
+  return { page: segs[0] || 'overview', id: segs[1] || null, q: params.get('q') || '' };
+}
+function goTo(page, id, q) {
+  if (q !== undefined) persistQuery(q);
+  const qq = q !== undefined ? q : '';
+  let hash = '#/' + page + (id ? '/' + id : '');
+  if (qq) hash += '?q=' + encodeURIComponent(qq);
+  location.hash = hash;
+}
+const VALID_PAGES = ['overview','schematic','jobs','job','dictionary','deploy','issues'];
+
+function router() {
+  const { page, id, q } = parseHash();
+  const p = VALID_PAGES.includes(page) ? page : 'overview';
+  document.querySelectorAll('.view').forEach(v => v.classList.remove('active'));
+  document.querySelectorAll('.rail nav a').forEach(a => a.classList.remove('active'));
+  const view = document.getElementById('view-' + p);
+  if (view) view.classList.add('active');
+  const navKey = p === 'job' ? 'jobs' : p;
+  const navLink = document.querySelector(`.rail nav a[data-page="${navKey}"]`);
+  if (navLink) navLink.classList.add('active');
+  const mainEl = document.querySelector('main');
+  if (mainEl) mainEl.scrollTop = 0;
+
+  if (p === 'jobs') renderJobIndex(q);
+  else if (p === 'job') renderJobDetail(id, q);
+}
+
+/* ============================================================================
+   PAGE RENDERERS
+============================================================================= */
+let activeFilter = 'all';
+
+function jobRowHTML(job) {
+  const stageColor = jobStageColor(job);
   const isEmpty = job.tags.includes('dead') && !job.reads.length && !job.proc.length;
   return `
-  <article class="job-card" data-stage="${job.stage}" data-group="${job.group}" data-search="${(job.name+' '+job.file+' '+job.purpose).toLowerCase()}">
-    <div class="job-head" onclick="this.closest('.job-card').classList.toggle('open')">
-      <div class="stagebar" style="background:${job.group==='foundation' && job.tags.includes('lib') ? 'var(--shared)' : stageColor}"></div>
-      <div class="job-main">
-        <div class="job-title-row"><h4>${job.name}</h4></div>
+  <div class="job-row" data-id="${job.id}">
+    <div class="stagebar" style="background:${stageColor}"></div>
+    <div class="job-main">
+      <div class="job-title-row"><h4>${job.name}</h4></div>
+      <div class="job-file">${job.file}</div>
+      <div class="job-purpose">${job.purpose}</div>
+      ${isEmpty ? '' : `<div class="job-quickstats"><span class="qs">Reads <b>${job.reads.length}</b></span><span class="qs">Joins <b>${job.joins.length}</b></span></div>`}
+      ${tagpills(job.tags)}
+    </div>
+    <svg class="row-arrow" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M9 6l6 6-6 6"/></svg>
+  </div>`;
+}
+
+function applyFilters(q) {
+  const ql = (q || '').trim().toLowerCase();
+  const filtered = JOBS.filter(j => {
+    const matchFilter = activeFilter === 'all' || String(j.stage) === activeFilter || j.group === activeFilter;
+    const matchSearch = !ql || matchJob(j, ql);
+    return matchFilter && matchSearch;
+  });
+  document.getElementById('jobGrid').innerHTML = filtered.map(jobRowHTML).join('') ||
+    `<p style="color:var(--text-muted); font-size:13.5px;">No jobs match this search/filter combination.</p>`;
+  document.getElementById('resultCount').textContent = filtered.length + ' of ' + JOBS.length + ' jobs';
+  document.getElementById('jobGrid').querySelectorAll('.job-row').forEach(row => {
+    row.addEventListener('click', () => {
+      const q2 = document.querySelector('#jobsSearchMount .search-input');
+      goTo('job', row.dataset.id, q2 ? q2.value.trim() : lastQuery);
+    });
+  });
+}
+
+function setFilter(f) {
+  activeFilter = f;
+  document.querySelectorAll('#filterBar .chip').forEach(c => c.classList.toggle('active', c.dataset.filter === f));
+  const input = document.querySelector('#jobsSearchMount .search-input');
+  applyFilters(input ? input.value : '');
+}
+
+function renderJobIndex(q) {
+  mountSearchBar('jobsSearchMount', { size: 'lg', placeholder: 'Search by job name, file path, table, or keyword…', value: q || '', autofocus: false });
+  setFilter(activeFilter);
+  applyFilters(q || '');
+}
+
+function renderJobDetail(id, q) {
+  mountSearchBar('jobDetailSearchMount', { size: 'md', placeholder: 'Search another job…', value: q || lastQuery || '', autofocus: false });
+  const job = jobById(id);
+  const container = document.getElementById('jobDetailBody');
+  if (!job) {
+    container.innerHTML = `<div class="breadcrumb"><a href="#/jobs">← Job index</a></div><p>Job not found.</p>`;
+    return;
+  }
+  const stageColor = jobStageColor(job);
+  const isEmpty = job.tags.includes('dead') && !job.reads.length && !job.proc.length;
+  const idx = JOBS.findIndex(j => j.id === id);
+  const prev = JOBS[(idx - 1 + JOBS.length) % JOBS.length];
+  const next = JOBS[(idx + 1) % JOBS.length];
+  const qs = q ? ('?q=' + encodeURIComponent(q)) : '';
+
+  container.innerHTML = `
+    <div class="breadcrumb"><a href="#/jobs${qs}">← Job index</a></div>
+    <div class="job-detail-header">
+      <div class="stagebar-lg" style="background:${stageColor}"></div>
+      <div>
+        <div class="job-title-row"><h2>${job.name}</h2></div>
         <div class="job-file">${job.file}</div>
-        <div class="job-purpose">${job.purpose}</div>
-        ${isEmpty ? '' : `<div class="job-quickstats">
-          <span class="qs">Reads <b>${readCount}</b></span>
-          <span class="qs">Joins <b>${joinCount}</b></span>
-        </div>`}
         ${tagpills(job.tags)}
       </div>
-      <svg class="chev" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M9 6l6 6-6 6"/></svg>
     </div>
+    <p class="job-purpose-lg">${job.purpose}</p>
     ${isEmpty ? '' : `
-    <div class="job-body">
+      <div class="job-quickstats" style="margin-bottom:18px;">
+        <span class="qs">Reads <b>${job.reads.length}</b></span>
+        <span class="qs">Joins <b>${job.joins.length}</b></span>
+      </div>
       <div class="job-body-grid">
         <div>
-          <div class="jb-h">Reads (${readCount})</div>
-          <ul class="jb-list">${listOrNone(job.reads,'src')}</ul>
-          <div class="jb-h">Joins (${joinCount})</div>
+          <div class="jb-h">Reads (${job.reads.length})</div>
+          <ul class="jb-list">${listOrNone(job.reads, 'src')}</ul>
+          <div class="jb-h">Joins (${job.joins.length})</div>
           <ul class="jb-list">${listOrNone(job.joins)}</ul>
         </div>
         <div>
@@ -1136,13 +1411,15 @@ function jobCardHTML(job) {
         </div>
       </div>
       ${job.downstream ? `<div class="downstream-note"><b>Downstream:</b> ${job.downstream}</div>` : ''}
-    </div>`}
-  </article>`;
+    `}
+    <div class="job-nav-buttons">
+      <a class="nav-btn" href="#/job/${prev.id}${qs}">← ${prev.name}</a>
+      <a class="nav-btn" href="#/job/${next.id}${qs}" style="text-align:right;">${next.name} →</a>
+    </div>
+  `;
 }
 
-function render() {
-  document.getElementById('jobGrid').innerHTML = JOBS.map(jobCardHTML).join('');
-
+function renderStaticTables() {
   document.getElementById('warehouseTable').querySelector('tbody').innerHTML = WAREHOUSE_TABLES.map(r => `
     <tr><td class="mono">${r[0]}</td><td>${r[1]}</td>
     <td>${r[2].startsWith('Yes') ? `<span class="status-dot" style="background:var(--good)"></span>` : `<span class="status-dot" style="background:var(--text-muted)"></span>`}${r[2]}</td>
@@ -1159,42 +1436,41 @@ function render() {
     <div class="tl-step" data-n="${i+1}"><h4>${s[0]}</h4><p>${s[1]}</p>${s[2] ? `<div class="note">${s[2]}</div>` : ''}</div>`).join('');
 
   const sevColor = { critical:'var(--critical)', serious:'var(--serious)', warning:'var(--warning)', info:'var(--shared)' };
-  document.getElementById('issueList').innerHTML = ISSUES.map(([sev, text]) => `
-    <div class="issue"><span class="sev" style="background:color-mix(in srgb, ${sevColor[sev]} 20%, transparent); color:${sevColor[sev]}">${sev}</span><p>${text}</p></div>`).join('');
+  const statusStyle = {
+    open:    { label:'Open',            bg:'color-mix(in srgb, var(--critical) 16%, transparent)', fg:'var(--critical)' },
+    partial: { label:'Partially Fixed',  bg:'color-mix(in srgb, var(--warning) 20%, transparent)',  fg:'var(--warning)' },
+    fixed:   { label:'Fixed',            bg:'color-mix(in srgb, var(--good) 18%, transparent)',     fg:'var(--good)' }
+  };
+  document.getElementById('issueList').innerHTML = ISSUES.map(iss => {
+    const st = statusStyle[iss.status] || statusStyle.open;
+    return `<div class="issue">
+      <div class="pills">
+        <span class="sev" style="background:color-mix(in srgb, ${sevColor[iss.sev]} 20%, transparent); color:${sevColor[iss.sev]}">${iss.sev}</span>
+        <span class="status-pill" style="background:${st.bg}; color:${st.fg}">${st.label}</span>
+      </div>
+      <p>${iss.text}</p>
+    </div>`;
+  }).join('');
 }
-render();
 
 /* ============================================================================
-   FILTER + SEARCH
+   WIRE-UP
 ============================================================================= */
-let activeFilter = 'all';
-function applyFilters() {
-  const q = document.getElementById('searchInput').value.trim().toLowerCase();
-  const cards = document.querySelectorAll('.job-card');
-  let shown = 0;
-  cards.forEach(c => {
-    const stage = c.dataset.stage, group = c.dataset.group;
-    let matchFilter = activeFilter === 'all' || stage === activeFilter || group === activeFilter;
-    let matchSearch = !q || c.dataset.search.includes(q);
-    const show = matchFilter && matchSearch;
-    c.classList.toggle('hidden', !show);
-    if (show) shown++;
-  });
-  document.getElementById('resultCount').textContent = shown + ' of ' + cards.length + ' jobs';
-}
+mountSearchBar('railSearchMount', { size: 'sm', placeholder: 'Search jobs…', value: '', autofocus: false });
 document.getElementById('filterBar').addEventListener('click', (e) => {
   const chip = e.target.closest('.chip');
-  if (!chip) return;
-  document.querySelectorAll('#filterBar .chip').forEach(c => c.classList.remove('active'));
-  chip.classList.add('active');
-  activeFilter = chip.dataset.filter;
-  applyFilters();
+  if (chip) setFilter(chip.dataset.filter);
 });
-document.getElementById('searchInput').addEventListener('input', () => {
-  if (document.getElementById('searchInput').value.trim()) {
-    document.getElementById('index').scrollIntoView({behavior:'smooth', block:'start'});
-  }
-  applyFilters();
+document.addEventListener('click', (e) => {
+  const gotoJob = e.target.closest('[data-goto-job]');
+  if (gotoJob) { goTo('job', gotoJob.dataset.gotoJob); return; }
+  const gotoFilter = e.target.closest('[data-goto-filter]');
+  if (gotoFilter) { activeFilter = gotoFilter.dataset.gotoFilter; goTo('jobs'); return; }
+  const gotoPage = e.target.closest('[data-goto]');
+  if (gotoPage) { goTo(gotoPage.dataset.goto); return; }
 });
-applyFilters();
+
+renderStaticTables();
+window.addEventListener('hashchange', router);
+router();
 </script>

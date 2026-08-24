@@ -1,11 +1,14 @@
 # cb-core-data — Architecture
 
 > **Scope note:** this document describes the pipeline as it exists on
-> `cbrelease-4.8.39.1-hotfix`. The current working branch adds a
-> performance-profiling / phase-clocking layer (timers wrapped around each
-> job's phases) on top of this same logic — that instrumentation is
-> intentionally **not** described here; everything below is the underlying
-> business logic it wraps.
+> **`cbrelease-4.8.39.3`** (as of 2026-08-24) — it started as an analysis of
+> `cbrelease-4.8.39.1-hotfix` and has been updated to reflect the 9 files
+> changed and 3 new jobs added since then. A performance-profiling /
+> phase-clocking instrumentation layer does exist in this codebase's
+> history, but only on a separate `cbrelease-4.8.39.1-profiling` branch
+> that was **never merged** into this lineage (`hotfix` → `newhotfix` →
+> `4.8.39.2` → `4.8.39.3`) — it is not present here, so there was nothing
+> to exclude.
 >
 > A companion interactive view of everything in this document —
 > filterable/searchable by job — lives at
@@ -139,7 +142,7 @@ for plans with no org restriction), chunked 2 million users at a time. The
 same engine pattern is reused by `capAllotment.py` in Stage 2 for CAP
 access-control resolution.
 
-### Stage 2 — Reports, warehouse & cache (~40 jobs)
+### Stage 2 — Reports, warehouse & cache (~43 jobs)
 
 Every job here is independent — none of them import each other, and most
 have their own `SparkSession`. What connects them is shared table names.
@@ -148,11 +151,16 @@ the interactive HTML view):
 
 | Group | Jobs | What it's for |
 |---|---|---|
-| **Warehouse & dashboard sync** | `dataWarehouse.py`, `dataWarehouseBash.sh`, `dashboardSync.py` | Push computed tables into Postgres/BigQuery and Redis |
+| **Warehouse & dashboard sync** | `dataWarehouse.py`, `dataWarehouseBash.sh`, `dashboardSync.py`, `postgresToParquet.py` *(new)* | Push computed tables into Postgres/BigQuery and Redis; the new job runs the Postgres→Parquet direction as a diagnostic export |
 | **Compliance & enrolment reports** | `acbpReport`, `assessmentReport`, `bharatKalpReport`, `blendedReport`, `capAllotment`, `courseBasedAssessmentReport`, `courseCompletionSurveyReport`, `courseReport` | Per-MDO CSVs on training compliance, content and assessments |
 | **Gamification & scoring** | `dsrComputation(Updated)`, `gamificationJob`, `gamificationNotification{Producer,Consumer}`, `inappReview`, `karmaPoints`, `kcmReport`, `l2Assessments` | Daily KPIs, badges, karma points, competency mapping |
-| **Leaderboards & campaigns** | `learnerLeaderboard`, `ministryLeaderboard`, `ministryMetrics`, `nationalLearningWeek`, `npsUpgraded`, `odcsRecommendation`, `org_hierarchy`, `peerValidation{EligibleUsers,NotificationSender}`, `programProgressSyncList_v5` | Rankings, campaign metrics, notification triggers |
+| **Leaderboards & campaigns** | `learnerLeaderboard`, `ministryLeaderboard`, `ministryMetrics`, `nationalLearningWeek`, `npsUpgraded`, `odcsRecommendation`, `org_hierarchy`, `orgHierarchyAll` *(new)*, `orgHerarchyUpdatedEmpty` *(new)*, `peerValidation{EligibleUsers,NotificationSender}`, `programProgressSyncList_v5` | Rankings, campaign metrics, notification triggers, org-hierarchy rebuilds |
 | **Surveys & export** | `surveyQuestionReport`, `surveyStatusReport`, `unenrollmentReport`, `userActivity`, `userDataToRedis`, `userEnrolment`, `userReport`, `weeklyClaps`, `workFlowSummarizer`, `zipUpload` | Survey exports, the two "core" user reports, and final packaging |
+
+The 3 new jobs (`orgHierarchyAll.py`, `orgHerarchyUpdatedEmpty.py`,
+`postgresToParquet.py`) landed in one commit alongside logging additions to
+`dataWarehouseBash.sh` — see [`JOB_DETAILS.md`](JOB_DETAILS.md) for what
+each one does and how they relate to the original `org_hierarchy.py`.
 
 Two jobs are explicitly part of an orchestrated sequence, not standalone:
 `jobs/main.py` runs Stage 1, then `userReport.py` ("Stage 2A"),
@@ -202,6 +210,12 @@ A handful of newer warehouse outputs (`cbp_enrollments`, `apar_cbp_enrollment`,
 **not yet referenced** by `dataWarehouse.py` or `bq-scripts.sh` — see the
 Data Dictionary for the full picture.
 
+A new job on this branch, `postgresToParquet.py`, runs the warehouse flow
+in the **opposite** direction — a CLI utility that reads a Postgres table
+(default `org_hierarchy_new`) back out to a local Parquet file. It isn't
+part of the sync pipeline above; it reads like a diagnostic/backup tool for
+whichever team is rebuilding the org-hierarchy tables (see below).
+
 ## Cross-job dependencies worth knowing about
 
 Because there's no orchestration DAG in this repo, the only way to know
@@ -230,6 +244,16 @@ hand. The dependencies that matter most:
   read-modify-write loop: this job updates Postgres `learner_stats`, and
   Stage 0 reads that same table fresh at the start of the *next* pipeline
   run.
+- **`contentDFUtil`'s new hierarchy-flattening step → `userReport.py`** —
+  new on this branch: `userReport.py`'s reworked learning-hours calculation
+  now hard-depends on the new `CONTENT_HIERARCHY_FLATTENED_PARQUET_FILE`
+  that Stage 1's `contentDFUtil.precomputeContentHierarchyDataFrame` writes.
+- **Three org-hierarchy jobs, one target** — `org_hierarchy.py`,
+  `orgHierarchyAll.py` and `orgHerarchyUpdatedEmpty.py` all write to the
+  same 3 Postgres tables with no coordination or cross-references between
+  them. `postgresToParquet.py` can then read whichever one last ran back
+  out to Parquet. Which of the three is actually scheduled isn't visible
+  from the repo.
 
 ## Technology stack
 

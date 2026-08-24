@@ -1,8 +1,9 @@
 # cb-core-data — Data Dictionary
 
-Every named dataset in the pipeline: raw Parquet caches, Stage-1 computed
-Parquet tables, the Postgres/BigQuery warehouse, and the Cassandra/Redis
-tables written directly by Stage 2 jobs. Cross-reference with
+Reflects branch **`cbrelease-4.8.39.3`** (as of 2026-08-24). Every named
+dataset in the pipeline: raw Parquet caches, Stage-1 computed Parquet
+tables, the Postgres/BigQuery warehouse, and the Cassandra/Redis tables
+written directly by Stage 2 jobs. Cross-reference with
 [`JOB_DETAILS.md`](JOB_DETAILS.md) for what each job does with these, and
 [`pipeline-overview.html`](pipeline-overview.html) for an interactive,
 searchable version of the same tables.
@@ -102,6 +103,7 @@ reads from — nothing here talks to a live source system.
 | `USER_WAREHOUSE_COMPUTED_PARQUET_FILE` | `user-warehouse-computed/` | `userDFUtil.preComputeUserWarehouseData` | warehouse-shaped user frame |
 | `CONTENT_WAREHOUSE_COMPUTED_PARQUET_FILE` | `content-warehouse-computed/` | `contentDFUtil.preComputeContentWarehouseData` | warehouse-shaped content frame — **also independently rewritten by `courseReport.py` in Stage 2** |
 | `GAMIFICATION_BADGE_USER_ENROLMENT_PARQUET_FILE` | `user_enrolment_badge_computed/` | `gamificationJob.py` — **Stage 2, not Stage 1**, despite living alongside these constants | badge-per-enrolment facts |
+| `CONTENT_HIERARCHY_FLATTENED_PARQUET_FILE` | `content_hierarchy_flattened` | `contentDFUtil.precomputeContentHierarchyDataFrame` — **new on this branch** | parent + 4 child levels of the content hierarchy flattened into one wide row per content id; feeds `userReport.py`'s learning-hours calculation |
 
 ---
 
@@ -176,9 +178,20 @@ straight to Postgres themselves:
 | `learner_stats` | **app** schema | `weeklyClaps.py` | overwrite+truncate — feeds back into Stage 0's own next-run read |
 | `slw_mdo_top_learners` | **app** schema | `ministryLeaderboard.py` | overwrite+truncate |
 | `nlw_user_leaderboard` | **app** schema | `nationalLearningWeek.py` | overwrite+truncate |
-| `org_hierarchy_new`, `org_hierarchy_lookup`, `mdo_children_lookup` | **app** schema | `org_hierarchy.py` | unconditional `TRUNCATE` + re-`INSERT`, every run |
+| `org_hierarchy_new`, `org_hierarchy_lookup`, `mdo_children_lookup` | **app** schema | `org_hierarchy.py` **or** `orgHierarchyAll.py` **or** `orgHerarchyUpdatedEmpty.py` (see note) | unconditional `TRUNCATE` + re-`INSERT`, every run |
 | `peer_validation_notification_queue`, `peer_validation_form_state` | warehouse schema | `peerValidationEligibleUsers.py` (insert) / `peerValidationNotificationSender.py` (update) | append + per-row update |
 | `dwnotificationQueue` (gamification queue — **config key undefined**, see Known Issues) | warehouse schema | `gamificationNotificationProducer.py` (insert) / `gamificationNotificationConsumer.py` (update) | append + per-row update |
+
+**Note on the org-hierarchy tables:** as of this branch, three separate job
+files can populate `org_hierarchy_new`/`org_hierarchy_lookup`/
+`mdo_children_lookup` — the original `org_hierarchy.py`, a fully
+config-driven rewrite `orgHierarchyAll.py`, and a narrower patch variant
+`orgHerarchyUpdatedEmpty.py` that only touches `org_hierarchy_new` (see
+[Known Issues](JOB_DETAILS.md#known-issues-found-during-this-read)). A
+fourth, unrelated new job — `postgresToParquet.py` — reads
+`org_hierarchy_new` (or any other table via CLI arg) back out to a local
+Parquet file; it's a diagnostic/export utility, not part of the normal
+warehouse-sync flow.
 
 ---
 
