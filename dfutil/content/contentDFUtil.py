@@ -167,6 +167,12 @@ def get_struct_type(df: DataFrame, col_name: str):
 def has_children(struct_type):
     return struct_type is not None and "children" in [f.name for f in struct_type.fields]
 
+@staticmethod
+def safe_raw_field(struct_type, node_col, field_name, out_alias):
+    if struct_type is not None and field_name in [f.name for f in struct_type.fields]:
+        return col(f"{node_col}.{field_name}").alias(out_alias)
+    return lit(None).cast("string").alias(out_alias)
+
 LEVEL_LABELS = ["parent", "first_level_child", "second_level_child", "third_level_child", "fourth_level_child"]
 def precomputeContentHierarchyDataFrame(spark: SparkSession) -> DataFrame:
     contentHierarchydf = spark.read.parquet(ParquetFileConstants.HIERARCHY_PARQUET_FILE).select(col("identifier"), col("hierarchy"))
@@ -205,6 +211,15 @@ def precomputeContentHierarchyDataFrame(spark: SparkSession) -> DataFrame:
     # courseCategory is only required at parent level
     parent_columns.append(
         safe_field(inferred_schema,"hierarchy","courseCategory","courseCategory")
+    )
+    parent_columns.append(
+        safe_raw_field(inferred_schema, "hierarchy", "batches", "parent_batches")
+    )
+    parent_columns.append(
+        safe_raw_field(inferred_schema, "hierarchy", "milestones_v1", "parent_milestones_v1")
+    )
+    parent_columns.append(
+        safe_field(inferred_schema, "hierarchy", "preliminaryAssessment", "parent_preliminary_assessment_id")
     )
 
     contentHierarchyWithSchema = (
@@ -275,6 +290,9 @@ def precomputeContentHierarchyDataFrame(spark: SparkSession) -> DataFrame:
     final_cols = ["root_content_id"]
     final_cols.extend(f"parent_{field}"for field in hierarchy_fields) # Parent fields
     final_cols.append("courseCategory") # Parent-only courseCategory
+    final_cols.append("parent_batches")
+    final_cols.append("parent_milestones_v1")
+    final_cols.append("parent_preliminary_assessment_id")
     for level_idx in range(1, 5):
         label = LEVEL_LABELS[level_idx]
         final_cols.extend(f"{label}_{field}"for field in hierarchy_fields) # Child levels 1-4

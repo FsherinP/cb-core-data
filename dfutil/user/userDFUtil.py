@@ -178,8 +178,7 @@ def appendContentDurationCompletionForEachUser(spark: SparkSession, user_master_
         sum(
             when(
                 (col("user_consumption_status") == "completed") &
-                col("certificateID").isNotNull() &
-                (col("category") == "Course"),
+                col("certificateID").isNotNull(),
                 coalesce(col("courseDuration"), lit(0.0))
             )
         ).alias("total_content_duration"),
