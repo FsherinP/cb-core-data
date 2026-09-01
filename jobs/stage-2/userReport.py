@@ -133,7 +133,7 @@ def processUserReport(config):
             )
             .otherwise(lit(0.0))
         )
-        ).cache()
+        )
         es_final_assessment_df = spark.read.parquet(ParquetFileConstants.FINAL_ASSESSMENT_PARQUET_FILE)
 
         first_level_selected_duration_df = (
@@ -176,7 +176,7 @@ def processUserReport(config):
                 first("parent_preliminary_assessment_id", ignorenulls=True).alias("parent_preliminary_assessment_id")
             ).join(first_level_selected_duration_df, on=["root_content_id", "courseCategory"], how="left")
             .withColumn("selected_child_duration", coalesce(col("selected_child_duration"), lit(0.0)))
-        ).cache()
+        )
 
         course_unit_duration_df = (
             base_hierarchy_df
