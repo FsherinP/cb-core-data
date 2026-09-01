@@ -143,7 +143,7 @@ def preComputeExternalContentDataFrame(spark) -> DataFrame:
         exportDFToParquet(df,ParquetFileConstants.EXTERNAL_CONTENT_COMPUTED_PARQUET_FILE)
 
 @staticmethod
-def infer_hierarchy_schema(spark, df, hierarchy_col, sample_fraction=0.3):
+def infer_hierarchy_schema(spark, df, hierarchy_col, sample_fraction=None):
     hierarchy_strings = df.select(hierarchy_col).filter(col(hierarchy_col).isNotNull())
     if sample_fraction:
         hierarchy_strings = hierarchy_strings.sample(fraction=sample_fraction, seed=42)
