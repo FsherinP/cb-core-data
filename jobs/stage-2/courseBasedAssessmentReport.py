@@ -44,8 +44,8 @@ class CourseBasedAssessmentModel:
 
             print("Stage 1: Loading assessment data...")
             assessmentDF = spark.read.parquet(ParquetFileConstants.ALL_ASSESSMENT_COMPUTED_PARQUET_FILE) \
-                .filter(
-                col("assessCategory").isin("Course", "Standalone Assessment", "Blended Program", "Curated Program"))
+                .filter(col("assessCategory").isin("Course", "Standalone Assessment", "Blended Program", "Curated Program")) \
+                .filter(~col("assessID").endswith(".img"))
             hierarchyDF = spark.read.parquet(ParquetFileConstants.HIERARCHY_PARQUET_FILE)
             organizationDF = spark.read.parquet(ParquetFileConstants.ORG_COMPUTED_PARQUET_FILE)
 
@@ -124,15 +124,12 @@ class CourseBasedAssessmentModel:
                 spark.read.parquet(ParquetFileConstants.USER_ORG_COMPUTED_FILE))
             print("User Assessment Children DataFrame Schema:")
 
-            retakesDF = userAssessChildrenDetailsDF.groupBy("assessChildID", "userID").agg(
-                countDistinct("assessStartTime").alias("retakes"))
+            retakesDF = userAssessChildrenDetailsDF.groupBy("assessID", "assessChildID", "userID").agg(countDistinct("assessStartTime").alias("retakes"))
 
-            windowSpec = Window.partitionBy("assessChildID", "userID").orderBy(col("assessEndTimestamp").desc())
+            windowSpec = Window.partitionBy("assessID", "assessChildID", "userID").orderBy(col("assessEndTimestamp").desc())
 
-            userAssessChildDataLatestDF = userAssessChildrenDetailsDF.withColumn("rowNum",
-                                                                                 row_number().over(windowSpec)).filter(
-                F.col("rowNum") == 1).drop("rowNum") \
-                .join(retakesDF.select("assessChildID", "userID", "retakes"), ["assessChildID", "userID"], "left")
+            userAssessChildDataLatestDF = userAssessChildrenDetailsDF.withColumn("rowNum", row_number().over(windowSpec)).filter(F.col("rowNum") == 1).drop("rowNum") \
+                .join(retakesDF.select("assessID", "assessChildID", "userID", "retakes"), ["assessID", "assessChildID", "userID"], "left")
 
             finalDF = userAssessChildDataLatestDF.withColumn("userAssessmentDuration",
                                                              unix_timestamp("assessEndTimestamp") - unix_timestamp(
@@ -414,7 +411,9 @@ class CourseBasedAssessmentModel:
             warehouseDF = warehouseDF.join(assessmentDF, warehouseDF["content_id"] == assessmentDF["assessID"], "left") \
                 .withColumn("assessment_sub_type",
                             when(col("assessCourseCategory") == "Comprehensive Assessment Program",
-                                 "Comprehensive Assessment Program").otherwise(col("assessment_type"))) \
+                                 "Comprehensive Assessment Program")
+                            .when(col("assessCourseCategory") == "Standalone Assessment", "Standalone Assessment")
+                            .otherwise(col("assessment_type"))) \
                 .withColumn(
                 "cut_off_percentage",
                 when(col("minimumPassPercentage").isNotNull(), col("minimumPassPercentage").cast("float"))
