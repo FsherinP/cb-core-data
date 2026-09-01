@@ -44,13 +44,14 @@ def preComputeACBPData(spark):
             col("publishedat").alias("allocatedOn"),
             col("contentlist").alias("acbpCourseIDList"),
             col("assignmentType"),
-            col("criteria.criteriaValue").alias("assignmentTypeInfo")
+            col("criteria.criteriaValue").alias("assignmentTypeInfo"),
+            col("planyear")
         ) \
         .na.fill({"cbPlanName": ""})
 
     # Draft data
     draft_cbp_data = acbp_select_df.filter((col("acbpStatus") == "draft") & col("draftdata").isNotNull()) \
-        .select("acbpID", "userOrgID", "draftdata", "acbpStatus", "acbpCreatedBy", "isapar") \
+        .select("acbpID", "userOrgID", "draftdata", "acbpStatus", "acbpCreatedBy", "isapar", "planyear") \
         .withColumn("draftData", from_json(col("draftdata"), schemas.cbplan_draft_data_schema)) \
         .withColumn("cbPlanName", col("draftData.name")) \
         .withColumn("assignmentType", col("draftData.assignmentType")) \

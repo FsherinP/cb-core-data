@@ -133,7 +133,7 @@ class ACBPModel:
                 .select(
                 "orgID", "acbpCreatedBy", "acbpID", "cbPlanName", "isapar",
                 "assignmentType", "assignmentTypeInfo", "courseID",
-                "allocatedOn", "completionDueDate", "acbpStatus"
+                "allocatedOn", "completionDueDate", "acbpStatus", "planyear"
             ) \
                 .withColumn("data_last_generated_on", lit(currentDateTime)) \
                 .select(
@@ -148,6 +148,7 @@ class ACBPModel:
                 date_format(col("completionDueDate"), ParquetFileConstants.DATE_TIME_FORMAT).alias("due_by"),
                 col("acbpStatus").alias("status"),
                 col("isapar"),
+                col("planyear").alias("plan_year"),
                 col("data_last_generated_on")
             ) \
                 .dropDuplicates() \
