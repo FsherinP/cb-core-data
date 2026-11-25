@@ -94,6 +94,7 @@ def preComputeRatingAndSummaryDataFrame(spark):
             col("createdon").alias("createdOn")
         )
     exportDFToParquet(ratingDF,ParquetFileConstants.RATING_COMPUTED_PARQUET_FILE)
+    ratingDF = spark.read.parquet(ParquetFileConstants.RATING_COMPUTED_PARQUET_FILE)  # PERF: avoid re-scan of raw ratings
 
 
     contentRating = ratingDF.filter(col("userRating").isNotNull()) \

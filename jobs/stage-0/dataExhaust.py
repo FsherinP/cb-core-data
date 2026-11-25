@@ -17,7 +17,7 @@ from pyspark.sql.functions import (
 from pyspark.sql.functions import unix_timestamp, abs
 from pyspark.sql.types import StructType, StructField, StringType, IntegerType, BooleanType, FloatType, ArrayType, Row, \
     LongType
-from pyspark import StorageLevel
+from pyspark import StorageLevel, InheritableThread
 import logging
 
 sys.path.append(str(Path(__file__).resolve().parents[2]))
@@ -28,6 +28,8 @@ from jobs.default_config import create_config
 from dfutil.utils import utils
 from util import schemas
 from pyspark.sql.window import Window
+from dfutil.assessment.assessmentDFUtil import with_parsed_assessment_columns
+
 
 
 class DataExhaustModel:
@@ -73,9 +75,15 @@ class DataExhaustModel:
             .option("driver", "org.postgresql.Driver") \
             .load()
 
-    def write_parquet(self, df: "DataFrame", path: str, partition_cols: list = None, mode: str = "overwrite"):
-        """Write DataFrame to Parquet with optimization"""
-        writer = df.coalesce(16)
+    def write_parquet(self, df: "DataFrame", path: str, partition_cols: list = None, mode: str = "overwrite",
+                      num_files: int = None):
+        """Write DataFrame to Parquet.
+
+        PERF: no coalesce(16) by default. coalesce() has no shuffle, so it capped every source read
+        (Cassandra token-range scans, ES shards) at 16 concurrent tasks on a 32-core box.
+        Pass num_files only for small outputs that must be a fixed number of files.
+        """
+        writer = df.repartition(num_files) if num_files else df
 
         if partition_cols:
             writer = writer.write.partitionBy(*partition_cols)
@@ -131,6 +139,40 @@ class DataExhaustModel:
         except Exception as e:
             self.logger.error(f"Failed to read safe columns: {str(e)}")
             raise e
+
+    _thread_error = None
+
+    def _run_in_pool(self, pool: str, fn, *args):
+        """Run fn in its own FAIR-scheduler pool so it shares cores with the main thread's jobs."""
+        try:
+            self.spark.sparkContext.setLocalProperty("spark.scheduler.pool", pool)
+            fn(*args)
+        except Exception as e:  # surfaced in process_data after join()
+            self.logger.error(f"Background extract in pool '{pool}' failed: {e}")
+            self._thread_error = e
+
+    def extract_user_assessment(self, output_base_path: str):
+        """Full raw dump of the user assessment table (all JSON kept for ad-hoc use), plus three
+        parsed struct columns holding only the fields stage 1 needs. Parquet is columnar, so stage 1
+        reads just those small columns and never touches the JSON text."""
+        self.logger.info("Processing user assessment data...")
+        user_assessment_df = self.read_cassandra_table(
+            self.config.cassandraUserKeyspace,
+            self.config.cassandraUserAssessmentTable
+        ).select(
+            col("assessmentid").alias("assessChildID"),
+            col("starttime").alias("assessStartTime"),
+            col("endtime").alias("assessEndTime"),
+            col("status").alias("assessUserStatus"),
+            col("userid").alias("userID"),
+            col("assessmentreadresponse"),
+            col("submitassessmentresponse"),
+            col("submitassessmentrequest"),
+            col("language").alias("assessLanguage")
+        ).fillna("{}", subset=["submitassessmentresponse", "submitassessmentrequest"])
+
+        self.write_parquet(with_parsed_assessment_columns(user_assessment_df), f"{output_base_path}/userAssessmentRaw")
+        self.logger.info("User assessment processing completed successfully!")
 
     def process_data(self, output_base_path: str = None):
         """
@@ -223,27 +265,12 @@ class DataExhaustModel:
             self.write_parquet(questionset_hierarchy_df, f"{output_base_path}/questionsetHierarchy")
             questionset_hierarchy_df.unpersist()
 
-            # Process user assessment data (complex transformation)
-            self.logger.info("Processing user assessment data...")
-            user_assessment_df = self.read_cassandra_table(
-                self.config.cassandraUserKeyspace,
-                self.config.cassandraUserAssessmentTable
-            ).select(
-                col("assessmentid").alias("assessChildID"),
-                col("starttime").alias("assessStartTime"),
-                col("endtime").alias("assessEndTime"),
-                col("status").alias("assessUserStatus"),
-                col("userid").alias("userID"),
-                col("assessmentreadresponse"),
-                col("submitassessmentresponse"),
-                col("submitassessmentrequest"),
-                col("language").alias("assessLanguage")
-            ).fillna("{}", subset=["submitassessmentresponse", "submitassessmentrequest"]) \
-
-            # write user assessment data to parquet
-            self.write_parquet(user_assessment_df, f"{output_base_path}/userAssessmentRaw")
-            user_assessment_df.unpersist()
-            self.logger.info("User assessment processing completed successfully!")
+            # PERF: user assessment is by far the largest source (~535 GB). It runs in its own
+            # thread/scheduler pool so the remaining extracts overlap with it instead of waiting.
+            assessment_thread = InheritableThread(
+                target=self._run_in_pool, args=("assessment", self.extract_user_assessment, output_base_path))
+            assessment_thread.start()
+            self.spark.sparkContext.setLocalProperty("spark.scheduler.pool", "others")
 
             # Process content hierarchy
             self.logger.info("Processing content hierarchy...")
@@ -730,8 +757,8 @@ class DataExhaustModel:
             events_enrolment_with_duration_df = self.duration_format(events_enrolment_with_duration_df,
                                                                      "progress_duration")
 
-            self.write_parquet(events_enrolment_with_duration_df.coalesce(1),
-                               f"{output_base_path}/eventEnrolmentDetails")
+            self.write_parquet(events_enrolment_with_duration_df, f"{output_base_path}/eventEnrolmentDetails",
+                               num_files=1)
             event_details_df.unpersist()
             events_enrolment_df.unpersist()
 
@@ -833,6 +860,7 @@ def create_spark_session_with_packages(config):
         .appName('DataExhaustModel') \
         .master("local[*]") \
         .config("spark.sql.shuffle.partitions", "240") \
+        .config("spark.scheduler.mode", "FAIR") \
         .config("spark.executor.memory", "30g") \
         .config("spark.driver.memory", "200g") \
         .config("spark.driver.memoryOverhead", "20g") \

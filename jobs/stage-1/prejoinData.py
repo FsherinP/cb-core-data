@@ -30,11 +30,11 @@ def initialize_spark():
 
     spark = SparkSession.builder \
         .appName("DataProcessing_Pipeline") \
-        .config("spark.master", "local[28]") \
+        .config("spark.master", "local[32]") \
         .config("spark.driver.memory", "180g") \
         .config("spark.driver.memoryOverhead", "24g") \
         .config("spark.driver.maxResultSize", "12g") \
-        .config("spark.sql.shuffle.partitions", "224") \
+        .config("spark.sql.shuffle.partitions", "256") \
         .config("spark.sql.files.maxPartitionBytes", "256MB") \
         .config("spark.sql.adaptive.enabled", "true") \
         .config("spark.sql.adaptive.coalescePartitions.enabled", "true") \

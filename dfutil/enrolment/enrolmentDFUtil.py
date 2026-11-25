@@ -110,6 +110,8 @@ def preComputeEnrolment(
     #exportDFToParquet(unenrolledDF,ParquetFileConstants.ENROLMENT_UNENROLLED_PARQUET_FILE)
     #enrolledDF = enrolmentDF.filter(col("enrolment_status") == "enrolled")
     exportDFToParquet(enrolmentDF,ParquetFileConstants.ENROLMENT_SELECT_PARQUET_FILE)
+    # PERF: continue from the written output instead of re-scanning and re-deriving the raw enrolments
+    enrolmentDF = spark.read.parquet(ParquetFileConstants.ENROLMENT_SELECT_PARQUET_FILE)
     
 
     batchDF= spark.read.parquet(ParquetFileConstants.BATCH_PARQUET_FILE) \
@@ -327,13 +329,7 @@ def preComputeUserEnrolmentWarehouseData(spark):
             .dropDuplicates(["userID", "content_id", "batchID"])
         )
     
-    # create summary of igot and marketplace enrolments counts
-    print("===== igot and marketplace enrolments summary =====")
-    print(f"----- igot enrolled count: {platform_enrolments_df.filter(col('enrolment_status') == 'enrolled').count()} ---")
-    print(f"----- igot unenrolled count: {platform_enrolments_df.filter(col('enrolment_status') == 'unenrolled').count()} ---")
-    print(f"----- igot count: {platform_enrolments_df.count()} ---")
-    print(f"----- marketplace count: {marketplace_enrolments_df.count()} ---")
-    print(f"----- combined count: {platform_enrolments_df.count() + marketplace_enrolments_df.count()} ---")
-    print("===== end of summary =====")
+    # PERF: removed 5 debug count() calls here. Nothing was cached, so each one re-ran the full
+    # enrolment x content x user join; the export below ran it once more.
     combined_enrolments_df = platform_enrolments_df.union(marketplace_enrolments_df)
     exportDFToParquet(combined_enrolments_df,ParquetFileConstants.ENROLMENT_WAREHOUSE_COMPUTED_PARQUET_FILE)

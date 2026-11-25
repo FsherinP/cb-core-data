@@ -81,6 +81,8 @@ def preComputeUser(spark: SparkSession) -> DataFrame:
     # Convert timestamp fields (assuming this function exists)
     userDF = timestampStringToLong(userDF, ["userCreatedTimestamp", "userUpdatedTimestamp"])
     exportDFToParquet(userDF, ParquetFileConstants.USER_SELECT_PARQUET_FILE)
+    # PERF: continue from the written output; otherwise the user profile JSON parse runs a second time
+    userDF = spark.read.parquet(ParquetFileConstants.USER_SELECT_PARQUET_FILE)
 
     roleRawDF = spark.read.parquet(ParquetFileConstants.ROLE_PARQUET_FILE)
     roleRawDF = roleRawDF \
@@ -300,7 +302,7 @@ def preComputeUserWarehouseData(spark):
         )
 
         # Write warehouse data
-        exportDFToParquet(warehouseDF.coalesce(1), ParquetFileConstants.USER_WAREHOUSE_COMPUTED_PARQUET_FILE)
+        exportDFToParquet(warehouseDF.repartition(1), ParquetFileConstants.USER_WAREHOUSE_COMPUTED_PARQUET_FILE)
         print(f"User warehouse data generation completed")
         return warehouseDF
 
